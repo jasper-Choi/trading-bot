@@ -1,0 +1,6 @@
+requests
+pandas
+schedule
+fastapi
+uvicorn[standard]
+pykrx

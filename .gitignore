@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# Dependencies
+node_modules/
+
+# Frontend build
+frontend/dist/
+
+# Logs & runtime data
+logs/*.log
+logs/*.jsonl
+data/positions.json
+
+# Environment
+.env
+
+# Windows automation scripts (local only)
+*.bat
+*.vbs
+
+# IDE
+.vscode/
+.idea/
