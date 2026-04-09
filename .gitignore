@@ -5,14 +5,11 @@ __pycache__/
 *.pyd
 .Python
 *.egg-info/
-dist/
+*.egg/
 build/
 
 # Dependencies
 node_modules/
-
-# Frontend build
-frontend/dist/
 
 # Logs & runtime data
 logs/*.log

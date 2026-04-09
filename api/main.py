@@ -24,6 +24,8 @@ if ROOT not in sys.path:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 import config
 from api.routers import bot, positions, trades, stats
@@ -87,10 +89,29 @@ def get_logs(lines: int = 50):
     )
 
 
-@app.get("/", tags=["root"], summary="루트")
-def root():
-    return {
-        "service": "Trading Bot API",
-        "docs": "/docs",
-        "status": "/api/status",
-    }
+# ---------------------------------------------------------------------------
+# 정적 파일 서빙 — React 빌드 결과물 (frontend/dist)
+# /api/* 는 위 라우터가 먼저 처리하므로 충돌 없음
+# ---------------------------------------------------------------------------
+DIST_DIR = os.path.join(ROOT, "frontend", "dist")
+
+if os.path.isdir(DIST_DIR):
+    # JS/CSS/assets 서빙
+    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_spa(full_path: str = ""):
+        """API 경로가 아닌 모든 요청을 index.html로 라우팅 (SPA fallback)."""
+        # /api/* 는 위 라우터들이 먼저 처리하므로 여기 도달하지 않음
+        index = os.path.join(DIST_DIR, "index.html")
+        return FileResponse(index)
+else:
+    @app.get("/", tags=["root"], summary="루트")
+    def root():
+        return {
+            "service": "Trading Bot API",
+            "docs": "/docs",
+            "status": "/api/status",
+            "note": "frontend/dist not found — run: cd frontend && npm run build",
+        }
