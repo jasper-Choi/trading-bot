@@ -1,33 +1,47 @@
 """
-포지션 현황 출력 및 로그 파일 기록.
+포지션 현황 출력 및 로그 기록 (인메모리 deque + 파일 선택적 fallback).
 """
 
 import logging
 import os
+from collections import deque
 from datetime import date
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 
-os.makedirs(config.LOG_DIR, exist_ok=True)
+# ── 인메모리 로그 버퍼 (최대 200줄) ──────────────────────────────────────────
+_log_buffer: deque = deque(maxlen=200)
 
+# ── 파일 핸들러 (옵션 — 쓰기 가능한 환경에서만 활성화) ──────────────────────────
 _logger = logging.getLogger("trading_bot")
 _logger.setLevel(logging.INFO)
 
 if not _logger.handlers:
-    _fh = logging.FileHandler(
-        os.path.join(config.LOG_DIR, "trading.log"),
-        encoding="utf-8",
-    )
-    _fh.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-    _logger.addHandler(_fh)
+    try:
+        os.makedirs(config.LOG_DIR, exist_ok=True)
+        _fh = logging.FileHandler(
+            os.path.join(config.LOG_DIR, "trading.log"),
+            encoding="utf-8",
+        )
+        _fh.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+        _logger.addHandler(_fh)
+    except OSError:
+        pass  # Railway 등 읽기 전용 파일시스템에서는 파일 로그 생략
 
 
 def log(msg: str):
-    """콘솔 + 로그 파일 동시 출력."""
+    """콘솔 + 인메모리 버퍼 + 파일(가능한 경우) 동시 출력."""
     print(msg)
+    _log_buffer.append(msg)
     _logger.info(msg)
+
+
+def get_log_lines(n: int = 50) -> list[str]:
+    """인메모리 버퍼에서 최근 N줄을 반환합니다."""
+    lines = list(_log_buffer)
+    return lines[-n:] if n < len(lines) else lines
 
 
 def print_status(positions: dict, current_prices: dict):

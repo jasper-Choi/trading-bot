@@ -1,5 +1,5 @@
 """
-FastAPI 앱 진입점.
+FastAPI 앱 진입점 — 봇 스케줄러가 앱 시작 시 자동으로 백그라운드 스레드에서 실행됩니다.
 
 실행:
   uvicorn api.main:app --reload --port 8000
@@ -11,13 +11,13 @@ ReDoc:       http://localhost:8000/redoc
 import io
 import os
 import sys
+from contextlib import asynccontextmanager
 
 # 윈도우 한글 출력 처리
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 # uvicorn을 trading-bot/ 루트에서 실행하므로 루트가 이미 sys.path에 있음.
-# 혹시 누락된 경우를 대비해 명시적으로 추가.
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -31,11 +31,28 @@ import config
 from api.routers import bot, positions, trades, stats
 from api.routers.bot import bot_runner
 from api.models import BotStatusOut, LogsOut
+from src.reporter import get_log_lines
+
+
+# ---------------------------------------------------------------------------
+# 앱 수명주기 — 시작 시 봇 스케줄러 자동 실행
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """FastAPI 앱 시작 시 봇 스케줄러를 자동으로 백그라운드에서 실행합니다."""
+    bot_runner.start()
+    print("[Startup] 봇 스케줄러 백그라운드 스레드 시작됨")
+    yield
+    bot_runner.stop()
+    print("[Shutdown] 봇 스케줄러 중지됨")
+
 
 app = FastAPI(
     title="Trading Bot API",
     description="모의투자 봇 — 변동성 돌파 + 추세 추종 전략",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # ---------------------------------------------------------------------------
@@ -70,23 +87,12 @@ def get_status():
 @app.get("/api/logs", response_model=LogsOut, tags=["logs"], summary="최근 로그 조회")
 def get_logs(lines: int = 50):
     """
-    logs/trading.log 파일의 최근 N줄을 반환합니다.
-    lines 파라미터로 줄 수를 조정할 수 있습니다 (기본값 50, 최대 500).
+    인메모리 로그 버퍼(최대 200줄)에서 최근 N줄을 반환합니다.
+    lines 파라미터로 줄 수를 조정할 수 있습니다 (기본값 50, 최대 200).
     """
-    lines = min(lines, 500)
-    log_path = os.path.join(config.LOG_DIR, "trading.log")
-
-    if not os.path.exists(log_path):
-        return LogsOut(lines=[], total_lines=0)
-
-    with open(log_path, encoding="utf-8", errors="replace") as f:
-        all_lines = f.readlines()
-
-    stripped = [l.rstrip("\n") for l in all_lines]
-    return LogsOut(
-        lines=stripped[-lines:],
-        total_lines=len(stripped),
-    )
+    lines = min(lines, 200)
+    recent = get_log_lines(lines)
+    return LogsOut(lines=recent, total_lines=len(recent))
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +109,6 @@ if os.path.isdir(DIST_DIR):
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str = ""):
         """API 경로가 아닌 모든 요청을 index.html로 라우팅 (SPA fallback)."""
-        # /api/* 는 위 라우터들이 먼저 처리하므로 여기 도달하지 않음
         index = os.path.join(DIST_DIR, "index.html")
         return FileResponse(index)
 else:
