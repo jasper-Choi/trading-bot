@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from './api'
-import StatCard       from './components/StatCard'
-import PositionTable  from './components/PositionTable'
-import PnlChart       from './components/PnlChart'
-import TradeHistory   from './components/TradeHistory'
-import LogViewer      from './components/LogViewer'
+import StatCard           from './components/StatCard'
+import PositionTable      from './components/PositionTable'
+import PnlChart           from './components/PnlChart'
+import TradeHistory       from './components/TradeHistory'
+import LogViewer          from './components/LogViewer'
+import MarketRegimeBanner from './components/MarketRegimeBanner'
+import StockPositionTable from './components/StockPositionTable'
 
 // ── 번역 텍스트 ────────────────────────────────────────────────────────────
 const T = {
@@ -17,7 +19,6 @@ const T = {
     refresh:       '새로고침',
     lastUpdate:    '업데이트',
     nextRun:       '다음 실행',
-    // 통계 카드
     totalInvested: '투자금',
     cumPnl:        '누적손익',
     winRate:       '승률',
@@ -25,12 +26,10 @@ const T = {
     mdd:           'MDD',
     trades:        '거래',
     noData:        '—',
-    // 패널 제목
     openPositions: '보유 포지션',
     pnlChart:      '누적 손익 곡선',
     recentTrades:  '최근 거래 이력',
     liveLog:       '실시간 로그',
-    // 테이블 헤더
     coin:          '코인',
     entryPrice:    '진입가',
     currentPrice:  '현재가',
@@ -42,12 +41,12 @@ const T = {
     exitPrice:     '청산가',
     pnl:           '손익',
     pnlPct:        '손익률',
-    // 빈 상태
     noPosition:    '보유 포지션이 없습니다',
     noTradeData:   '거래 이력이 없습니다',
     noLog:         '로그가 없습니다',
-    // 에러
     apiError:      'API 서버에 연결할 수 없습니다',
+    tabCoin:       '코인',
+    tabStock:      '주식',
   },
   en: {
     title:         'Paper Trading Dashboard',
@@ -84,6 +83,8 @@ const T = {
     noTradeData:   'No trade history',
     noLog:         'No logs yet',
     apiError:      'Cannot connect to API server',
+    tabCoin:       'Coin',
+    tabStock:      'Stock',
   },
 }
 
@@ -94,12 +95,21 @@ const fmtMoney = (n) =>
 const fmtPct = (n) =>
   n != null ? `${(n * 100).toFixed(1)}%` : null
 
+// 장 운영 시간 확인 (KST 기준, 클라이언트 로컬 시간 사용)
+function isMarketOpen() {
+  const now     = new Date()
+  const hours   = now.getHours()
+  const minutes = now.getMinutes()
+  const day     = now.getDay()   // 0=일, 6=토
+  if (day === 0 || day === 6) return false
+  const totalMin = hours * 60 + minutes
+  return totalMin >= 9 * 60 && totalMin <= 15 * 60 + 30
+}
+
 // 거래 이력 → 누적 손익 차트 데이터
 function buildChartData(trades) {
   if (!trades.length) return []
-  // exit_date 기준 오름차순
   const sorted = [...trades].sort((a, b) => a.exit_date.localeCompare(b.exit_date))
-  // 같은 날 여러 건 합산
   const grouped = {}
   sorted.forEach(({ exit_date, pnl }) => {
     grouped[exit_date] = (grouped[exit_date] ?? 0) + pnl
@@ -115,34 +125,45 @@ function buildChartData(trades) {
 const REFRESH_SEC = 30
 
 export default function App() {
-  const [lang,       setLang]       = useState('ko')
-  const [status,     setStatus]     = useState(null)
-  const [positions,  setPositions]  = useState([])
-  const [trades,     setTrades]     = useState([])
-  const [stats,      setStats]      = useState(null)
-  const [logs,       setLogs]       = useState([])
-  const [error,      setError]      = useState(null)
-  const [lastUpdate, setLastUpdate] = useState(null)
-  const [countdown,  setCountdown]  = useState(REFRESH_SEC)
+  const [lang,           setLang]           = useState('ko')
+  const [status,         setStatus]         = useState(null)
+  const [positions,      setPositions]      = useState([])
+  const [trades,         setTrades]         = useState([])
+  const [stats,          setStats]          = useState(null)
+  const [logs,           setLogs]           = useState([])
+  const [regime,         setRegime]         = useState(null)
+  const [stockPositions, setStockPositions] = useState([])
+  const [error,          setError]          = useState(null)
+  const [lastUpdate,     setLastUpdate]     = useState(null)
+  const [countdown,      setCountdown]      = useState(REFRESH_SEC)
+  const [activeTab,      setActiveTab]      = useState('coin')   // 'coin' | 'stock'
 
   const t = T[lang]
 
   // ── 전체 데이터 패치 ──────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     try {
-      const [s, p, tr, st, lg] = await Promise.all([
+      const [s, p, tr, st, lg, reg, sp] = await Promise.all([
         api.status(),
         api.positions(),
         api.trades(50),
         api.stats(),
         api.logs(40),
+        api.marketRegime().catch(() => null),
+        api.stockPositions().catch(() => []),
       ])
       setStatus(s)
       setPositions(p)
       setTrades(tr)
       setStats(st)
       setLogs(lg.lines)
-      setLastUpdate(new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }))
+      if (reg) setRegime(reg)
+      setStockPositions(sp)
+      setLastUpdate(
+        new Date().toLocaleTimeString('ko-KR', {
+          hour: '2-digit', minute: '2-digit', second: '2-digit',
+        })
+      )
       setError(null)
     } catch (e) {
       setError(e.message)
@@ -175,13 +196,11 @@ export default function App() {
   const openPositions = positions.filter((p) => p.status === 'open')
   const chartData     = buildChartData(trades)
   const isRunning     = status?.running ?? false
-
-  // 총 투자금 = 오픈 포지션의 capital 합계
   const totalInvested = openPositions.reduce((s, p) => s + p.capital, 0)
-
-  const pnlVal      = stats?.total_pnl ?? null
-  const pnlPositive = pnlVal == null ? null : pnlVal >= 0
-  const winRateVal  = stats ? stats.win_rate * 100 : null
+  const pnlVal        = stats?.total_pnl ?? null
+  const pnlPositive   = pnlVal == null ? null : pnlVal >= 0
+  const winRateVal    = stats ? stats.win_rate * 100 : null
+  const marketOpen    = isMarketOpen()
 
   // ── 렌더 ─────────────────────────────────────────────────────────────
   return (
@@ -191,7 +210,6 @@ export default function App() {
       <header className="header">
         <span className="header-title">📈 {t.title}</span>
 
-        {/* 봇 상태 */}
         <span className={`status-dot ${isRunning ? 'on' : 'off'}`} />
         <span className="status-text">{isRunning ? t.running : t.stopped}</span>
 
@@ -203,7 +221,6 @@ export default function App() {
 
         <div className="header-sep" />
 
-        {/* 봇 제어 버튼 */}
         <button className="btn btn-start" onClick={handleStart} disabled={isRunning}>
           ▶ {t.start}
         </button>
@@ -213,7 +230,6 @@ export default function App() {
 
         <div className="header-sep" />
 
-        {/* 새로고침 */}
         <button className="btn btn-ghost" onClick={fetchAll}>
           ↻ {countdown}s
         </button>
@@ -224,11 +240,17 @@ export default function App() {
 
         <div className="header-sep" />
 
-        {/* 언어 전환 */}
         <button className="btn btn-lang" onClick={() => setLang((l) => (l === 'ko' ? 'en' : 'ko'))}>
           {lang === 'ko' ? 'EN' : '한'}
         </button>
       </header>
+
+      {/* ── 시장 국면 배너 ──────────────────────── */}
+      <MarketRegimeBanner
+        regime={regime?.regime ?? 'NEUTRAL'}
+        lastChanged={regime?.last_changed ?? null}
+        marketOpen={marketOpen}
+      />
 
       {/* ── 에러 배너 ──────────────────────────── */}
       {error && (
@@ -283,9 +305,30 @@ export default function App() {
           </div>
         </div>
 
-        {/* 중단 왼쪽: 오픈 포지션 */}
+        {/* 중단 왼쪽: 코인/주식 탭 포지션 */}
         <div className="area-position">
-          <PositionTable positions={openPositions} t={t} />
+          <div className="panel" style={{ height: '100%' }}>
+            <div className="tab-bar">
+              <button
+                className={`btn btn-tab ${activeTab === 'coin' ? 'active' : ''}`}
+                onClick={() => setActiveTab('coin')}
+              >
+                🪙 {t.tabCoin}
+              </button>
+              <button
+                className={`btn btn-tab ${activeTab === 'stock' ? 'active' : ''}`}
+                onClick={() => setActiveTab('stock')}
+              >
+                📊 {t.tabStock}
+              </button>
+            </div>
+
+            {activeTab === 'coin' ? (
+              <PositionTable positions={openPositions} t={t} embedded />
+            ) : (
+              <StockPositionTable positions={stockPositions} />
+            )}
+          </div>
         </div>
 
         {/* 중단 오른쪽: 누적 손익 곡선 */}

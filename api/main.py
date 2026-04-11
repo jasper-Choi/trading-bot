@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse
 
 import config
 from api.routers import bot, positions, trades, stats
+from api.routers import stock as stock_router
 from api.routers.bot import bot_runner
 from api.models import BotStatusOut, LogsOut
 from src.reporter import get_log_lines
@@ -73,6 +74,7 @@ app.include_router(bot.router)
 app.include_router(positions.router)
 app.include_router(trades.router)
 app.include_router(stats.router)
+app.include_router(stock_router.router)
 
 # ---------------------------------------------------------------------------
 # 공통 엔드포인트

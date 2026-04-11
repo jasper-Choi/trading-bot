@@ -11,8 +11,53 @@ import time
 import requests
 import pandas as pd
 
-UPBIT_15M_URL  = "https://api.upbit.com/v1/candles/minutes/15"
-REQUEST_TIMEOUT = 10
+UPBIT_CANDLES_URL = "https://api.upbit.com/v1/candles/minutes/{unit}"
+UPBIT_15M_URL     = "https://api.upbit.com/v1/candles/minutes/15"
+REQUEST_TIMEOUT   = 10
+
+
+def fetch_candles_by_unit(market: str, unit: int, count: int = 100) -> pd.DataFrame:
+    """
+    업비트 N분봉 데이터를 가져옵니다.
+    unit: 1, 3, 5, 10, 15, 30, 60, 240
+    """
+    url     = UPBIT_CANDLES_URL.format(unit=unit)
+    params  = {"market": market, "count": min(count, 200)}
+    headers = {"Accept": "application/json"}
+
+    for attempt in range(3):
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            break
+        except requests.RequestException as e:
+            if attempt == 2:
+                raise RuntimeError(f"[{unit}M] API 호출 실패 ({market}): {e}") from e
+            time.sleep(1)
+
+    data = resp.json()
+    if not data:
+        raise ValueError(f"[{unit}M] 빈 응답: {market}")
+
+    df = pd.DataFrame(data).rename(columns={
+        "candle_date_time_kst":    "date",
+        "opening_price":           "open",
+        "high_price":              "high",
+        "low_price":               "low",
+        "trade_price":             "close",
+        "candle_acc_trade_volume": "volume",
+    })
+    df["date"] = pd.to_datetime(df["date"])
+    return (
+        df[["date", "open", "high", "low", "close", "volume"]]
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+
+
+def fetch_5m_candles(market: str, count: int = 100) -> pd.DataFrame:
+    """업비트 5분봉 데이터."""
+    return fetch_candles_by_unit(market, unit=5, count=count)
 
 
 def fetch_15m_candles(market: str, count: int = 100) -> pd.DataFrame:

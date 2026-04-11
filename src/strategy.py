@@ -142,6 +142,15 @@ def compute_trailing_stop(peak_price: float, atr: float) -> float:
 
 
 def effective_stop(position: dict, atr: float) -> float:
-    """현재 적용되는 손절가 (초기 손절 vs 트레일링 스탑 중 높은 값)."""
-    trail = compute_trailing_stop(position["peak_price"], atr)
+    """
+    현재 적용되는 손절가 (초기 손절 vs 트레일링 스탑 중 높은 값).
+    VOLATILE 국면에서는 트레일링 배수를 ATR×1.0으로 타이트하게 적용.
+    """
+    try:
+        from src.market_regime import market_regime, VOLATILE
+        trail_mult = 1.0 if market_regime.regime == VOLATILE else config.ATR_TRAIL_MULT
+    except ImportError:
+        trail_mult = config.ATR_TRAIL_MULT
+
+    trail = position["peak_price"] - trail_mult * atr
     return max(position["stop_loss"], trail)
