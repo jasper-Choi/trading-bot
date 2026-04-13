@@ -5,7 +5,7 @@
 import logging
 import os
 from collections import deque
-from datetime import date
+from datetime import date, datetime
 
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -13,6 +13,18 @@ import config
 
 # ── 인메모리 로그 버퍼 (최대 200줄) ──────────────────────────────────────────
 _log_buffer: deque = deque(maxlen=200)
+
+
+# ── KST 로그 포맷터 ───────────────────────────────────────────────────────────
+class _KSTFormatter(logging.Formatter):
+    """한국 시간(KST, UTC+9)으로 로그 시각을 출력하는 포맷터."""
+
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=config.KST)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
 
 # ── 파일 핸들러 (옵션 — 쓰기 가능한 환경에서만 활성화) ──────────────────────────
 _logger = logging.getLogger("trading_bot")
@@ -25,7 +37,7 @@ if not _logger.handlers:
             os.path.join(config.LOG_DIR, "trading.log"),
             encoding="utf-8",
         )
-        _fh.setFormatter(logging.Formatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+        _fh.setFormatter(_KSTFormatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         _logger.addHandler(_fh)
     except OSError:
         pass  # Railway 등 읽기 전용 파일시스템에서는 파일 로그 생략

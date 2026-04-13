@@ -2,7 +2,12 @@
 포지션 현황 라우터.
 
 data/positions.json 을 읽어 현재가 및 미실현 손익을 계산해서 반환합니다.
+- 로컬: 파일에서 직접 읽기 (최신 반영)
+- Railway: 파일 없음 → 인메모리 fallback
 """
+
+import json
+import os
 
 from fastapi import APIRouter, HTTPException
 
@@ -14,6 +19,20 @@ from src.data_fetcher import fetch_daily_candles
 from api.models import PositionOut
 
 router = APIRouter(prefix="/api/positions", tags=["positions"])
+
+
+def _load_positions_data() -> dict:
+    """positions.json 파일 우선 읽기, 없으면 인메모리 fallback."""
+    path = os.path.join(config.DATA_DIR, "positions.json")
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return load_positions()
 
 
 def _enrich_open(pos: dict, coin: str) -> PositionOut:
@@ -43,7 +62,7 @@ def _enrich_open(pos: dict, coin: str) -> PositionOut:
 @router.get("", response_model=list[PositionOut], summary="전체 포지션 조회")
 def get_positions():
     """현재 열려 있는 포지션과 오늘 청산된 포지션을 모두 반환합니다."""
-    positions = load_positions()
+    positions = _load_positions_data()
     result = []
 
     for coin, pos in positions.items():
@@ -58,7 +77,7 @@ def get_positions():
 @router.get("/open", response_model=list[PositionOut], summary="오픈 포지션만 조회")
 def get_open_positions():
     """현재 보유 중인 포지션만 반환합니다."""
-    positions = load_positions()
+    positions = _load_positions_data()
     return [
         _enrich_open(pos, coin)
         for coin, pos in positions.items()
@@ -70,7 +89,7 @@ def get_open_positions():
 def get_position_by_coin(coin: str):
     """특정 코인의 포지션을 반환합니다."""
     coin = coin.upper()
-    positions = load_positions()
+    positions = _load_positions_data()
     pos = positions.get(coin)
     if not pos:
         raise HTTPException(status_code=404, detail=f"포지션 없음: {coin}")

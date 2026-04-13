@@ -7,12 +7,13 @@
   ・매 15분 — 전체 KRW 마켓 스캔 + 추세 업데이트
 """
 
+import os
 import threading
 import time
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 import config
 from src.screener        import get_top_krw_coins
@@ -25,8 +26,12 @@ from src.position_manager import (
     can_open_new_position, pyramid_position,
 )
 from src.market_regime   import market_regime
-from src.reporter        import log
-from api.models          import BotStatusOut, BotControlOut, MarketRegimeOut
+from src.reporter        import log, get_log_lines
+from src.stock_strategy  import (
+    manage_stock_positions, run_gap_momentum,
+    run_news_momentum, run_premarket_screening,
+)
+from api.models          import BotStatusOut, BotControlOut, MarketRegimeOut, LogsOut
 
 router = APIRouter(prefix="/api/bot", tags=["bot"])
 TAG    = "[API-Bot]"
@@ -79,8 +84,8 @@ class _BotRunner:
     # ── 내부 루프 ─────────────────────────────────────────────────────────
 
     def _next_minute_boundary(self) -> datetime:
-        """다음 정각 1분 경계 시각."""
-        now = datetime.now()
+        """다음 정각 1분 경계 시각 (KST)."""
+        now = datetime.now(config.KST)
         return now.replace(second=0, microsecond=0) + timedelta(minutes=1)
 
     def _loop(self):
@@ -89,14 +94,14 @@ class _BotRunner:
             next_dt = self._next_minute_boundary()
             self.next_run = next_dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            while datetime.now() < next_dt and not self._stop_event.is_set():
-                remaining = (next_dt - datetime.now()).total_seconds()
+            while datetime.now(config.KST) < next_dt and not self._stop_event.is_set():
+                remaining = (next_dt - datetime.now(config.KST)).total_seconds()
                 time.sleep(min(10, max(1, remaining)))
 
             if self._stop_event.is_set():
                 break
 
-            self.last_run = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.last_run = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M:%S")
             try:
                 self._tick()
             except Exception as exc:
@@ -104,7 +109,7 @@ class _BotRunner:
 
     def _tick(self):
         """1분 틱 — 1분·5분·15분 작업을 분기합니다."""
-        now    = datetime.now()
+        now    = datetime.now(config.KST)
         minute = now.minute
 
         # 1분마다: 긴급 국면 감지
@@ -195,6 +200,26 @@ class _BotRunner:
                 f"[점수:{signal['score']} — {reasons_str}] "
                 f"진입가={signal['entry_price']:,.2f}"
             )
+
+        # ── 주식 전략 (KST 기준) ───────────────────────────────────────────────
+        now_kst = datetime.now(config.KST)
+        h, m    = now_kst.hour, now_kst.minute
+
+        # 08:50 장 전 스크리닝
+        if h == 8 and m == 50:
+            try:
+                run_premarket_screening(log)
+            except Exception as exc:
+                log(f"{TAG} 주식 장전스크리닝 오류: {exc}")
+
+        try:
+            gap_entered  = run_gap_momentum(log)
+            news_entered = run_news_momentum(log)
+            manage_stock_positions(log)
+            if gap_entered or news_entered:
+                log(f"{TAG} 주식 진입 — 갭:{gap_entered}건 뉴스:{news_entered}건")
+        except Exception as exc:
+            log(f"{TAG} 주식 전략 오류: {exc}")
 
     def _run_15m(self):
         """15분 전체 스캔 + 추세 업데이트."""
@@ -296,6 +321,25 @@ def stop_bot():
         message = "봇을 중지했습니다." if stopped else "실행 중이 아닙니다.",
         status  = bot_runner.to_status(),
     )
+
+
+@router.get("/logs", response_model=LogsOut, summary="봇 로그 조회")
+def get_bot_logs(lines: int = Query(50, ge=1, le=500, description="반환할 로그 줄 수")):
+    """
+    trading.log 파일(로컬)에서 직접 읽거나, 파일이 없으면 인메모리 버퍼(Railway)에서 반환합니다.
+    """
+    log_path = os.path.join(config.LOG_DIR, "trading.log")
+    try:
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8") as f:
+                all_lines = [ln.rstrip("\n") for ln in f if ln.strip()]
+            recent = all_lines[-lines:] if lines < len(all_lines) else all_lines
+            return LogsOut(lines=recent, total_lines=len(recent))
+    except OSError:
+        pass
+    # Railway fallback: 인메모리 버퍼
+    recent = get_log_lines(lines)
+    return LogsOut(lines=recent, total_lines=len(recent))
 
 
 @router.get("/market-regime", response_model=MarketRegimeOut, summary="현재 시장 국면")

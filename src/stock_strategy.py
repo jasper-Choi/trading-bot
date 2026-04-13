@@ -90,7 +90,7 @@ def open_stock_position(
         "name":        name,
         "status":      "open",
         "entry_price": entry_price,
-        "entry_date":  datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "entry_date":  datetime.now(config.KST).strftime("%Y-%m-%d %H:%M:%S"),
         "stop_loss":   entry_price * (1 - STOP_LOSS_PCT),
         "peak_price":  entry_price,
         "capital":     capital,
@@ -124,7 +124,7 @@ def close_stock_position(
             "entry_price": pos["entry_price"],
             "entry_date":  pos["entry_date"],
             "exit_price":  exit_price,
-            "exit_date":   datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "exit_date":   datetime.now(config.KST).strftime("%Y-%m-%d %H:%M:%S"),
             "exit_reason": reason,
             "quantity":    qty,
             "capital":     pos["capital"],
@@ -179,7 +179,7 @@ def _fetch_current_price(ticker: str) -> Optional[float]:
 
 def manage_stock_positions(log_fn=print) -> None:
     """기존 주식 포지션 손절·익절·트레일링·강제청산."""
-    now         = datetime.now()
+    now         = datetime.now(config.KST)
     force_close = now.hour >= 15
 
     for ticker in list(_stock_positions.keys()):
@@ -260,7 +260,7 @@ def manage_stock_positions(log_fn=print) -> None:
 
 def run_gap_momentum(log_fn=print) -> int:
     """갭 상승 종목 스캔 및 진입. 반환: 진입 건수."""
-    now = datetime.now()
+    now = datetime.now(config.KST)
     if not (now.hour == 9 and now.minute < 30):
         return 0
     if not _can_enter():
@@ -322,7 +322,7 @@ def run_gap_momentum(log_fn=print) -> int:
 
 def run_news_momentum(log_fn=print) -> int:
     """뉴스 모멘텀 스캔 및 진입. 반환: 진입 건수."""
-    now  = datetime.now()
+    now  = datetime.now(config.KST)
     h, m = now.hour, now.minute
     in_window = (h == 9 and m >= 30) or (10 <= h < 14) or (h == 14 and m <= 30)
     if not in_window or not _can_enter():
@@ -343,7 +343,9 @@ def run_news_momentum(log_fn=print) -> int:
         if not news_list:
             continue
         try:
-            news_time = datetime.strptime(news_list[0]["pub_time"], "%Y-%m-%d %H:%M")
+            news_time = config.KST.localize(
+                datetime.strptime(news_list[0]["pub_time"], "%Y-%m-%d %H:%M")
+            )
             if (now - news_time).total_seconds() > 300:
                 continue
         except (ValueError, KeyError):

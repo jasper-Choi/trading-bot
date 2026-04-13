@@ -4,3 +4,4 @@ numpy
 schedule
 fastapi
 uvicorn[standard]
+pytz

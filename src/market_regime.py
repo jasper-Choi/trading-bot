@@ -19,6 +19,11 @@ import pandas as pd
 from datetime import datetime
 from typing import Optional
 
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import config
+
 # ── 국면 상수 ─────────────────────────────────────────────────────────────────
 BULL     = "BULL"
 NEUTRAL  = "NEUTRAL"
@@ -68,7 +73,7 @@ class MarketRegimeDetector:
     def __init__(self):
         self._lock   = threading.Lock()
         self._regime = NEUTRAL
-        self._last_changed = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._last_changed = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M:%S")
         self._regime_history: list[dict] = []
 
     # ── 공개 프로퍼티 ─────────────────────────────────────────────────────────
@@ -94,7 +99,7 @@ class MarketRegimeDetector:
                 return False
             old = self._regime
             self._regime        = new_regime
-            self._last_changed  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._last_changed  = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M:%S")
             self._regime_history.append({
                 "time":   self._last_changed,
                 "from":   old,

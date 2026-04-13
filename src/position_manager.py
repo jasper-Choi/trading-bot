@@ -75,7 +75,7 @@ _init_from_files()
 
 
 def _now_str() -> str:
-    return datetime.now().strftime(_DT_FMT)
+    return datetime.now(config.KST).strftime(_DT_FMT)
 
 def _parse_dt(s: str) -> datetime:
     return datetime.strptime(s[:19].replace("T", " "), _DT_FMT)

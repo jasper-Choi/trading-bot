@@ -70,7 +70,7 @@ def run_5m():
     """5분봉 기반 진입/청산 신호 체크 + 주식 전략."""
     global _top_coins_cache
 
-    now_str  = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str  = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M")
     regime   = market_regime.regime
     regime_cfg = market_regime.get_config()
     log(f"\n{TAG_5M} 신호 체크 — {now_str} | 국면:{regime}")
@@ -172,10 +172,10 @@ def run_5m():
         )
 
     # ── 주식 전략 ──────────────────────────────────────────────────────────
-    now = datetime.now()
+    now = datetime.now(config.KST)
     h, m = now.hour, now.minute
 
-    # 08:50 장 전 스크리닝
+    # 08:50 장 전 스크리닝 (KST)
     if h == 8 and m == 50:
         run_premarket_screening(log)
 
@@ -206,7 +206,7 @@ def run_15m():
     """매 15분 전체 KRW 마켓 스캔 + 15분봉 추세 업데이트."""
     global _top_coins_cache
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M")
     log(f"\n{'='*56}")
     log(f"{TAG_15M} 전략 실행 — {now_str}")
 
