@@ -31,6 +31,38 @@ if not _logger.handlers:
         pass  # Railway 등 읽기 전용 파일시스템에서는 파일 로그 생략
 
 
+def _is_railway() -> bool:
+    """Railway 환경 여부를 감지합니다."""
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+    )
+
+
+def _init_log_from_file():
+    """앱 시작 시 trading.log 파일에서 로그 버퍼를 복원합니다 (로컬 전용).
+
+    Railway는 에페머럴 파일시스템이라 파일이 없으므로 건너뜁니다.
+    """
+    if _is_railway():
+        return
+    log_file = os.path.join(config.LOG_DIR, "trading.log")
+    try:
+        if os.path.exists(log_file):
+            with open(log_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in lines:
+                stripped = line.rstrip("\n")
+                if stripped:
+                    _log_buffer.append(stripped)
+    except OSError:
+        pass
+
+
+_init_log_from_file()
+
+
 def log(msg: str):
     """콘솔 + 인메모리 버퍼 + 파일(가능한 경우) 동시 출력."""
     print(msg)

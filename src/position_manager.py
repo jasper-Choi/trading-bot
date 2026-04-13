@@ -29,6 +29,51 @@ _positions: dict           = {}
 _history:   list           = []
 
 
+def _is_railway() -> bool:
+    """Railway 환경 여부를 감지합니다."""
+    return bool(
+        os.environ.get("RAILWAY_ENVIRONMENT")
+        or os.environ.get("RAILWAY_PROJECT_ID")
+        or os.environ.get("RAILWAY_SERVICE_ID")
+    )
+
+
+def _init_from_files():
+    """앱 시작 시 파일에서 인메모리 저장소를 복원합니다 (로컬 전용).
+
+    Railway는 에페머럴 파일시스템이라 파일이 없으므로 건너뜁니다.
+    """
+    if _is_railway():
+        return
+
+    # positions.json → _positions
+    try:
+        if os.path.exists(POSITIONS_FILE):
+            with open(POSITIONS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                _positions.update(data)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    # trade_history.jsonl → _history
+    try:
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            _history.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            pass
+    except OSError:
+        pass
+
+
+_init_from_files()
+
+
 def _now_str() -> str:
     return datetime.now().strftime(_DT_FMT)
 
