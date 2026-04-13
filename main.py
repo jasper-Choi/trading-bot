@@ -181,17 +181,21 @@ def run_5m():
     if h == 8 and m == 50:
         run_premarket_screening(log)
 
-    # 09:00~09:30 갭 모멘텀
-    gap_entered = run_gap_momentum(log)
+    try:
+        # 09:00~09:30 갭 모멘텀
+        gap_entered = run_gap_momentum(log)
 
-    # 09:30~14:30 뉴스 모멘텀
-    news_entered = run_news_momentum(log)
+        # 09:30~14:30 뉴스 모멘텀
+        news_entered = run_news_momentum(log)
 
-    # 주식 포지션 관리
-    manage_stock_positions(log)
+        # 주식 포지션 관리
+        manage_stock_positions(log)
 
-    if gap_entered or news_entered:
-        log(f"{TAG_5M} 주식 진입 — 갭:{gap_entered}건 뉴스:{news_entered}건")
+        if gap_entered or news_entered:
+            log(f"{TAG_5M} 주식 진입 — 갭:{gap_entered}건 뉴스:{news_entered}건")
+    except Exception as exc:
+        import traceback
+        log(f"{TAG_5M} 주식 전략 오류: {exc}\n{traceback.format_exc()}")
 
     # 요약
     daily_pnl  = get_daily_pnl()

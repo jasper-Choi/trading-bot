@@ -265,15 +265,28 @@ def run_gap_momentum(log_fn=print, force: bool = False) -> int:
         force: True이면 시간 체크 없이 강제 실행합니다 (테스트용).
     """
     now = datetime.now(config.KST)
-    if not force and not (now.hour == 9 and now.minute < 30):
+    in_window = (now.hour == 9 and now.minute < 30)
+
+    if not force and not in_window:
         return 0
+
+    log_fn(f"[주식] 스캔 시작 (갭 모멘텀) — {now.strftime('%H:%M')} KST | force={force}")
+
     if not force and not _can_enter():
         log_fn(f"[주식갭] 진입 불가 — 시장 국면: {market_regime.regime}")
         return 0
 
-    log_fn(f"[주식] 스캔 시작 (갭 모멘텀) — {now.strftime('%H:%M')} KST")
-    all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N)
-    gap_stocks = get_gap_up_stocks(force=force)
+    # 코스닥 실시간 데이터 조회 (API 호출 1회만)
+    try:
+        all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N)
+        log_fn(f"[주식] 코스닥 조회 완료 → {len(all_stocks)}개 종목")
+    except Exception as exc:
+        log_fn(f"[주식] 코스닥 데이터 조회 오류: {exc}")
+        all_stocks = []
+
+    # 갭 상승 필터 (get_gap_up_stocks 중복 호출 방지)
+    gap_stocks = [s for s in all_stocks if s.get("gap_pct", 0) >= config.STOCK_GAP_MIN]
+    gap_stocks.sort(key=lambda x: x["gap_pct"], reverse=True)
 
     if not gap_stocks:
         log_fn(
@@ -287,14 +300,19 @@ def run_gap_momentum(log_fn=print, force: bool = False) -> int:
         ticker = s["ticker"]
 
         # 뉴스 감성
-        sentiment = analyze_stock_news(ticker, min_confidence=0.7)
+        try:
+            sentiment = analyze_stock_news(ticker, min_confidence=0.7)
+        except Exception as exc:
+            log_fn(f"[주식갭] {s['name']}({ticker}) 뉴스 분석 오류: {exc}")
+            continue
+
         if sentiment["label"] == "NEGATIVE":
             log_fn(f"[주식갭] {s['name']}({ticker}) 뉴스부정 — 스킵")
             continue
 
         # 거래량 2배 이상
         if s.get("volume", 0) < s.get("prev_volume", 1) * 2:
-            log_fn(f"[주식갭] {s['name']}({ticker}) 거래량부족 — 스킵")
+            log_fn(f"[주식갭] {s['name']}({ticker}) 거래량부족({s.get('volume',0):,} < {s.get('prev_volume',1)*2:,}) — 스킵")
             continue
 
         score = float(s["gap_pct"])
@@ -305,7 +323,7 @@ def run_gap_momentum(log_fn=print, force: bool = False) -> int:
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
     log_fn(
-        f"[주식] 스캔 시작 → 종목 {len(all_stocks)}개 "
+        f"[주식] 스캔 완료 → 종목 {len(all_stocks)}개 "
         f"→ 갭 상승 {len(gap_stocks)}개 "
         f"→ 신호 {len(candidates)}개"
     )
@@ -314,6 +332,7 @@ def run_gap_momentum(log_fn=print, force: bool = False) -> int:
         ticker = cand["ticker"]
         price  = cand.get("today_open") or cand.get("current_price", 0)
         if price <= 0:
+            log_fn(f"[주식갭] {cand['name']}({ticker}) 가격 조회 실패 — 스킵")
             continue
 
         pos = open_stock_position(

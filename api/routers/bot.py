@@ -219,7 +219,8 @@ class _BotRunner:
             if gap_entered or news_entered:
                 log(f"{TAG} 주식 진입 — 갭:{gap_entered}건 뉴스:{news_entered}건")
         except Exception as exc:
-            log(f"{TAG} 주식 전략 오류: {exc}")
+            import traceback
+            log(f"{TAG} 주식 전략 오류: {exc}\n{traceback.format_exc()}")
 
     def _run_15m(self):
         """15분 전체 스캔 + 추세 업데이트."""

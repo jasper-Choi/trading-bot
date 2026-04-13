@@ -39,13 +39,11 @@ def _is_railway() -> bool:
 
 
 def _init_from_files():
-    """앱 시작 시 파일에서 인메모리 저장소를 복원합니다 (로컬 전용).
+    """앱 시작 시 파일에서 인메모리 저장소를 복원합니다.
 
-    Railway는 에페머럴 파일시스템이라 파일이 없으므로 건너뜁니다.
+    로컬: 영속 파일에서 복원.
+    Railway: 동일 배포 내 재시작 시 파일이 남아 있으면 복원, 없으면 빈 상태로 시작.
     """
-    if _is_railway():
-        return
-
     # positions.json → _positions
     try:
         if os.path.exists(POSITIONS_FILE):
