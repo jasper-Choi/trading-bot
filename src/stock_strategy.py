@@ -258,16 +258,28 @@ def manage_stock_positions(log_fn=print) -> None:
 
 # ── 갭 모멘텀 (09:00~09:30) ──────────────────────────────────────────────────
 
-def run_gap_momentum(log_fn=print) -> int:
-    """갭 상승 종목 스캔 및 진입. 반환: 진입 건수."""
+def run_gap_momentum(log_fn=print, force: bool = False) -> int:
+    """갭 상승 종목 스캔 및 진입. 반환: 진입 건수.
+
+    Args:
+        force: True이면 시간 체크 없이 강제 실행합니다 (테스트용).
+    """
     now = datetime.now(config.KST)
-    if not (now.hour == 9 and now.minute < 30):
+    if not force and not (now.hour == 9 and now.minute < 30):
         return 0
-    if not _can_enter():
+    if not force and not _can_enter():
+        log_fn(f"[주식갭] 진입 불가 — 시장 국면: {market_regime.regime}")
         return 0
 
-    gap_stocks = get_gap_up_stocks()
+    log_fn(f"[주식] 스캔 시작 (갭 모멘텀) — {now.strftime('%H:%M')} KST")
+    all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N)
+    gap_stocks = get_gap_up_stocks(force=force)
+
     if not gap_stocks:
+        log_fn(
+            f"[주식] 스캔 완료 → 종목 {len(all_stocks)}개 "
+            f"→ 갭+{config.STOCK_GAP_MIN}% 0개 → 신호 0개"
+        )
         return 0
 
     candidates = []
@@ -292,6 +304,11 @@ def run_gap_momentum(log_fn=print) -> int:
         candidates.append({**s, "score": score, "sentiment": sentiment})
 
     candidates.sort(key=lambda x: x["score"], reverse=True)
+    log_fn(
+        f"[주식] 스캔 시작 → 종목 {len(all_stocks)}개 "
+        f"→ 갭 상승 {len(gap_stocks)}개 "
+        f"→ 신호 {len(candidates)}개"
+    )
     entered = 0
     for cand in candidates[:3]:
         ticker = cand["ticker"]

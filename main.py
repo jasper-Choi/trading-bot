@@ -11,6 +11,7 @@
   python main.py run        # 즉시 1회 실행 (15분 전략)
   python main.py status     # 포지션 현황
   python main.py history    # 거래 이력
+  python main.py stock-test # 주식 스크리너 강제 실행 (시간 제한 무시)
 """
 
 import sys
@@ -39,6 +40,7 @@ from src.position_manager import (
 )
 from src.reporter        import log, print_status, print_history
 from src.market_regime   import market_regime
+from src.stock_screener  import get_kosdaq_realtime, get_gap_up_stocks
 from src.stock_strategy  import (
     manage_stock_positions, run_gap_momentum,
     run_news_momentum, run_premarket_screening,
@@ -357,6 +359,43 @@ def show_history():
     print_history(load_history())
 
 
+def run_stock_test():
+    """주식 스크리너 강제 실행 — 장 시간/스캔 창 무관하게 테스트."""
+    from datetime import datetime
+    now_str = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M KST")
+    print(f"\n[stock-test] === 주식 스크리너 강제 테스트 ({now_str}) ===")
+
+    # 1. 코스닥 실시간 데이터
+    print("[stock-test] 코스닥 실시간 데이터 조회 중...")
+    all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N)
+    print(f"[stock-test] 조회 결과: {len(all_stocks)}개 종목")
+    if all_stocks:
+        print(f"[stock-test] 상위 5개 샘플:")
+        for s in all_stocks[:5]:
+            print(
+                f"  {s['name']}({s['ticker']}) "
+                f"현재가={s['current_price']:,.0f} "
+                f"갭={s['gap_pct']:+.2f}%"
+            )
+
+    # 2. 갭 상승 종목 (force=True)
+    print(f"\n[stock-test] 갭 +{config.STOCK_GAP_MIN}% 이상 종목 스캔 (force=True)...")
+    gap_stocks = get_gap_up_stocks(force=True)
+    print(f"[stock-test] 갭 상승 종목: {len(gap_stocks)}개")
+    for s in gap_stocks[:10]:
+        print(
+            f"  {s['name']}({s['ticker']}) "
+            f"갭={s['gap_pct']:+.2f}% "
+            f"현재가={s['current_price']:,.0f}"
+        )
+
+    # 3. 갭 모멘텀 전략 강제 실행 (진입은 시장 국면에 따라 결정)
+    print(f"\n[stock-test] 갭 모멘텀 전략 강제 실행...")
+    entered = run_gap_momentum(log_fn=print, force=True)
+    print(f"[stock-test] 진입 건수: {entered}건")
+    print("[stock-test] === 완료 ===\n")
+
+
 # ── 스케줄러 시작 ────────────────────────────────────────────────────────────
 
 def start_scheduler():
@@ -392,5 +431,7 @@ if __name__ == "__main__":
         show_status()
     elif cmd == "history":
         show_history()
+    elif cmd == "stock-test":
+        run_stock_test()
     else:
         start_scheduler()

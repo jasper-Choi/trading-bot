@@ -1,7 +1,9 @@
-// Vite 프록시가 /api/* → http://localhost:8000 으로 전달
+// 로컬 개발: VITE_API_BASE_URL=http://localhost:8000 (.env.development)
+// Railway 배포: VITE_API_BASE_URL 미설정 → 상대경로 /api/... (같은 도메인)
+const BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 async function request(path, options = {}) {
-  const res = await fetch(path, options)
+  const res = await fetch(`${BASE}${path}`, options)
   if (!res.ok) throw new Error(`HTTP ${res.status} — ${path}`)
   return res.json()
 }

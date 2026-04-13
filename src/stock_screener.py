@@ -188,8 +188,9 @@ def get_kosdaq_realtime(top_n: int = 50) -> list[dict]:
         results = _parse_naver_html(resp.text, top_n)
         if results:
             return results
-    except Exception:
-        pass
+        print("[주식스크리너] 1차(sise_rise) 파싱 결과 0개 — 2차 시도")
+    except Exception as e:
+        print(f"[주식스크리너] 1차(sise_rise) 오류: {e}")
 
     # 2차: 네이버 모바일 JSON API
     try:
@@ -201,8 +202,9 @@ def get_kosdaq_realtime(top_n: int = 50) -> list[dict]:
         results = _parse_naver_mobile_json(data, top_n)
         if results:
             return results
-    except Exception:
-        pass
+        print("[주식스크리너] 2차(mobile JSON) 파싱 결과 0개 — 3차 시도")
+    except Exception as e:
+        print(f"[주식스크리너] 2차(mobile JSON) 오류: {e}")
 
     # 3차: sise_market_sum HTML
     try:
@@ -214,19 +216,24 @@ def get_kosdaq_realtime(top_n: int = 50) -> list[dict]:
         results = _parse_naver_html(resp.text, top_n)
         if results:
             return results
-    except Exception:
-        pass
+        print("[주식스크리너] 3차(sise_market_sum) 파싱 결과 0개 — 데이터 없음")
+    except Exception as e:
+        print(f"[주식스크리너] 3차(sise_market_sum) 오류: {e}")
 
+    print("[주식스크리너] 모든 API 실패 — 빈 리스트 반환")
     return []
 
 
-def get_gap_up_stocks() -> list[dict]:
+def get_gap_up_stocks(force: bool = False) -> list[dict]:
     """
     코스닥 갭 상승 종목 리스트.
 
     - 갭 +config.STOCK_GAP_MIN% 이상
-    - 갭 스캔 창(09:00~09:30) 내에서만 반환
+    - 갭 스캔 창(09:00~09:30) 내에서만 반환 (force=True 시 시간 무시)
     - Railway 해외 서버에서도 동작 (pykrx 불필요)
+
+    Args:
+        force: True이면 장 시간/스캔 창 체크를 건너뜁니다 (테스트용).
 
     Returns:
         [
@@ -237,7 +244,7 @@ def get_gap_up_stocks() -> list[dict]:
           ...
         ]
     """
-    if not _in_scan_window():
+    if not force and not _in_scan_window():
         return []
 
     all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N)
