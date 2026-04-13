@@ -7,7 +7,6 @@
   ・매 15분 — 전체 KRW 마켓 스캔 + 추세 업데이트
 """
 
-import os
 import threading
 import time
 from datetime import datetime, timedelta
@@ -326,19 +325,14 @@ def stop_bot():
 
 @router.get("/logs", response_model=LogsOut, summary="봇 로그 조회")
 def get_bot_logs(lines: int = Query(50, ge=1, le=500, description="반환할 로그 줄 수")):
-    """
-    trading.log 파일(로컬)에서 직접 읽거나, 파일이 없으면 인메모리 버퍼(Railway)에서 반환합니다.
-    """
-    log_path = os.path.join(config.LOG_DIR, "trading.log")
+    """DB에서 최근 로그를 반환합니다 (인메모리 버퍼 fallback)."""
     try:
-        if os.path.exists(log_path):
-            with open(log_path, "r", encoding="utf-8") as f:
-                all_lines = [ln.rstrip("\n") for ln in f if ln.strip()]
-            recent = all_lines[-lines:] if lines < len(all_lines) else all_lines
+        from src.database import db_load_logs
+        recent = db_load_logs(n=lines)
+        if recent:
             return LogsOut(lines=recent, total_lines=len(recent))
-    except OSError:
+    except Exception:
         pass
-    # Railway fallback: 인메모리 버퍼
     recent = get_log_lines(lines)
     return LogsOut(lines=recent, total_lines=len(recent))
 

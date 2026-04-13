@@ -1,5 +1,5 @@
 """
-가상 포지션 관리 (15분봉 기준) — 인메모리 저장소 + 파일 선택적 fallback.
+가상 포지션 관리 (15분봉 기준) — 인메모리 + DB 영속화.
 
 주요 제약:
   - 동시 최대 포지션: 시장 국면별 REGIME_CONFIG["max_positions"]
@@ -10,7 +10,6 @@
   - 피라미딩        → BULL 모드, +2% 수익 시 최대 3회 추가
 """
 
-import json
 import os
 import threading
 from datetime import datetime
@@ -19,57 +18,12 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import config
 
-POSITIONS_FILE = os.path.join(config.DATA_DIR, "positions.json")
-HISTORY_FILE   = os.path.join(config.LOG_DIR,  "trade_history.jsonl")
-_DT_FMT        = "%Y-%m-%d %H:%M:%S"
+_DT_FMT = "%Y-%m-%d %H:%M:%S"
 
 # ── 인메모리 저장소 ───────────────────────────────────────────────────────────
 _lock:      threading.Lock = threading.Lock()
 _positions: dict           = {}
 _history:   list           = []
-
-
-def _is_railway() -> bool:
-    """Railway 환경 여부를 감지합니다."""
-    return bool(
-        os.environ.get("RAILWAY_ENVIRONMENT")
-        or os.environ.get("RAILWAY_PROJECT_ID")
-        or os.environ.get("RAILWAY_SERVICE_ID")
-    )
-
-
-def _init_from_files():
-    """앱 시작 시 파일에서 인메모리 저장소를 복원합니다.
-
-    로컬: 영속 파일에서 복원.
-    Railway: 동일 배포 내 재시작 시 파일이 남아 있으면 복원, 없으면 빈 상태로 시작.
-    """
-    # positions.json → _positions
-    try:
-        if os.path.exists(POSITIONS_FILE):
-            with open(POSITIONS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                _positions.update(data)
-    except (OSError, json.JSONDecodeError):
-        pass
-
-    # trade_history.jsonl → _history
-    try:
-        if os.path.exists(HISTORY_FILE):
-            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        try:
-                            _history.append(json.loads(line))
-                        except json.JSONDecodeError:
-                            pass
-    except OSError:
-        pass
-
-
-_init_from_files()
 
 
 def _now_str() -> str:
@@ -79,23 +33,53 @@ def _parse_dt(s: str) -> datetime:
     return datetime.strptime(s[:19].replace("T", " "), _DT_FMT)
 
 
-# ── 파일 I/O ─────────────────────────────────────────────────────────────────
+# ── DB 영속화 헬퍼 ────────────────────────────────────────────────────────────
 
-def _try_write_positions(positions: dict):
+def _save_position(pos: dict, coin: str | None = None) -> None:
+    """포지션을 DB에 upsert."""
     try:
-        os.makedirs(config.DATA_DIR, exist_ok=True)
-        with open(POSITIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump(positions, f, ensure_ascii=False, indent=2)
-    except OSError:
-        pass
+        from src.database import db_upsert_position
+        p = dict(pos)
+        if coin:
+            p["coin"] = coin
+        p.setdefault("market", "coin")
+        db_upsert_position(p)
+    except Exception as exc:
+        print(f"[PM] DB 포지션 저장 실패: {exc}")
 
-def _try_append_history(record: dict):
+
+def _save_trade(record: dict) -> None:
+    """거래 이력을 DB에 삽입."""
     try:
-        os.makedirs(config.LOG_DIR, exist_ok=True)
-        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+        from src.database import db_insert_trade
+        r = dict(record)
+        r.setdefault("market", "coin")
+        db_insert_trade(r)
+    except Exception as exc:
+        print(f"[PM] DB 거래 저장 실패: {exc}")
+
+
+# ── DB에서 인메모리 복원 (앱 시작 시) ────────────────────────────────────────
+
+def _init_from_db() -> None:
+    """앱 시작 시 DB에서 인메모리 저장소를 복원합니다.
+
+    로컬 SQLite, Railway PostgreSQL 모두 동일한 경로를 사용합니다.
+    """
+    try:
+        from src.database import init_db, db_load_positions, db_load_trades
+        init_db()  # 테이블 생성 + 파일 마이그레이션 (멱등)
+        db_pos = db_load_positions(market="coin")
+        _positions.update(db_pos)
+        # 최근 200건만 in-memory로 (일일 PnL, 연속 손실 계산에 충분)
+        db_hist = db_load_trades(market="coin", limit=200)
+        _history.extend(reversed(db_hist))  # 오래된 순으로
+        print(f"[PM] DB 복원: 포지션 {len(db_pos)}개, 거래 이력 {len(db_hist)}건")
+    except Exception as exc:
+        print(f"[PM] DB 복원 실패 (빈 메모리로 시작): {exc}")
+
+
+_init_from_db()
 
 
 # ── 조회 ─────────────────────────────────────────────────────────────────────
@@ -160,7 +144,7 @@ def _check_defense_triggers():
     if total_capital <= 0:
         return
 
-    loss_pct = -daily_pnl / total_capital   # 양수 = 손실 %
+    loss_pct = -daily_pnl / total_capital
 
     if loss_pct >= 0.05:
         market_regime.set_regime(VOLATILE, f"일간손실{loss_pct*100:.1f}%≥5%")
@@ -175,7 +159,6 @@ def _check_defense_triggers():
 # ── 포지션 크기 결정 ──────────────────────────────────────────────────────────
 
 def _get_position_capital() -> float:
-    """연속 손실에 따라 포지션 크기(원)를 조정합니다."""
     base   = config.INITIAL_CAPITAL_PER_COIN
     consec = get_consecutive_losses()
     return base * 0.5 if consec >= 3 else base
@@ -184,20 +167,16 @@ def _get_position_capital() -> float:
 # ── 진입 가능 여부 ────────────────────────────────────────────────────────────
 
 def can_open_new_position() -> tuple[bool, str]:
-    """신규 포지션 진입 가능 여부를 반환합니다."""
-    # 방어 트리거 먼저 체크
     _check_defense_triggers()
 
-    # 연속 손실 5회 → 당일 거래 중단
     consec = get_consecutive_losses()
     if consec >= 5:
         return False, f"연속 손실 {consec}회 — 당일 거래 중단"
 
-    # 시장 국면 체크
     try:
         from src.market_regime import market_regime
-        regime_cfg = market_regime.get_config()
-        max_pos    = regime_cfg["max_positions"]
+        regime_cfg  = market_regime.get_config()
+        max_pos     = regime_cfg["max_positions"]
         regime_name = market_regime.regime
     except ImportError:
         max_pos     = config.MAX_POSITIONS
@@ -210,7 +189,6 @@ def can_open_new_position() -> tuple[bool, str]:
     if open_cnt >= max_pos:
         return False, f"최대 포지션 도달 ({open_cnt}/{max_pos}, 국면:{regime_name})"
 
-    # 일일 손실 한도
     total_capital  = config.INITIAL_CAPITAL_PER_COIN * config.MAX_POSITIONS
     loss_threshold = -(total_capital * config.DAILY_LOSS_LIMIT_PCT)
     daily_pnl      = get_daily_pnl()
@@ -242,7 +220,6 @@ def is_time_exit(pos: dict) -> bool:
 def open_position(
     coin: str, entry_price: float, stop_loss: float, atr: float
 ) -> dict:
-    """가상 매수 포지션을 기록합니다."""
     capital  = _get_position_capital()
     quantity = capital / entry_price
     pos = {
@@ -260,26 +237,23 @@ def open_position(
     }
     with _lock:
         _positions[coin] = pos
-        snapshot = dict(_positions)
-    _try_write_positions(snapshot)
+    _save_position(pos, coin)
     return pos
 
 
-def update_peak(coin: str, current_price: float):
-    """고점 가격을 갱신합니다 (트레일링 스탑 계산용)."""
+def update_peak(coin: str, current_price: float) -> None:
     with _lock:
         pos = _positions.get(coin)
         if pos and pos["status"] == "open" and current_price > pos["peak_price"]:
             pos["peak_price"] = current_price
-            snapshot = dict(_positions)
+            snapshot = dict(pos)
         else:
             snapshot = None
     if snapshot:
-        _try_write_positions(snapshot)
+        _save_position(snapshot, coin)
 
 
 def close_position(coin: str, exit_price: float, reason: str) -> dict:
-    """가상 포지션을 청산하고 손익을 기록합니다."""
     with _lock:
         pos = _positions.get(coin)
         if not pos or pos["status"] != "open":
@@ -299,20 +273,15 @@ def close_position(coin: str, exit_price: float, reason: str) -> dict:
         })
         _positions[coin] = pos
         _history.append(pos)
-        snapshot = dict(_positions)
-        record   = dict(pos)
+        snapshot = dict(pos)
 
-    _try_write_positions(snapshot)
-    _try_append_history(record)
+    _save_position(snapshot, coin)
+    _save_trade(snapshot)
     return pos
 
 
 def pyramid_position(coin: str, current_price: float, atr: float) -> dict | None:
-    """
-    BULL 모드에서 수익 중인 포지션에 추가 진입 (피라미딩).
-    - +2% 수익 시 50% 크기로 추가
-    - 최대 3회
-    """
+    """BULL 모드에서 수익 중인 포지션에 추가 진입 (피라미딩)."""
     try:
         from src.market_regime import market_regime, BULL
         if market_regime.regime != BULL:
@@ -340,9 +309,9 @@ def pyramid_position(coin: str, current_price: float, atr: float) -> dict | None
         pos["capital"]       += add_capital
         pos["pyramid_count"]  = pyramid_count + 1
         pos["stop_loss"]      = max(pos["stop_loss"], new_stop)
-        snapshot = dict(_positions)
+        snapshot = dict(pos)
 
-    _try_write_positions(snapshot)
+    _save_position(snapshot, coin)
     return {
         "added_quantity": add_quantity,
         "pyramid_count":  pyramid_count + 1,

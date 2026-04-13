@@ -60,6 +60,33 @@ _stock_positions: dict[str, dict] = {}
 _stock_history:   list[dict]      = []
 
 
+# ── DB에서 주식 포지션 복원 (앱 시작 시) ──────────────────────────────────────
+
+def _init_stock_from_db() -> None:
+    """앱 시작 시 DB에서 주식 포지션 / 이력을 복원합니다."""
+    try:
+        from src.database import init_db, db_load_positions, db_load_trades
+        init_db()
+        db_pos = db_load_positions(market="stock")
+        with _stock_lock:
+            for key, pos in db_pos.items():
+                pos["ticker"] = key          # coin 컬럼 → ticker
+                pos.setdefault("reason", "DB복원")
+                if pos.get("status") == "open":
+                    _stock_positions[key] = pos
+        db_hist = db_load_trades(market="stock", limit=200)
+        with _stock_lock:
+            for trade in reversed(db_hist):
+                trade.setdefault("ticker", trade.get("coin", ""))
+                _stock_history.append(trade)
+        print(f"[Stock] DB 복원: 주식 포지션 {len(db_pos)}개, 거래 {len(db_hist)}건")
+    except Exception as exc:
+        print(f"[Stock] DB 복원 실패: {exc}")
+
+
+_init_stock_from_db()
+
+
 # ── 포지션 크기 결정 ─────────────────────────────────────────────────────────
 
 def _position_capital() -> float:
@@ -102,6 +129,12 @@ def open_stock_position(
     }
     with _stock_lock:
         _stock_positions[ticker] = pos
+    # DB 영속화
+    try:
+        from src.database import db_upsert_position
+        db_upsert_position({**pos, "coin": ticker, "market": "stock"})
+    except Exception:
+        pass
     return pos
 
 
@@ -146,6 +179,15 @@ def close_stock_position(
                 "pnl":         record["pnl"],
                 "pnl_pct":     record["pnl_pct"],
             })
+    # DB 영속화
+    try:
+        from src.database import db_upsert_position, db_insert_trade
+        with _stock_lock:
+            cur = _stock_positions.get(ticker, {})
+        db_upsert_position({**cur, "coin": ticker, "market": "stock"})
+        db_insert_trade({**record, "coin": ticker, "market": "stock"})
+    except Exception:
+        pass
     return record
 
 

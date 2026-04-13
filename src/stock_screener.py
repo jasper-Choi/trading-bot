@@ -40,7 +40,6 @@ def _kst_now() -> datetime:
 
 
 def _in_market_hours() -> bool:
-    """현재 시각이 장 운영 시간(09:00~15:30 KST) 내인지 확인합니다."""
     now    = _kst_now()
     open_  = now.replace(hour=MARKET_OPEN[0],  minute=MARKET_OPEN[1],  second=0, microsecond=0)
     close_ = now.replace(hour=MARKET_CLOSE[0], minute=MARKET_CLOSE[1], second=0, microsecond=0)
@@ -48,7 +47,6 @@ def _in_market_hours() -> bool:
 
 
 def _in_scan_window() -> bool:
-    """갭 스캔 허용 범위(config.STOCK_SCAN_START ~ STOCK_SCAN_END, KST) 내인지 확인합니다."""
     now   = _kst_now()
     start = now.replace(hour=config.STOCK_SCAN_START[0], minute=config.STOCK_SCAN_START[1], second=0, microsecond=0)
     end   = now.replace(hour=config.STOCK_SCAN_END[0],   minute=config.STOCK_SCAN_END[1],   second=0, microsecond=0)
@@ -59,16 +57,15 @@ def _in_scan_window() -> bool:
 
 _ROW_PATTERN = re.compile(
     r'code=(\d{6})"[^>]*>\s*([^<]{2,20})\s*</a>'
-    r'.*?<td[^>]*class="number"[^>]*>([\d,]+)</td>'          # 현재가
-    r'.*?<td[^>]*>(.*?)</td>'                                 # 전일비 (부호 포함)
-    r'.*?<td[^>]*class="number"[^>]*>([\d,]+(?:\.\d+)?)</td>'# 등락률
-    r'.*?<td[^>]*class="number"[^>]*>([\d,]+)</td>',         # 거래량
+    r'.*?<td[^>]*class="number"[^>]*>([\d,]+)</td>'
+    r'.*?<td[^>]*>(.*?)</td>'
+    r'.*?<td[^>]*class="number"[^>]*>([\d,]+(?:\.\d+)?)</td>'
+    r'.*?<td[^>]*class="number"[^>]*>([\d,]+)</td>',
     re.DOTALL,
 )
 
 
 def _parse_naver_html(html: str, top_n: int) -> list[dict]:
-    """네이버 금융 HTML에서 종목 데이터를 파싱합니다."""
     results: list[dict] = []
     for m in _ROW_PATTERN.finditer(html):
         if len(results) >= top_n:
@@ -113,8 +110,6 @@ def _parse_naver_html(html: str, top_n: int) -> list[dict]:
 
 
 def _parse_naver_mobile_json(data, top_n: int) -> list[dict]:
-    """네이버 모바일 API JSON 응답을 파싱합니다 (다양한 응답 구조 대응)."""
-    # 응답 구조 탐색
     if isinstance(data, list):
         stocks = data
     else:
@@ -169,62 +164,86 @@ def _parse_naver_mobile_json(data, top_n: int) -> list[dict]:
     return results[:top_n]
 
 
-def get_kosdaq_realtime(top_n: int = 50) -> list[dict]:
+def get_kosdaq_realtime(top_n: int = 50, verbose: bool = False) -> list[dict]:
     """
     네이버 금융 코스닥 등락률 상위 종목 실시간 데이터 반환.
     세 가지 URL을 순서대로 시도합니다 (각각 실패 시 다음으로 fallback).
+
+    Args:
+        top_n:   최대 반환 종목 수
+        verbose: True이면 각 단계 상세 로그 출력 (stock-test용)
 
     Returns:
         [{"ticker", "name", "current_price", "prev_close",
           "today_open", "gap_pct", "volume", "prev_volume"}, ...]
     """
-    # 1차: 기존 HTML (등락률 상위)
+    def vprint(msg: str):
+        if verbose:
+            print(msg)
+
+    # 1차: 네이버 금융 HTML (등락률 상위)
+    url1 = "https://finance.naver.com/sise/sise_rise.naver?sosok=1"
     try:
-        resp = requests.get(
-            "https://finance.naver.com/sise/sise_rise.naver?sosok=1",
-            headers=HEADERS, timeout=10,
-        )
+        vprint(f"[주식스크리너] 1차 시도: {url1}")
+        resp = requests.get(url1, headers=HEADERS, timeout=10)
         resp.encoding = "euc-kr"
+        vprint(f"[주식스크리너] 1차 HTTP 상태: {resp.status_code}, 응답 길이: {len(resp.text):,}자")
         results = _parse_naver_html(resp.text, top_n)
+        vprint(f"[주식스크리너] 1차 파싱 결과: {len(results)}개 종목")
         if results:
             return results
         print("[주식스크리너] 1차(sise_rise) 파싱 결과 0개 — 2차 시도")
+    except requests.exceptions.Timeout:
+        print(f"[주식스크리너] 1차(sise_rise) 타임아웃 — 2차 시도")
+    except requests.exceptions.ConnectionError as e:
+        print(f"[주식스크리너] 1차(sise_rise) 연결 오류: {e} — 2차 시도")
     except Exception as e:
-        print(f"[주식스크리너] 1차(sise_rise) 오류: {e}")
+        print(f"[주식스크리너] 1차(sise_rise) 오류: {type(e).__name__}: {e}")
 
     # 2차: 네이버 모바일 JSON API
+    url2 = "https://m.stock.naver.com/api/stock/exchange/KOSDAQ"
     try:
-        resp = requests.get(
-            "https://m.stock.naver.com/api/stock/exchange/KOSDAQ",
-            headers=HEADERS, timeout=10,
-        )
+        vprint(f"[주식스크리너] 2차 시도: {url2}")
+        resp = requests.get(url2, headers=HEADERS, timeout=10)
+        vprint(f"[주식스크리너] 2차 HTTP 상태: {resp.status_code}")
         data    = resp.json()
+        vprint(f"[주식스크리너] 2차 JSON 키: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
         results = _parse_naver_mobile_json(data, top_n)
+        vprint(f"[주식스크리너] 2차 파싱 결과: {len(results)}개 종목")
         if results:
             return results
         print("[주식스크리너] 2차(mobile JSON) 파싱 결과 0개 — 3차 시도")
+    except requests.exceptions.Timeout:
+        print(f"[주식스크리너] 2차(mobile JSON) 타임아웃 — 3차 시도")
+    except requests.exceptions.ConnectionError as e:
+        print(f"[주식스크리너] 2차(mobile JSON) 연결 오류: {e}")
     except Exception as e:
-        print(f"[주식스크리너] 2차(mobile JSON) 오류: {e}")
+        print(f"[주식스크리너] 2차(mobile JSON) 오류: {type(e).__name__}: {e}")
 
     # 3차: sise_market_sum HTML
+    url3 = "https://finance.naver.com/sise/sise_market_sum.naver?sosok=1"
     try:
-        resp = requests.get(
-            "https://finance.naver.com/sise/sise_market_sum.naver?sosok=1",
-            headers=HEADERS, timeout=10,
-        )
+        vprint(f"[주식스크리너] 3차 시도: {url3}")
+        resp = requests.get(url3, headers=HEADERS, timeout=10)
         resp.encoding = "euc-kr"
+        vprint(f"[주식스크리너] 3차 HTTP 상태: {resp.status_code}, 응답 길이: {len(resp.text):,}자")
         results = _parse_naver_html(resp.text, top_n)
+        vprint(f"[주식스크리너] 3차 파싱 결과: {len(results)}개 종목")
         if results:
             return results
         print("[주식스크리너] 3차(sise_market_sum) 파싱 결과 0개 — 데이터 없음")
+    except requests.exceptions.Timeout:
+        print(f"[주식스크리너] 3차(sise_market_sum) 타임아웃")
+    except requests.exceptions.ConnectionError as e:
+        print(f"[주식스크리너] 3차(sise_market_sum) 연결 오류: {e}")
     except Exception as e:
-        print(f"[주식스크리너] 3차(sise_market_sum) 오류: {e}")
+        print(f"[주식스크리너] 3차(sise_market_sum) 오류: {type(e).__name__}: {e}")
 
     print("[주식스크리너] 모든 API 실패 — 빈 리스트 반환")
     return []
 
 
-def get_gap_up_stocks(force: bool = False) -> list[dict]:
+def get_gap_up_stocks(force: bool = False, verbose: bool = False) -> list[dict]:
     """
     코스닥 갭 상승 종목 리스트.
 
@@ -233,21 +252,13 @@ def get_gap_up_stocks(force: bool = False) -> list[dict]:
     - Railway 해외 서버에서도 동작 (pykrx 불필요)
 
     Args:
-        force: True이면 장 시간/스캔 창 체크를 건너뜁니다 (테스트용).
-
-    Returns:
-        [
-          {
-            "ticker", "name", "prev_close", "today_open",
-            "gap_pct", "prev_volume"
-          },
-          ...
-        ]
+        force:   True이면 장 시간/스캔 창 체크를 건너뜁니다 (테스트용).
+        verbose: True이면 각 단계 상세 로그 출력 (stock-test용)
     """
     if not force and not _in_scan_window():
         return []
 
-    all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N)
+    all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N, verbose=verbose)
     gap_stocks = [
         s for s in all_stocks if s.get("gap_pct", 0) >= config.STOCK_GAP_MIN
     ]

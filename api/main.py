@@ -41,7 +41,10 @@ from src.reporter import get_log_lines
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI 앱 시작 시 봇 스케줄러를 자동으로 백그라운드에서 실행합니다."""
+    """FastAPI 앱 시작 시 DB 초기화 → 봇 스케줄러 실행."""
+    from src.database import init_db
+    init_db()
+    print("[Startup] DB 초기화 완료")
     bot_runner.start()
     print("[Startup] 봇 스케줄러 백그라운드 스레드 시작됨")
     yield

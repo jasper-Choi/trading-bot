@@ -1,5 +1,7 @@
 """
-포지션 현황 출력 및 로그 기록 (인메모리 deque + 파일 선택적 fallback).
+포지션 현황 출력 및 로그 기록.
+
+로그 저장: 인메모리 deque (빠른 읽기) + DB 영속화 (재시작 복원).
 """
 
 import logging
@@ -17,8 +19,6 @@ _log_buffer: deque = deque(maxlen=200)
 
 # ── KST 로그 포맷터 ───────────────────────────────────────────────────────────
 class _KSTFormatter(logging.Formatter):
-    """한국 시간(KST, UTC+9)으로 로그 시각을 출력하는 포맷터."""
-
     def formatTime(self, record, datefmt=None):
         dt = datetime.fromtimestamp(record.created, tz=config.KST)
         if datefmt:
@@ -26,7 +26,7 @@ class _KSTFormatter(logging.Formatter):
         return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-# ── 파일 핸들러 (옵션 — 쓰기 가능한 환경에서만 활성화) ──────────────────────────
+# ── 파일 핸들러 (옵션) ────────────────────────────────────────────────────────
 _logger = logging.getLogger("trading_bot")
 _logger.setLevel(logging.INFO)
 
@@ -40,45 +40,38 @@ if not _logger.handlers:
         _fh.setFormatter(_KSTFormatter("%(asctime)s  %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
         _logger.addHandler(_fh)
     except OSError:
-        pass  # Railway 등 읽기 전용 파일시스템에서는 파일 로그 생략
-
-
-def _is_railway() -> bool:
-    """Railway 환경 여부를 감지합니다."""
-    return bool(
-        os.environ.get("RAILWAY_ENVIRONMENT")
-        or os.environ.get("RAILWAY_PROJECT_ID")
-        or os.environ.get("RAILWAY_SERVICE_ID")
-    )
-
-
-def _init_log_from_file():
-    """앱 시작 시 trading.log 파일에서 로그 버퍼를 복원합니다.
-
-    로컬: 영속 파일에서 복원.
-    Railway: 동일 배포 내 재시작 시 파일이 남아 있으면 복원, 없으면 빈 상태로 시작.
-    """
-    log_file = os.path.join(config.LOG_DIR, "trading.log")
-    try:
-        if os.path.exists(log_file):
-            with open(log_file, "r", encoding="utf-8") as f:
-                lines = f.readlines()
-            for line in lines:
-                stripped = line.rstrip("\n")
-                if stripped:
-                    _log_buffer.append(stripped)
-    except OSError:
         pass
 
 
-_init_log_from_file()
+# ── DB에서 로그 버퍼 복원 (앱 시작 시) ───────────────────────────────────────
+
+def _init_log_from_db() -> None:
+    """앱 시작 시 DB에서 최근 200줄을 in-memory 버퍼에 복원합니다."""
+    try:
+        from src.database import init_db, db_load_logs
+        init_db()
+        lines = db_load_logs(n=200)
+        for line in lines:
+            _log_buffer.append(line)
+    except Exception as exc:
+        print(f"[Reporter] DB 로그 복원 실패: {exc}")
 
 
-def log(msg: str):
-    """콘솔 + 인메모리 버퍼 + 파일(가능한 경우) 동시 출력."""
+_init_log_from_db()
+
+
+# ── 로그 함수 ─────────────────────────────────────────────────────────────────
+
+def log(msg: str) -> None:
+    """콘솔 + 인메모리 버퍼 + 파일(가능 시) + DB 동시 출력."""
     print(msg)
     _log_buffer.append(msg)
     _logger.info(msg)
+    try:
+        from src.database import db_insert_log
+        db_insert_log(msg)
+    except Exception:
+        pass
 
 
 def get_log_lines(n: int = 50) -> list[str]:
@@ -87,51 +80,49 @@ def get_log_lines(n: int = 50) -> list[str]:
     return lines[-n:] if n < len(lines) else lines
 
 
-def print_status(positions: dict, current_prices: dict):
-    """현재 포지션 현황을 출력합니다."""
+# ── 현황 출력 ─────────────────────────────────────────────────────────────────
+
+def print_status(positions: dict, current_prices: dict) -> None:
     sep = "=" * 62
     print(f"\n{sep}")
     print(f"  모의투자 현황  ({date.today()})")
     print(sep)
 
-    open_positions = {k: v for k, v in positions.items() if v.get("status") == "open"}
+    open_positions   = {k: v for k, v in positions.items() if v.get("status") == "open"}
     closed_positions = {k: v for k, v in positions.items() if v.get("status") == "closed"}
 
-    # --- 보유 포지션 ---
     if open_positions:
         print("\n[보유 포지션]")
         for coin, pos in open_positions.items():
             price = current_prices.get(coin, pos["entry_price"])
-            pnl = (price - pos["entry_price"]) * pos["quantity"]
+            pnl   = (price - pos["entry_price"]) * pos["quantity"]
             pnl_pct = (price / pos["entry_price"] - 1) * 100
             print(f"  {coin}")
             print(f"    진입가: {pos['entry_price']:>14,.2f}  ({pos['entry_date']})")
             print(f"    현재가: {price:>14,.2f}  |  고점: {pos['peak_price']:,.2f}")
             print(f"    손절가: {pos['stop_loss']:>14,.2f}")
             print(f"    수량:   {pos['quantity']:>14.4f}")
-            pnl_sign = "+" if pnl >= 0 else ""
-            print(f"    평가손익: {pnl_sign}{pnl:,.0f}원  ({pnl_sign}{pnl_pct:.2f}%)")
+            sign = "+" if pnl >= 0 else ""
+            print(f"    평가손익: {sign}{pnl:,.0f}원  ({sign}{pnl_pct:.2f}%)")
     else:
         print("\n[보유 포지션]  없음")
 
-    # --- 청산 내역 ---
     if closed_positions:
         print("\n[금일 청산 내역]")
         for coin, pos in closed_positions.items():
-            pnl = pos.get("pnl", 0)
+            pnl     = pos.get("pnl", 0)
             pnl_pct = pos.get("pnl_pct", 0)
-            pnl_sign = "+" if pnl >= 0 else ""
+            sign    = "+" if pnl >= 0 else ""
             print(
                 f"  {coin}  {pos['entry_date']} → {pos.get('exit_date', '-')}"
                 f"  사유: {pos.get('exit_reason', '-')}"
-                f"  손익: {pnl_sign}{pnl:,.0f}원 ({pnl_sign}{pnl_pct:.2f}%)"
+                f"  손익: {sign}{pnl:,.0f}원 ({sign}{pnl_pct:.2f}%)"
             )
 
     print(f"{sep}\n")
 
 
-def print_history(records: list[dict]):
-    """전체 거래 이력을 출력합니다."""
+def print_history(records: list[dict]) -> None:
     sep = "=" * 62
     print(f"\n{sep}")
     print("  전체 거래 이력")
@@ -142,7 +133,7 @@ def print_history(records: list[dict]):
     else:
         total_pnl = 0.0
         for r in records:
-            pnl = r.get("pnl", 0)
+            pnl     = r.get("pnl", 0)
             pnl_pct = r.get("pnl_pct", 0)
             total_pnl += pnl
             sign = "+" if pnl >= 0 else ""

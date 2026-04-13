@@ -367,36 +367,66 @@ def run_stock_test():
     """주식 스크리너 강제 실행 — 장 시간/스캔 창 무관하게 테스트."""
     from datetime import datetime
     now_str = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M KST")
-    print(f"\n[stock-test] === 주식 스크리너 강제 테스트 ({now_str}) ===")
+    in_market = "장 시간 내" if (9 <= datetime.now(config.KST).hour < 15) else "장 시간 외"
+    print(f"\n{'='*60}")
+    print(f"[stock-test] 주식 스크리너 강제 테스트")
+    print(f"[stock-test] 시각: {now_str} ({in_market})")
+    print(f"{'='*60}")
 
-    # 1. 코스닥 실시간 데이터
-    print("[stock-test] 코스닥 실시간 데이터 조회 중...")
-    all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N)
-    print(f"[stock-test] 조회 결과: {len(all_stocks)}개 종목")
+    # 1. 네이버 금융 API 직접 테스트 (verbose=True)
+    print("\n[stock-test] ── 1단계: 코스닥 실시간 데이터 조회 (상세 로그) ──")
+    from src.stock_screener import get_kosdaq_realtime, get_gap_up_stocks
+    all_stocks = get_kosdaq_realtime(config.STOCK_TOP_N, verbose=True)
+    print(f"\n[stock-test] 조회 결과: {len(all_stocks)}개 종목")
+
     if all_stocks:
-        print(f"[stock-test] 상위 5개 샘플:")
-        for s in all_stocks[:5]:
+        print(f"[stock-test] 상위 10개 샘플:")
+        for i, s in enumerate(all_stocks[:10], 1):
             print(
-                f"  {s['name']}({s['ticker']}) "
-                f"현재가={s['current_price']:,.0f} "
-                f"갭={s['gap_pct']:+.2f}%"
+                f"  {i:2d}. {s['name']:<12}({s['ticker']}) "
+                f"현재가={s['current_price']:>8,.0f} "
+                f"갭={s['gap_pct']:+6.2f}% "
+                f"거래량={s['volume']:>10,}"
             )
+    else:
+        print("[stock-test] !! 종목 데이터를 가져오지 못했습니다.")
+        print("[stock-test] 가능한 원인:")
+        print("  - 네이버 금융 서버 점검 중")
+        print("  - 네트워크 연결 문제 (방화벽, 프록시)")
+        print("  - HTML 파싱 패턴 변경")
+        print("[stock-test] === 종료 ===\n")
+        return
 
-    # 2. 갭 상승 종목 (force=True)
-    print(f"\n[stock-test] 갭 +{config.STOCK_GAP_MIN}% 이상 종목 스캔 (force=True)...")
-    gap_stocks = get_gap_up_stocks(force=True)
+    # 2. 갭 상승 필터
+    print(f"\n[stock-test] ── 2단계: 갭 +{config.STOCK_GAP_MIN}% 이상 필터 (force=True) ──")
+    gap_stocks = get_gap_up_stocks(force=True, verbose=True)
     print(f"[stock-test] 갭 상승 종목: {len(gap_stocks)}개")
-    for s in gap_stocks[:10]:
-        print(
-            f"  {s['name']}({s['ticker']}) "
-            f"갭={s['gap_pct']:+.2f}% "
-            f"현재가={s['current_price']:,.0f}"
-        )
+    if gap_stocks:
+        print("[stock-test] 갭 상승 종목 목록:")
+        for s in gap_stocks[:10]:
+            print(
+                f"  {s['name']:<12}({s['ticker']}) "
+                f"갭={s['gap_pct']:+6.2f}% "
+                f"현재가={s['current_price']:>8,.0f} "
+                f"거래량={s['volume']:>10,}"
+            )
+    else:
+        print(f"[stock-test] 갭 +{config.STOCK_GAP_MIN}% 이상 종목 없음")
+        if all_stocks:
+            best = all_stocks[0]
+            print(f"[stock-test] 현재 최고 갭: {best['name']} ({best['gap_pct']:+.2f}%)")
 
-    # 3. 갭 모멘텀 전략 강제 실행 (진입은 시장 국면에 따라 결정)
-    print(f"\n[stock-test] 갭 모멘텀 전략 강제 실행...")
-    entered = run_gap_momentum(log_fn=print, force=True)
-    print(f"[stock-test] 진입 건수: {entered}건")
+    # 3. 갭 모멘텀 전략 강제 실행
+    print(f"\n[stock-test] ── 3단계: 갭 모멘텀 전략 강제 실행 ──")
+    try:
+        entered = run_gap_momentum(log_fn=print, force=True)
+        print(f"[stock-test] 진입 건수: {entered}건")
+    except Exception as exc:
+        import traceback
+        print(f"[stock-test] 전략 실행 오류: {exc}")
+        traceback.print_exc()
+
+    print(f"\n{'='*60}")
     print("[stock-test] === 완료 ===\n")
 
 
@@ -428,6 +458,10 @@ def start_scheduler():
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "scheduler"
+
+    # DB 초기화 (테이블 생성 + 파일 마이그레이션)
+    from src.database import init_db
+    init_db()
 
     if cmd == "run":
         run_15m()

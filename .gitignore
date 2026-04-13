@@ -15,6 +15,7 @@ node_modules/
 logs/*.log
 logs/*.jsonl
 data/positions.json
+data/trading.db
 
 # Environment
 .env

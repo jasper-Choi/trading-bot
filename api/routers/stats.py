@@ -105,16 +105,28 @@ def _compute_stats(records: list[dict]) -> StatsOut:
     )
 
 
+def _load_all_trades() -> list[dict]:
+    """DB에서 전체 거래 이력 로드, 실패 시 인메모리 fallback."""
+    try:
+        from src.database import db_load_trades
+        records = db_load_trades(market="coin", limit=9999)
+        if records:
+            return records
+    except Exception:
+        pass
+    return load_history()
+
+
 @router.get("", response_model=StatsOut, summary="전체 전략 통계")
 def get_stats():
     """전체 청산 거래를 기반으로 전략 성과 통계를 반환합니다."""
-    records = load_history()
+    records = _load_all_trades()
     return _compute_stats(records)
 
 
 @router.get("/{coin}", response_model=StatsOut, summary="코인별 통계")
 def get_stats_by_coin(coin: str):
     """특정 코인의 거래만 필터링하여 통계를 반환합니다."""
-    records = load_history()
+    records  = _load_all_trades()
     filtered = [r for r in records if r.get("coin", "").upper() == coin.upper()]
     return _compute_stats(filtered)
