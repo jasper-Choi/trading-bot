@@ -59,6 +59,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from api.routers.insights import router as insights_router
+app.include_router(insights_router)
+
 # ---------------------------------------------------------------------------
 # CORS — React 개발 서버 및 로컬 파일 접근 허용
 # ---------------------------------------------------------------------------
