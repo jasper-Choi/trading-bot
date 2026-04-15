@@ -6,15 +6,17 @@ router = APIRouter(prefix="/insights", tags=["insights"])
 
 @router.get("/")
 def get_insights():
-    api_key = os.getenv("OPENAI_API_KEY", "")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
     orchestrator = OrchestratorAgent(openai_api_key=api_key)
     result = orchestrator.run()
     return result
 
 @router.get("/debug")
 def debug():
-    api_key = os.getenv("OPENAI_API_KEY", "NOT_FOUND")
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    all_env = {k: v[:6] + "..." for k, v in os.environ.items() if "KEY" in k or "TOKEN" in k}
     return {
-        "key_found": bool(api_key and api_key != "NOT_FOUND"),
-        "key_preview": api_key[:8] + "..." if api_key else "EMPTY"
+        "key_length": len(api_key),
+        "key_preview": api_key[:8] + "..." if len(api_key) > 8 else "TOO_SHORT",
+        "env_keys": all_env
     }
