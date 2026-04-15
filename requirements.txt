@@ -7,3 +7,5 @@ uvicorn[standard]
 pytz
 sqlalchemy
 psycopg2-binary
+feedparser
+openai
