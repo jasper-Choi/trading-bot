@@ -8,22 +8,13 @@ RSS_FEEDS = [
     "https://coindesk.com/arc/outboundfeeds/rss/",
 ]
 
-HF_API_URL = "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest"
+HF_API_URL = "https://api-inference.huggingface.co/models/distilbert-base-uncased-finetuned-sst-2-english"
 
 SAMPLE_HEADLINES = [
     "Bitcoin rises amid growing institutional interest",
     "Crypto market shows signs of recovery",
     "Ethereum upgrade boosts investor confidence",
 ]
-
-LABEL_MAP = {
-    "positive": 1.0,
-    "negative": 0.0,
-    "neutral": 0.5,
-    "LABEL_0": 0.0,
-    "LABEL_1": 0.5,
-    "LABEL_2": 1.0,
-}
 
 class SentimentAgent(BaseAgent):
     def __init__(self, api_key: str = ""):
@@ -56,9 +47,10 @@ class SentimentAgent(BaseAgent):
             raise Exception(f"HF error: {result['error']}")
         if isinstance(result, list) and len(result) > 0:
             scores = result[0]
-            best = max(scores, key=lambda x: x["score"])
-            label = best["label"].lower()
-            return LABEL_MAP.get(label, 0.5)
+            score_map = {item["label"].upper(): item["score"] for item in scores}
+            positive = score_map.get("POSITIVE", 0)
+            negative = score_map.get("NEGATIVE", 0)
+            return round(positive / (positive + negative + 1e-9), 4)
         return 0.5
 
     def run(self) -> dict:
@@ -79,6 +71,6 @@ class SentimentAgent(BaseAgent):
         avg = round(sum(individual_scores) / len(individual_scores), 4)
         return {
             "score": avg,
-            "reason": f"RoBERTa sentiment across {len(individual_scores)} headlines",
+            "reason": f"DistilBERT sentiment across {len(individual_scores)} headlines",
             "raw": {"headlines": headlines, "scores": individual_scores},
         }
