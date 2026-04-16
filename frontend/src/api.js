@@ -29,5 +29,7 @@ export const api = {
   stockPositions: () => request('/api/stock/positions'),
   /** 二쇱떇 嫄곕옒 ?대젰 */
   stockHistory:   (limit = 30) => request(`/api/stock/history?limit=${limit}`),
+  insights:       () => request('/insights/'),
 }
+
 
