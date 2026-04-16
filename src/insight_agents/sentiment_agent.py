@@ -18,15 +18,20 @@ class SentimentAgent(BaseAgent):
     def _fetch_headlines(self) -> list[str]:
         headlines = []
         for url in RSS_FEEDS:
-            feed = feedparser.parse(url)
-            for entry in feed.entries[:3]:
-                headlines.append(entry.title)
+            try:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:3]:
+                    headlines.append(entry.title)
+            except Exception:
+                continue
         return headlines[:6]
 
     def _analyze(self, text: str) -> float:
         headers = {"Authorization": f"Bearer {self.hf_key}"}
-        response = requests.post(HF_API_URL, headers=headers, json={"inputs": text}, timeout=15)
+        response = requests.post(HF_API_URL, headers=headers, json={"inputs": text}, timeout=30)
         result = response.json()
+        if isinstance(result, dict) and "error" in result:
+            raise Exception(f"HF error: {result['error']}")
         if isinstance(result, list) and len(result) > 0:
             scores = result[0]
             score_map = {item["label"]: item["score"] for item in scores}
@@ -41,15 +46,17 @@ class SentimentAgent(BaseAgent):
             return {"score": 0.5, "reason": "no headlines fetched", "raw": {}}
 
         individual_scores = []
+        errors = []
         for h in headlines:
             try:
                 s = self._analyze(h)
                 individual_scores.append(s)
-            except Exception:
+            except Exception as e:
+                errors.append(str(e))
                 continue
 
         if not individual_scores:
-            return {"score": 0.5, "reason": "sentiment analysis failed", "raw": {}}
+            return {"score": 0.5, "reason": f"failed: {errors[:2]}", "raw": {}}
 
         avg = round(sum(individual_scores) / len(individual_scores), 4)
         return {
