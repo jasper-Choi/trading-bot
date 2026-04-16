@@ -7,8 +7,8 @@ import TradeHistory       from './components/TradeHistory'
 import LogViewer          from './components/LogViewer'
 import MarketRegimeBanner from './components/MarketRegimeBanner'
 import StockPositionTable from './components/StockPositionTable'
+import InsightPanel       from './components/InsightPanel'
 
-// ── 번역 텍스트 ────────────────────────────────────────────────────────────
 const T = {
   ko: {
     title:         '모의투자 봇 대시보드',
@@ -22,10 +22,10 @@ const T = {
     totalInvested: '투자금',
     cumPnl:        '누적손익',
     winRate:       '승률',
-    sharpe:        '샤프비율',
+    sharpe:        '샤프지수',
     mdd:           'MDD',
     trades:        '거래',
-    noData:        '—',
+    noData:        '--',
     openPositions: '보유 포지션',
     pnlChart:      '누적 손익 곡선',
     recentTrades:  '최근 거래 이력',
@@ -34,7 +34,7 @@ const T = {
     entryPrice:    '진입가',
     currentPrice:  '현재가',
     stopLoss:      '손절가',
-    unrealizedPnl: '평가손익',
+    unrealizedPnl: '미실현손익',
     entryDate:     '진입일',
     exitDate:      '청산일',
     exitReason:    '사유',
@@ -63,7 +63,7 @@ const T = {
     sharpe:        'Sharpe',
     mdd:           'MDD',
     trades:        'trades',
-    noData:        '—',
+    noData:        '--',
     openPositions: 'Open Positions',
     pnlChart:      'Cumulative PnL',
     recentTrades:  'Trade History',
@@ -88,25 +88,22 @@ const T = {
   },
 }
 
-// ── 포맷 유틸 ──────────────────────────────────────────────────────────────
 const fmtMoney = (n) =>
   n != null ? `₩${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : null
 
 const fmtPct = (n) =>
   n != null ? `${(n * 100).toFixed(1)}%` : null
 
-// 장 운영 시간 확인 (KST 기준, 클라이언트 로컬 시간 사용)
 function isMarketOpen() {
   const now     = new Date()
   const hours   = now.getHours()
   const minutes = now.getMinutes()
-  const day     = now.getDay()   // 0=일, 6=토
+  const day     = now.getDay()
   if (day === 0 || day === 6) return false
   const totalMin = hours * 60 + minutes
   return totalMin >= 9 * 60 && totalMin <= 15 * 60 + 30
 }
 
-// 거래 이력 → 누적 손익 차트 데이터
 function buildChartData(trades) {
   if (!trades.length) return []
   const sorted = [...trades].sort((a, b) => a.exit_date.localeCompare(b.exit_date))
@@ -121,7 +118,6 @@ function buildChartData(trades) {
   })
 }
 
-// ── 앱 컴포넌트 ────────────────────────────────────────────────────────────
 const REFRESH_SEC = 30
 
 export default function App() {
@@ -133,17 +129,17 @@ export default function App() {
   const [logs,           setLogs]           = useState([])
   const [regime,         setRegime]         = useState(null)
   const [stockPositions, setStockPositions] = useState([])
+  const [insights,       setInsights]       = useState(null)
   const [error,          setError]          = useState(null)
   const [lastUpdate,     setLastUpdate]     = useState(null)
   const [countdown,      setCountdown]      = useState(REFRESH_SEC)
-  const [activeTab,      setActiveTab]      = useState('coin')   // 'coin' | 'stock'
+  const [activeTab,      setActiveTab]      = useState('coin')
 
   const t = T[lang]
 
-  // ── 전체 데이터 패치 ──────────────────────────────────────────────────
   const fetchAll = useCallback(async () => {
     try {
-      const [s, p, tr, st, lg, reg, sp] = await Promise.all([
+      const [s, p, tr, st, lg, reg, sp, ins] = await Promise.all([
         api.status(),
         api.positions(),
         api.trades(50),
@@ -151,6 +147,7 @@ export default function App() {
         api.logs(40),
         api.marketRegime().catch(() => null),
         api.stockPositions().catch(() => []),
+        api.insights().catch(() => null),
       ])
       setStatus(s)
       setPositions(p)
@@ -159,6 +156,7 @@ export default function App() {
       setLogs(lg.lines)
       if (reg) setRegime(reg)
       setStockPositions(sp)
+      if (ins) setInsights(ins)
       setLastUpdate(
         new Date().toLocaleTimeString('ko-KR', {
           hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -171,20 +169,17 @@ export default function App() {
     setCountdown(REFRESH_SEC)
   }, [])
 
-  // 마운트 시 즉시 + 30초마다 자동 새로고침
   useEffect(() => {
     fetchAll()
     const iv = setInterval(fetchAll, REFRESH_SEC * 1000)
     return () => clearInterval(iv)
   }, [fetchAll])
 
-  // 카운트다운 타이머
   useEffect(() => {
     const iv = setInterval(() => setCountdown((c) => (c > 0 ? c - 1 : 0)), 1000)
     return () => clearInterval(iv)
   }, [])
 
-  // ── 봇 제어 ──────────────────────────────────────────────────────────
   const handleStart = async () => {
     try { await api.startBot(); await fetchAll() } catch (e) { setError(e.message) }
   }
@@ -192,7 +187,6 @@ export default function App() {
     try { await api.stopBot(); await fetchAll() } catch (e) { setError(e.message) }
   }
 
-  // ── 파생 데이터 ───────────────────────────────────────────────────────
   const openPositions = positions.filter((p) => p.status === 'open')
   const chartData     = buildChartData(trades)
   const isRunning     = status?.running ?? false
@@ -202,11 +196,9 @@ export default function App() {
   const winRateVal    = stats ? stats.win_rate * 100 : null
   const marketOpen    = isMarketOpen()
 
-  // ── 렌더 ─────────────────────────────────────────────────────────────
   return (
     <div className="app">
 
-      {/* ── 헤더 ─────────────────────────────── */}
       <header className="header">
         <span className="header-title">📈 {t.title}</span>
 
@@ -241,28 +233,24 @@ export default function App() {
         <div className="header-sep" />
 
         <button className="btn btn-lang" onClick={() => setLang((l) => (l === 'ko' ? 'en' : 'ko'))}>
-          {lang === 'ko' ? 'EN' : '한'}
+          {lang === 'ko' ? 'EN' : 'KO'}
         </button>
       </header>
 
-      {/* ── 시장 국면 배너 ──────────────────────── */}
       <MarketRegimeBanner
         regime={regime?.regime ?? 'NEUTRAL'}
         lastChanged={regime?.last_changed ?? null}
         marketOpen={marketOpen}
       />
 
-      {/* ── 에러 배너 ──────────────────────────── */}
       {error && (
         <div className="error-banner">
           ⚠ {t.apiError} — {error}
         </div>
       )}
 
-      {/* ── 대시보드 그리드 ───────────────────── */}
       <main className="dashboard">
 
-        {/* 상단: 통계 카드 4개 */}
         <div className="area-cards">
           <div className="stat-row">
             <StatCard
@@ -272,11 +260,7 @@ export default function App() {
             />
             <StatCard
               label={t.cumPnl}
-              value={
-                pnlVal != null
-                  ? `${pnlPositive ? '+' : '−'}${fmtMoney(pnlVal)}`
-                  : t.noData
-              }
+              value={pnlVal != null ? `${pnlPositive ? '+' : '-'}${fmtMoney(pnlVal)}` : t.noData}
               sub={stats ? `${stats.total_trades} ${t.trades}` : t.noData}
               valueClass={pnlPositive == null ? 'c-text' : pnlPositive ? 'c-green' : 'c-red'}
             />
@@ -305,7 +289,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* 중단 왼쪽: 코인/주식 탭 포지션 */}
+        <div className="area-insights">
+          <InsightPanel data={insights} />
+        </div>
+
         <div className="area-position">
           <div className="panel" style={{ height: '100%' }}>
             <div className="tab-bar">
@@ -331,17 +318,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* 중단 오른쪽: 누적 손익 곡선 */}
         <div className="area-chart">
           <PnlChart chartData={chartData} t={t} />
         </div>
 
-        {/* 하단 왼쪽: 거래 이력 */}
         <div className="area-trades">
           <TradeHistory trades={trades.slice(0, 15)} t={t} />
         </div>
 
-        {/* 하단 오른쪽: 실시간 로그 */}
         <div className="area-logs">
           <LogViewer lines={logs} t={t} />
         </div>
