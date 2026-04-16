@@ -1,4 +1,4 @@
-from datetime import datetime
+﻿from datetime import datetime
 from .sentiment_agent import SentimentAgent
 from .trend_agent import TrendAgent
 from .macro_agent import MacroAgent
@@ -12,9 +12,9 @@ WEIGHTS = {
 }
 
 class OrchestratorAgent:
-    def __init__(self, openai_api_key: str):
+    def __init__(self, openai_api_key: str = ""):
         self.agents = {
-            "sentiment": SentimentAgent(api_key=openai_api_key),
+            "sentiment": SentimentAgent(),
             "trend":     TrendAgent(),
             "macro":     MacroAgent(),
             "onchain":   OnchainAgent(),
