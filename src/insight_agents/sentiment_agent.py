@@ -1,14 +1,12 @@
 ﻿import os
-import requests
 import feedparser
+from huggingface_hub import InferenceClient
 from .base_agent import BaseAgent
 
 RSS_FEEDS = [
     "https://cointelegraph.com/rss",
     "https://coindesk.com/arc/outboundfeeds/rss/",
 ]
-
-HF_API_URL = "https://api-inference.huggingface.co/models/distilbert-base-uncased-finetuned-sst-2-english"
 
 SAMPLE_HEADLINES = [
     "Bitcoin rises amid growing institutional interest",
@@ -20,6 +18,10 @@ class SentimentAgent(BaseAgent):
     def __init__(self, api_key: str = ""):
         super().__init__("SentimentAgent")
         self.hf_key = os.getenv("HUGGINGFACE_API_KEY", api_key)
+        self.client = InferenceClient(
+            provider="hf-inference",
+            api_key=self.hf_key,
+        )
 
     def _fetch_headlines(self) -> list[str]:
         headlines = []
@@ -33,25 +35,14 @@ class SentimentAgent(BaseAgent):
         return headlines[:6] if headlines else SAMPLE_HEADLINES
 
     def _analyze(self, text: str) -> float:
-        headers = {"Authorization": f"Bearer {self.hf_key}"}
-        response = requests.post(
-            HF_API_URL,
-            headers=headers,
-            json={"inputs": text},
-            timeout=30
+        result = self.client.text_classification(
+            text,
+            model="distilbert-base-uncased-finetuned-sst-2-english",
         )
-        if response.status_code != 200:
-            raise Exception(f"HTTP {response.status_code}")
-        result = response.json()
-        if isinstance(result, dict) and "error" in result:
-            raise Exception(f"HF error: {result['error']}")
-        if isinstance(result, list) and len(result) > 0:
-            scores = result[0]
-            score_map = {item["label"].upper(): item["score"] for item in scores}
-            positive = score_map.get("POSITIVE", 0)
-            negative = score_map.get("NEGATIVE", 0)
-            return round(positive / (positive + negative + 1e-9), 4)
-        return 0.5
+        score_map = {item.label.upper(): item.score for item in result}
+        positive = score_map.get("POSITIVE", 0)
+        negative = score_map.get("NEGATIVE", 0)
+        return round(positive / (positive + negative + 1e-9), 4)
 
     def run(self) -> dict:
         headlines = self._fetch_headlines()
