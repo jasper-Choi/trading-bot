@@ -14,6 +14,12 @@ SAMPLE_HEADLINES = [
     "Ethereum upgrade boosts investor confidence",
 ]
 
+LABEL_MAP = {
+    "positive": 1.0,
+    "negative": 0.0,
+    "neutral": 0.5,
+}
+
 class SentimentAgent(BaseAgent):
     def __init__(self, api_key: str = ""):
         super().__init__("SentimentAgent")
@@ -37,12 +43,10 @@ class SentimentAgent(BaseAgent):
     def _analyze(self, text: str) -> float:
         result = self.client.text_classification(
             text,
-            model="distilbert-base-uncased-finetuned-sst-2-english",
+            model="cardiffnlp/twitter-roberta-base-sentiment-latest",
         )
-        score_map = {item.label.upper(): item.score for item in result}
-        positive = score_map.get("POSITIVE", 0)
-        negative = score_map.get("NEGATIVE", 0)
-        return round(positive / (positive + negative + 1e-9), 4)
+        best = max(result, key=lambda x: x.score)
+        return LABEL_MAP.get(best.label.lower(), 0.5)
 
     def run(self) -> dict:
         headlines = self._fetch_headlines()
@@ -62,6 +66,6 @@ class SentimentAgent(BaseAgent):
         avg = round(sum(individual_scores) / len(individual_scores), 4)
         return {
             "score": avg,
-            "reason": f"DistilBERT sentiment across {len(individual_scores)} headlines",
+            "reason": f"RoBERTa sentiment across {len(individual_scores)} headlines",
             "raw": {"headlines": headlines, "scores": individual_scores},
         }
