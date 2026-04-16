@@ -1,4 +1,4 @@
-import os
+﻿import os
 import requests
 import feedparser
 from .base_agent import BaseAgent
@@ -38,4 +38,22 @@ class SentimentAgent(BaseAgent):
     def run(self) -> dict:
         headlines = self._fetch_headlines()
         if not headlines:
-            return {"score": 0.5, "reason": "no headlines fetched", "raw":
+            return {"score": 0.5, "reason": "no headlines fetched", "raw": {}}
+
+        individual_scores = []
+        for h in headlines:
+            try:
+                s = self._analyze(h)
+                individual_scores.append(s)
+            except Exception:
+                continue
+
+        if not individual_scores:
+            return {"score": 0.5, "reason": "sentiment analysis failed", "raw": {}}
+
+        avg = round(sum(individual_scores) / len(individual_scores), 4)
+        return {
+            "score": avg,
+            "reason": f"FinBERT sentiment across {len(individual_scores)} headlines",
+            "raw": {"headlines": headlines, "scores": individual_scores},
+        }
