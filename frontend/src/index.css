@@ -241,6 +241,7 @@ tr:hover td { background: var(--surface2); }
 
 /* ?? 紐⑤컮????768px ?댄븯 ?????????????????????????? */
 @media (max-width: 768px) {
+  .area-insights { grid-column: 1 / -1; }
   /* ?ㅻ뜑 */
   .header { padding: 8px 12px; gap: 6px; }
   .header-title { font-size: 13px; }
@@ -274,4 +275,5 @@ tr:hover td { background: var(--surface2); }
   .panel { padding: 10px; }
   .panel-title { font-size: 10px; }
 }
+
 
