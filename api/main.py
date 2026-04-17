@@ -22,7 +22,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -60,6 +60,7 @@ app = FastAPI(
 )
 
 from api.routers.insights import router as insights_router
+app.include_router(insights_router, prefix="/api")
 app.include_router(insights_router)
 
 # ---------------------------------------------------------------------------
@@ -117,6 +118,14 @@ if os.path.isdir(DIST_DIR):
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_spa(full_path: str = ""):
         """API 경로가 아닌 모든 요청을 index.html로 라우팅 (SPA fallback)."""
+        normalized = full_path.strip("/")
+        if normalized == "api" or normalized.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        candidate = os.path.join(DIST_DIR, normalized)
+        if normalized and os.path.isfile(candidate):
+            return FileResponse(candidate)
+
         index = os.path.join(DIST_DIR, "index.html")
         return FileResponse(index)
 else:
