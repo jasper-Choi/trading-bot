@@ -98,6 +98,7 @@ def load_company_state() -> CompanyState:
                 session_state=rec.session_state or {},
                 desk_views=rec.desk_views or {},
                 strategy_book=rec.strategy_book or {},
+                daily_summary=load_daily_summary(),
                 execution_log=load_recent_orders(limit=10),
                 recent_journal=load_recent_journal(limit=8),
                 agent_runs=[AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
@@ -181,6 +182,9 @@ def load_recent_orders(limit: int = 10) -> list[dict]:
                     "action": row.action,
                     "focus": row.focus,
                     "size": row.size,
+                    "notional_pct": row.rationale[0].get("notional_pct", 0.0) if row.rationale and isinstance(row.rationale[0], dict) else 0.0,
+                    "status": row.rationale[0].get("status", "planned") if row.rationale and isinstance(row.rationale[0], dict) else "planned",
+                    "pnl_estimate_pct": row.rationale[0].get("pnl_estimate_pct", 0.0) if row.rationale and isinstance(row.rationale[0], dict) else 0.0,
                     "rationale": row.rationale or [],
                 }
                 for row in rows
@@ -188,6 +192,48 @@ def load_recent_orders(limit: int = 10) -> list[dict]:
     except OperationalError:
         rebuild_db()
         return []
+
+
+def load_daily_summary() -> dict:
+    init_db()
+    today = utcnow_iso()[:10]
+    try:
+        with SessionLocal() as db:
+            orders = db.execute(select(PaperOrderRecord).where(PaperOrderRecord.created_at.startswith(today))).scalars().all()
+            journal = db.execute(select(CycleJournalRecord).where(CycleJournalRecord.run_at.startswith(today))).scalars().all()
+            order_dicts = [
+                {
+                    "desk": row.desk,
+                    "action": row.action,
+                    "size": row.size,
+                    "rationale": row.rationale or [],
+                }
+                for row in orders
+            ]
+            planned_orders = sum(1 for row in order_dicts if row["action"] not in {"stand_by", "pre_market_watch"})
+            active_desks = sorted({row["desk"] for row in order_dicts})
+            estimated_pnl = 0.0
+            for row in order_dicts:
+                meta = row["rationale"][0] if row["rationale"] and isinstance(row["rationale"][0], dict) else {}
+                estimated_pnl += float(meta.get("pnl_estimate_pct", 0.0) or 0.0)
+            return {
+                "date": today,
+                "cycles_run": len(journal),
+                "orders_logged": len(order_dicts),
+                "planned_orders": planned_orders,
+                "active_desks": active_desks,
+                "estimated_pnl_pct": round(estimated_pnl, 2),
+            }
+    except OperationalError:
+        rebuild_db()
+        return {
+            "date": today,
+            "cycles_run": 0,
+            "orders_logged": 0,
+            "planned_orders": 0,
+            "active_desks": [],
+            "estimated_pnl_pct": 0.0,
+        }
 
 
 def load_recent_journal(limit: int = 8) -> list[dict]:

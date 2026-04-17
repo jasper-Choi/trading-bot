@@ -182,6 +182,10 @@ def root() -> str:
         <h2>Cycle Journal</h2>
         <ul id="cycle-journal"></ul>
       </article>
+      <article class="card">
+        <h2>Daily Summary</h2>
+        <ul id="daily-summary"></ul>
+      </article>
     </section>
     <section class="card" style="margin-top:14px;">
       <h2>Agent Desk</h2>
@@ -210,8 +214,15 @@ def root() -> str:
         `<li><strong>crypto</strong>: ${{state.strategy_book.crypto_plan ? state.strategy_book.crypto_plan.action + ' / ' + state.strategy_book.crypto_plan.size + ' / ' + state.strategy_book.crypto_plan.focus : 'n/a'}}</li>`,
         `<li><strong>korea</strong>: ${{state.strategy_book.korea_plan ? state.strategy_book.korea_plan.action + ' / ' + state.strategy_book.korea_plan.size + ' / ' + state.strategy_book.korea_plan.focus : 'n/a'}}</li>`
       ].join('');
-      document.getElementById('paper-blotter').innerHTML = (state.execution_log || []).slice(0, 6).map(item => `<li>${{item.created_at}} / ${{item.desk}} / ${{item.action}} / ${{item.size}} / ${{item.focus}}</li>`).join('') || '<li>No paper orders yet</li>';
+      document.getElementById('paper-blotter').innerHTML = (state.execution_log || []).slice(0, 6).map(item => `<li>${{item.created_at}} / ${{item.desk}} / ${{item.action}} / ${{item.size}} / est ${{item.pnl_estimate_pct}}%</li>`).join('') || '<li>No paper orders yet</li>';
       document.getElementById('cycle-journal').innerHTML = (state.recent_journal || []).slice(0, 5).map(item => `<li>${{item.run_at}} / ${{item.stance}} / ${{item.regime}} / ${{item.company_focus}}</li>`).join('') || '<li>No journal yet</li>';
+      document.getElementById('daily-summary').innerHTML = [
+        `<li><strong>date</strong>: ${{state.daily_summary.date || 'n/a'}}</li>`,
+        `<li><strong>cycles</strong>: ${{state.daily_summary.cycles_run || 0}}</li>`,
+        `<li><strong>orders</strong>: ${{state.daily_summary.orders_logged || 0}}</li>`,
+        `<li><strong>planned_orders</strong>: ${{state.daily_summary.planned_orders || 0}}</li>`,
+        `<li><strong>est_pnl_pct</strong>: ${{state.daily_summary.estimated_pnl_pct || 0}}</li>`
+      ].join('');
       document.getElementById('agents').innerHTML = (state.agent_runs || []).map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
     }}
     async function runCycle() {{

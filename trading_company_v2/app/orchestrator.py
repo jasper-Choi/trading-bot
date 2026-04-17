@@ -19,7 +19,7 @@ from app.services.recommendation_engine import build_crypto_plan, build_korea_pl
 
 class CompanyOrchestrator:
     def __init__(self):
-        self.agents = [
+        self.analysis_agents = [
             MarketDataAgent(),
             MacroSentimentAgent(),
             TrendStructureAgent(),
@@ -28,9 +28,9 @@ class CompanyOrchestrator:
             KoreaStockDeskAgent(),
             CIOAgent(),
             RiskCommitteeAgent(),
-            ExecutionAgent(),
-            OpsAgent(),
         ]
+        self.execution_agent = ExecutionAgent()
+        self.ops_agent = OpsAgent()
 
     @staticmethod
     def _determine_stance(macro_score: float, trend_score: float) -> str:
@@ -52,7 +52,7 @@ class CompanyOrchestrator:
     def run_cycle(self) -> dict:
         state = load_company_state()
         previous_state = state.model_dump()
-        results: list[AgentResult] = [agent.safe_run() for agent in self.agents]
+        results: list[AgentResult] = [agent.safe_run() for agent in self.analysis_agents]
 
         macro_result = next((r for r in results if r.name == "macro_sentiment_agent"), AgentResult(name="macro_sentiment_agent", reason="missing"))
         trend_result = next((r for r in results if r.name == "trend_structure_agent"), AgentResult(name="trend_structure_agent", reason="missing"))
@@ -60,7 +60,6 @@ class CompanyOrchestrator:
         strategy_allocator_result = next((r for r in results if r.name == "strategy_allocator_agent"), AgentResult(name="strategy_allocator_agent", reason="missing"))
         crypto_desk_result = next((r for r in results if r.name == "crypto_desk_agent"), AgentResult(name="crypto_desk_agent", reason="missing"))
         stock_desk_result = next((r for r in results if r.name == "korea_stock_desk_agent"), AgentResult(name="korea_stock_desk_agent", reason="missing"))
-        execution_result = next((r for r in results if r.name == "execution_agent"), AgentResult(name="execution_agent", reason="missing"))
         state.stance = self._determine_stance(macro_result.score, trend_result.score)
         state.regime = self._determine_regime(macro_result.score, trend_result.score)
         state.risk_budget = 0.5 if state.stance == "BALANCED" else 0.7 if state.stance == "OFFENSE" else 0.3
@@ -106,6 +105,10 @@ class CompanyOrchestrator:
                 strategy_allocator_result.payload.get("session", {}),
             ),
         }
+        self.execution_agent.configure(strategy_book=state.strategy_book, regime=state.regime)
+        execution_result = self.execution_agent.safe_run()
+        ops_result = self.ops_agent.safe_run()
+        results.extend([execution_result, ops_result])
         paper_orders = [PaperOrder.model_validate(item) for item in execution_result.payload.get("orders", [])]
         save_paper_orders(paper_orders)
         save_cycle_journal(
@@ -118,6 +121,7 @@ class CompanyOrchestrator:
             )
         )
         refreshed_state = load_company_state()
+        state.daily_summary = refreshed_state.daily_summary
         state.execution_log = refreshed_state.execution_log
         state.recent_journal = refreshed_state.recent_journal
         state.agent_runs = [

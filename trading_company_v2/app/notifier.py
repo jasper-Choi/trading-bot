@@ -54,6 +54,13 @@ class TelegramNotifier:
         if execution_log:
             latest = execution_log[0]
             lines.append(f"latest paper order: {latest.get('desk')} / {latest.get('action')} / {latest.get('size')}")
+        daily_summary = current_state.get("daily_summary", {})
+        if daily_summary:
+            lines.append(
+                f"today: cycles={daily_summary.get('cycles_run', 0)} / "
+                f"orders={daily_summary.get('orders_logged', 0)} / "
+                f"est_pnl={daily_summary.get('estimated_pnl_pct', 0.0)}%"
+            )
         return self.send("\n".join(lines))
 
     def send_error(self, message: str) -> bool:

@@ -35,6 +35,9 @@ class PaperOrder(BaseModel):
     action: str
     focus: str
     size: str
+    notional_pct: float = 0.0
+    status: str = "planned"
+    pnl_estimate_pct: float = 0.0
     rationale: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=utcnow_iso)
 
@@ -61,6 +64,7 @@ class CompanyState(BaseModel):
     session_state: dict = Field(default_factory=dict)
     desk_views: dict = Field(default_factory=dict)
     strategy_book: dict = Field(default_factory=dict)
+    daily_summary: dict = Field(default_factory=dict)
     execution_log: list[dict] = Field(default_factory=list)
     recent_journal: list[dict] = Field(default_factory=list)
     agent_runs: list[AgentSnapshot] = Field(default_factory=list)
