@@ -130,6 +130,7 @@ export default function App() {
   const [regime,         setRegime]         = useState(null)
   const [stockPositions, setStockPositions] = useState([])
   const [insights,       setInsights]       = useState(null)
+  const [agentStatus,    setAgentStatus]    = useState(null)
   const [error,          setError]          = useState(null)
   const [lastUpdate,     setLastUpdate]     = useState(null)
   const [countdown,      setCountdown]      = useState(REFRESH_SEC)
@@ -139,7 +140,7 @@ export default function App() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const [s, p, tr, st, lg, reg, sp, ins] = await Promise.all([
+      const [s, p, tr, st, lg, reg, sp, ins, agents] = await Promise.all([
         api.status(),
         api.positions(),
         api.trades(50),
@@ -148,6 +149,7 @@ export default function App() {
         api.marketRegime().catch(() => null),
         api.stockPositions().catch(() => []),
         api.insights().catch(() => null),
+        api.agentsStatus().catch(() => null),
       ])
       setStatus(s)
       setPositions(p)
@@ -157,6 +159,7 @@ export default function App() {
       if (reg) setRegime(reg)
       setStockPositions(sp)
       if (ins) setInsights(ins)
+      if (agents) setAgentStatus(agents)
       setLastUpdate(
         new Date().toLocaleTimeString('ko-KR', {
           hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -290,7 +293,7 @@ export default function App() {
         </div>
 
         <div className="area-insights">
-          <InsightPanel data={insights} />
+          <InsightPanel data={insights} agentStatus={agentStatus} />
         </div>
 
         <div className="area-position">

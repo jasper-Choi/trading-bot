@@ -159,14 +159,16 @@ def merge_state(updates: dict[str, Any]) -> dict[str, Any]:
     return write_state(merged)
 
 
-def write_json_artifact(path: Path, payload: dict[str, Any]) -> None:
+def write_json_artifact(path: Path | str, payload: dict[str, Any]) -> None:
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fp:
         json.dump(payload, fp, ensure_ascii=True, indent=2)
         fp.write("\n")
 
 
-def load_json_artifact(path: Path, default: dict[str, Any] | None = None) -> dict[str, Any]:
+def load_json_artifact(path: Path | str, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    path = Path(path)
     if not path.exists():
         return {} if default is None else default
     with path.open("r", encoding="utf-8") as fp:

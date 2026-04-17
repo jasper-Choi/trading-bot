@@ -30,6 +30,7 @@ export const api = {
   /** 二쇱떇 嫄곕옒 ?대젰 */
   stockHistory:   (limit = 30) => request(`/api/stock/history?limit=${limit}`),
   insights:       () => request('/api/insights/'),
+  agentsStatus:   () => request('/api/insights/agents/status'),
 }
 
 
