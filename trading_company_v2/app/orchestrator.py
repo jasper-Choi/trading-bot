@@ -105,6 +105,7 @@ class CompanyOrchestrator:
                 strategy_allocator_result.payload.get("session", {}),
             ),
         }
+        company_focus = str(state.strategy_book.get("company_focus") or "Capital preservation and watchlist maintenance")
         self.execution_agent.configure(strategy_book=state.strategy_book, regime=state.regime)
         execution_result = self.execution_agent.safe_run()
         ops_result = self.ops_agent.safe_run()
@@ -115,7 +116,7 @@ class CompanyOrchestrator:
             CycleJournalEntry(
                 stance=state.stance,
                 regime=state.regime,
-                company_focus=state.strategy_book.get("company_focus", ""),
+                company_focus=company_focus,
                 summary=state.latest_signals[:5],
                 orders=paper_orders,
             )
