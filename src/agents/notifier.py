@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
+from pathlib import Path
 from typing import Iterable
 
+import config
 import requests
+from src.position_manager import load_history
 
 from .base import TradingAgent
+from .state import CACHE_DIR, load_json_artifact, write_json_artifact
+
+
+NOTIFIER_STATE_FILE = CACHE_DIR / "notifier_state.json"
 
 
 class TelegramNotifier(TradingAgent):
@@ -54,3 +62,33 @@ class TelegramNotifier(TradingAgent):
 
     def send_error(self, message: str) -> bool:
         return self.send_message(f"[Agent Error]\n{message}")
+
+    def send_daily_summary_if_needed(self, stock_history: list[dict] | None = None) -> bool:
+        now = datetime.now(config.KST)
+        if now.hour < 16:
+            return False
+
+        marker = load_json_artifact(NOTIFIER_STATE_FILE, default={})
+        today = now.strftime("%Y-%m-%d")
+        if marker.get("daily_summary_sent_at") == today:
+            return False
+
+        coin_history = load_history()
+        stock_history = stock_history or []
+
+        coin_pnl = sum(float(item.get("pnl", 0) or 0) for item in coin_history if str(item.get("exit_date", "")).startswith(today))
+        stock_pnl = sum(float(item.get("pnl", 0) or 0) for item in stock_history if str(item.get("exit_date", "")).startswith(today))
+        total_pnl = coin_pnl + stock_pnl
+
+        text = "\n".join(
+            [
+                f"[Daily Summary] {today}",
+                f"coin pnl: {coin_pnl:+,.0f}",
+                f"stock pnl: {stock_pnl:+,.0f}",
+                f"total pnl: {total_pnl:+,.0f}",
+            ]
+        )
+        sent = self.send_message(text)
+        if sent:
+            write_json_artifact(Path(NOTIFIER_STATE_FILE), {"daily_summary_sent_at": today})
+        return sent

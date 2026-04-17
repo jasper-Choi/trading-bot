@@ -27,10 +27,12 @@ from src.position_manager import (
 from src.market_regime   import market_regime
 from src.reporter        import log, get_log_lines
 from src.stock_strategy  import (
+    get_stock_history,
     manage_stock_positions, run_gap_momentum,
     run_news_momentum, run_premarket_screening,
 )
 from src.agents.orchestrator import run_agent_cycle
+from src.agents.notifier import TelegramNotifier
 from api.models          import BotStatusOut, BotControlOut, MarketRegimeOut, LogsOut
 
 router = APIRouter(prefix="/api/bot", tags=["bot"])
@@ -111,6 +113,7 @@ class _BotRunner:
         """1분 틱 — 1분·5분·15분 작업을 분기합니다."""
         now    = datetime.now(config.KST)
         minute = now.minute
+        TelegramNotifier().send_daily_summary_if_needed(stock_history=get_stock_history())
 
         # 1분마다: 긴급 국면 감지
         new_regime = market_regime.check_1m()

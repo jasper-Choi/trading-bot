@@ -42,10 +42,12 @@ from src.reporter        import log, print_status, print_history
 from src.market_regime   import market_regime
 from src.stock_screener  import get_kosdaq_realtime, get_gap_up_stocks
 from src.stock_strategy  import (
+    get_stock_history,
     manage_stock_positions, run_gap_momentum,
     run_news_momentum, run_premarket_screening,
 )
 from src.agents.orchestrator import run_agent_cycle
+from src.agents.notifier import TelegramNotifier
 
 TAG_1M  = "[1M]"
 TAG_5M  = "[5M]"
@@ -59,6 +61,7 @@ _top_coins_cache: list[str] = []
 
 def run_1m():
     """BTC 1분봉으로 긴급 국면 체크."""
+    TelegramNotifier().send_daily_summary_if_needed(stock_history=get_stock_history())
     new_regime = market_regime.check_1m()
     if new_regime:
         log(
