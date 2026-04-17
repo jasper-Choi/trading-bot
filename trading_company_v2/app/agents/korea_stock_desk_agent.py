@@ -21,6 +21,6 @@ class KoreaStockDeskAgent(BaseAgent):
                 "gap_candidates": gap_candidates[:5],
                 "leader_count": len(leaders),
                 "active_gap_count": len(gap_candidates),
+                "top_focus": gap_candidates[0]["name"] if gap_candidates else None,
             },
         )
-

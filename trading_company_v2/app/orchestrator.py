@@ -8,11 +8,13 @@ from app.agents.macro_sentiment_agent import MacroSentimentAgent
 from app.agents.market_data_agent import MarketDataAgent
 from app.agents.ops_agent import OpsAgent
 from app.agents.risk_committee_agent import RiskCommitteeAgent
+from app.agents.strategy_allocator_agent import StrategyAllocatorAgent
 from app.agents.trend_structure_agent import TrendStructureAgent
 from app.config import settings
 from app.core.models import AgentResult, AgentSnapshot, CompanyState
 from app.core.state_store import load_company_state, save_company_state
 from app.notifier import notifier
+from app.services.recommendation_engine import build_crypto_plan, build_korea_plan
 
 
 class CompanyOrchestrator:
@@ -21,6 +23,7 @@ class CompanyOrchestrator:
             MarketDataAgent(),
             MacroSentimentAgent(),
             TrendStructureAgent(),
+            StrategyAllocatorAgent(),
             CryptoDeskAgent(),
             KoreaStockDeskAgent(),
             CIOAgent(),
@@ -54,6 +57,7 @@ class CompanyOrchestrator:
         macro_result = next((r for r in results if r.name == "macro_sentiment_agent"), AgentResult(name="macro_sentiment_agent", reason="missing"))
         trend_result = next((r for r in results if r.name == "trend_structure_agent"), AgentResult(name="trend_structure_agent", reason="missing"))
         market_data_result = next((r for r in results if r.name == "market_data_agent"), AgentResult(name="market_data_agent", reason="missing"))
+        strategy_allocator_result = next((r for r in results if r.name == "strategy_allocator_agent"), AgentResult(name="strategy_allocator_agent", reason="missing"))
         crypto_desk_result = next((r for r in results if r.name == "crypto_desk_agent"), AgentResult(name="crypto_desk_agent", reason="missing"))
         stock_desk_result = next((r for r in results if r.name == "korea_stock_desk_agent"), AgentResult(name="korea_stock_desk_agent", reason="missing"))
         state.stance = self._determine_stance(macro_result.score, trend_result.score)
@@ -75,6 +79,7 @@ class CompanyOrchestrator:
             f"macro_bias={macro_result.payload.get('macro_bias', 'unknown')}",
             f"trend_bias={trend_result.payload.get('trend_bias', 'unknown')}",
             f"regime={state.regime.lower()}",
+            f"session_focus={strategy_allocator_result.payload.get('company_focus', 'unknown')}",
             f"crypto_desk={crypto_desk_result.payload.get('desk_bias', 'unknown')}",
             f"korea_gap_candidates={stock_desk_result.payload.get('active_gap_count', 0)}",
         ]
@@ -84,9 +89,21 @@ class CompanyOrchestrator:
             "stock_leaders": market_data_result.payload.get("stock_leaders", []),
             "gap_candidates": market_data_result.payload.get("gap_candidates", []),
         }
+        state.session_state = strategy_allocator_result.payload.get("session", {})
         state.desk_views = {
             "crypto_desk": crypto_desk_result.payload,
             "korea_stock_desk": stock_desk_result.payload,
+        }
+        state.strategy_book = {
+            "company_focus": strategy_allocator_result.payload.get("company_focus"),
+            "desk_priorities": strategy_allocator_result.payload.get("desk_priorities", []),
+            "crypto_plan": build_crypto_plan(state.stance, state.regime, crypto_desk_result.payload),
+            "korea_plan": build_korea_plan(
+                state.stance,
+                state.regime,
+                stock_desk_result.payload,
+                strategy_allocator_result.payload.get("session", {}),
+            ),
         }
         state.agent_runs = [
             AgentSnapshot(

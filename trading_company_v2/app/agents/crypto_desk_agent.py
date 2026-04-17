@@ -21,6 +21,6 @@ class CryptoDeskAgent(BaseAgent):
                 "lead_market": "KRW-BTC",
                 "desk_bias": signal["bias"],
                 "reasons": signal["reasons"],
+                "signal_score": signal["score"],
             },
         )
-

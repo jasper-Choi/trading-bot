@@ -58,7 +58,6 @@ def root() -> str:
       --ink: #1b1f18;
       --muted: #5b6257;
       --accent: #0f766e;
-      --warn: #b45309;
       --danger: #b91c1c;
       --border: #d8d2c6;
     }}
@@ -70,7 +69,7 @@ def root() -> str:
       color: var(--ink);
     }}
     main {{
-      max-width: 920px;
+      max-width: 980px;
       margin: 0 auto;
       padding: 24px 16px 40px;
     }}
@@ -84,7 +83,7 @@ def root() -> str:
     .grid {{
       display: grid;
       gap: 14px;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     }}
     .card {{
       background: var(--card);
@@ -93,7 +92,7 @@ def root() -> str:
       padding: 16px;
       box-shadow: 0 8px 24px rgba(27,31,24,0.05);
     }}
-    h1, h2, h3, p {{ margin: 0; }}
+    h1, h2, p {{ margin: 0; }}
     h1 {{ font-size: 2rem; margin-bottom: 8px; }}
     h2 {{ font-size: 1rem; margin-bottom: 10px; }}
     .muted {{ color: var(--muted); }}
@@ -121,7 +120,6 @@ def root() -> str:
       cursor: pointer;
     }}
     .danger {{ color: var(--danger); }}
-    .warn {{ color: var(--warn); }}
   </style>
 </head>
 <body>
@@ -161,6 +159,20 @@ def root() -> str:
         <ul id="desks"></ul>
       </article>
     </section>
+    <section class="grid" style="margin-top:14px;">
+      <article class="card">
+        <h2>Session State</h2>
+        <ul id="session-state"></ul>
+      </article>
+      <article class="card">
+        <h2>Strategy Book</h2>
+        <ul id="strategy-book"></ul>
+      </article>
+      <article class="card">
+        <h2>Desk Plans</h2>
+        <ul id="desk-plans"></ul>
+      </article>
+    </section>
     <section class="card" style="margin-top:14px;">
       <h2>Agent Desk</h2>
       <ul id="agents"></ul>
@@ -174,12 +186,21 @@ def root() -> str:
       document.getElementById('state-line').textContent =
         `${{state.stance}} stance / ${{state.regime}} regime / risk budget ${{state.risk_budget}} / new entries ${{state.allow_new_entries ? 'ON' : 'BLOCKED'}}`;
       document.getElementById('updated-line').textContent = `Updated: ${{state.updated_at}}`;
-      document.getElementById('signals').innerHTML = state.latest_signals.map(item => `<li>${{item}}</li>`).join('') || '<li>No signals yet</li>';
-      document.getElementById('principles').innerHTML = state.trader_principles.map(item => `<li>${{item}}</li>`).join('');
-      document.getElementById('crypto-leaders').innerHTML = (state.market_snapshot.crypto_leaders || []).slice(0, 5).map(item => `<li>${{item.market}} / ${{item.change_rate}}% / ₩${{Number(item.trade_price).toLocaleString()}}</li>`).join('') || '<li>No crypto snapshot yet</li>';
+      document.getElementById('signals').innerHTML = (state.latest_signals || []).map(item => `<li>${{item}}</li>`).join('') || '<li>No signals yet</li>';
+      document.getElementById('principles').innerHTML = (state.trader_principles || []).map(item => `<li>${{item}}</li>`).join('');
+      document.getElementById('crypto-leaders').innerHTML = (state.market_snapshot.crypto_leaders || []).slice(0, 5).map(item => `<li>${{item.market}} / ${{item.change_rate}}% / KRW ${{Number(item.trade_price).toLocaleString()}}</li>`).join('') || '<li>No crypto snapshot yet</li>';
       document.getElementById('stock-leaders').innerHTML = (state.market_snapshot.gap_candidates || state.market_snapshot.stock_leaders || []).slice(0, 5).map(item => `<li>${{item.name || item.ticker}} / gap ${{item.gap_pct}}% / vol ${{Number(item.volume || 0).toLocaleString()}}</li>`).join('') || '<li>No KOSDAQ snapshot yet</li>';
       document.getElementById('desks').innerHTML = Object.entries(state.desk_views || {{}}).map(([name, payload]) => `<li><strong>${{name}}</strong>: ${{JSON.stringify(payload)}}</li>`).join('') || '<li>No desk output yet</li>';
-      document.getElementById('agents').innerHTML = state.agent_runs.map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
+      document.getElementById('session-state').innerHTML = Object.entries(state.session_state || {{}}).map(([name, value]) => `<li><strong>${{name}}</strong>: ${{Array.isArray(value) ? value.join(', ') : value}}</li>`).join('') || '<li>No session state yet</li>';
+      document.getElementById('strategy-book').innerHTML = [
+        `<li><strong>company_focus</strong>: ${{state.strategy_book.company_focus || 'n/a'}}</li>`,
+        `<li><strong>desk_priorities</strong>: ${{(state.strategy_book.desk_priorities || []).join(' | ') || 'n/a'}}</li>`
+      ].join('');
+      document.getElementById('desk-plans').innerHTML = [
+        `<li><strong>crypto</strong>: ${{state.strategy_book.crypto_plan ? state.strategy_book.crypto_plan.action + ' / ' + state.strategy_book.crypto_plan.size + ' / ' + state.strategy_book.crypto_plan.focus : 'n/a'}}</li>`,
+        `<li><strong>korea</strong>: ${{state.strategy_book.korea_plan ? state.strategy_book.korea_plan.action + ' / ' + state.strategy_book.korea_plan.size + ' / ' + state.strategy_book.korea_plan.focus : 'n/a'}}</li>`
+      ].join('');
+      document.getElementById('agents').innerHTML = (state.agent_runs || []).map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
     }}
     async function runCycle() {{
       await fetch('/cycle', {{ method: 'POST' }});

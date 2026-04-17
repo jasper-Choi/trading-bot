@@ -40,6 +40,8 @@ class CompanyState(BaseModel):
     trader_principles: list[str] = Field(default_factory=list)
     latest_signals: list[str] = Field(default_factory=list)
     market_snapshot: dict = Field(default_factory=dict)
+    session_state: dict = Field(default_factory=dict)
     desk_views: dict = Field(default_factory=dict)
+    strategy_book: dict = Field(default_factory=dict)
     agent_runs: list[AgentSnapshot] = Field(default_factory=list)
     updated_at: str = Field(default_factory=utcnow_iso)
