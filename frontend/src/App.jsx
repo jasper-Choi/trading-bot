@@ -120,6 +120,14 @@ function buildChartData(trades) {
 
 const REFRESH_SEC = 30
 
+async function settle(promise, fallback) {
+  try {
+    return await promise
+  } catch {
+    return fallback
+  }
+}
+
 export default function App() {
   const [lang,           setLang]           = useState('ko')
   const [status,         setStatus]         = useState(null)
@@ -139,36 +147,35 @@ export default function App() {
   const t = T[lang]
 
   const fetchAll = useCallback(async () => {
-    try {
-      const [s, p, tr, st, lg, reg, sp, ins, agents] = await Promise.all([
-        api.status(),
-        api.positions(),
-        api.trades(50),
-        api.stats(),
-        api.logs(40),
-        api.marketRegime().catch(() => null),
-        api.stockPositions().catch(() => []),
-        api.insights().catch(() => null),
-        api.agentsStatus().catch(() => null),
-      ])
-      setStatus(s)
-      setPositions(p)
-      setTrades(tr)
-      setStats(st)
-      setLogs(lg.lines)
-      if (reg) setRegime(reg)
-      setStockPositions(sp)
-      if (ins) setInsights(ins)
-      if (agents) setAgentStatus(agents)
-      setLastUpdate(
-        new Date().toLocaleTimeString('ko-KR', {
-          hour: '2-digit', minute: '2-digit', second: '2-digit',
-        })
-      )
-      setError(null)
-    } catch (e) {
-      setError(e.message)
-    }
+    const [s, p, tr, st, lg, reg, sp, ins, agents] = await Promise.all([
+      settle(api.status(), null),
+      settle(api.positions(), []),
+      settle(api.trades(50), []),
+      settle(api.stats(), null),
+      settle(api.logs(40), { lines: [] }),
+      settle(api.marketRegime(), null),
+      settle(api.stockPositions(), []),
+      settle(api.insights(), null),
+      settle(api.agentsStatus(), null),
+    ])
+
+    if (s) setStatus(s)
+    setPositions(p)
+    setTrades(tr)
+    if (st) setStats(st)
+    setLogs(lg?.lines ?? [])
+    if (reg) setRegime(reg)
+    setStockPositions(sp)
+    if (ins) setInsights(ins)
+    if (agents) setAgentStatus(agents)
+
+    const hasCoreData = Boolean(s || st || ins || agents)
+    setError(hasCoreData ? null : 'Dashboard data temporarily unavailable')
+    setLastUpdate(
+      new Date().toLocaleTimeString('ko-KR', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+      })
+    )
     setCountdown(REFRESH_SEC)
   }, [])
 
