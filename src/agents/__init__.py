@@ -4,6 +4,7 @@ from .base import TradingAgent
 from .ceo_agent import CEOAgent
 from .coin_data_agent import CoinDataAgent
 from .coin_signal_agent import CoinSignalAgent
+from .risk_agent import RiskAgent
 from .state import (
     AGENTS_DIR,
     CACHE_DIR,
@@ -26,6 +27,7 @@ __all__ = [
     "CEOAgent",
     "CoinDataAgent",
     "CoinSignalAgent",
+    "RiskAgent",
     "SIGNALS_DIR",
     "STATE_FILE",
     "StockDataAgent",
