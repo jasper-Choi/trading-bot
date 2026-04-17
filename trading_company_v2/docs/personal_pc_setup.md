@@ -57,6 +57,9 @@ run_company_loop.bat
 
 You can change the interval with `CYCLE_INTERVAL_MINUTES` in `.env`.
 
+If a batch window closes immediately, run it again after this update.
+The scripts now keep the error message visible with `pause` when startup fails.
+
 ## Telegram Alerts
 
 1. Create a Telegram bot with BotFather

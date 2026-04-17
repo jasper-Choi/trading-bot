@@ -69,6 +69,8 @@ For the always-on bot loop on your home PC:
 - Dashboard/API: `run_local.bat`
 - 15-minute company loop: `run_company_loop.bat`
 
+The batch files call `.venv\Scripts\python.exe` directly, so they do not depend on `activate.bat`.
+
 Detailed instructions are in [docs/personal_pc_setup.md](./docs/personal_pc_setup.md).
 
 ## Local Endpoints
