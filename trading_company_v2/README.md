@@ -90,3 +90,8 @@ Detailed instructions are in [docs/personal_pc_setup.md](./docs/personal_pc_setu
 - Default behavior: notify only on stance/regime/risk changes or runtime errors
 - Set `TELEGRAM_NOTIFY_EVERY_CYCLE=true` if you want every loop reported
 - On Windows, `register_windows_tasks.bat` creates logon startup tasks for dashboard and loop
+- Telegram summary now includes:
+  - company focus
+  - crypto/korea desk plan
+  - latest paper order
+  - daily cycle/order summary

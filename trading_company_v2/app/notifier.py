@@ -42,18 +42,26 @@ class TelegramNotifier:
         if not should_send:
             return False
 
+        crypto_plan = current_state.get("strategy_book", {}).get("crypto_plan", {})
+        korea_plan = current_state.get("strategy_book", {}).get("korea_plan", {})
+        desk_priorities = current_state.get("strategy_book", {}).get("desk_priorities", [])
         lines = [
             f"[{settings.company_name}] company cycle update",
-            f"stance: {current_state.get('stance')}",
-            f"regime: {current_state.get('regime')}",
-            f"risk budget: {current_state.get('risk_budget')}",
-            f"new entries: {'ON' if current_state.get('allow_new_entries') else 'BLOCKED'}",
-            f"signals: {', '.join(current_state.get('latest_signals', [])[:4])}",
+            f"time: {current_state.get('session_state', {}).get('local_time', 'n/a')} {current_state.get('session_state', {}).get('timezone', '')}".strip(),
+            f"stance/regime: {current_state.get('stance')} / {current_state.get('regime')}",
+            f"risk: budget {current_state.get('risk_budget')} / entries {'ON' if current_state.get('allow_new_entries') else 'BLOCKED'}",
+            f"focus: {current_state.get('strategy_book', {}).get('company_focus', 'n/a')}",
+            f"priorities: {', '.join(desk_priorities[:2]) if desk_priorities else 'n/a'}",
+            f"crypto plan: {crypto_plan.get('action', 'n/a')} / {crypto_plan.get('size', 'n/a')} / {crypto_plan.get('focus', 'n/a')}",
+            f"korea plan: {korea_plan.get('action', 'n/a')} / {korea_plan.get('size', 'n/a')} / {korea_plan.get('focus', 'n/a')}",
         ]
         execution_log = current_state.get("execution_log", [])
         if execution_log:
             latest = execution_log[0]
-            lines.append(f"latest paper order: {latest.get('desk')} / {latest.get('action')} / {latest.get('size')}")
+            lines.append(
+                f"latest paper order: {latest.get('desk')} / {latest.get('action')} / "
+                f"{latest.get('size')} / est {latest.get('pnl_estimate_pct', 0.0)}%"
+            )
         daily_summary = current_state.get("daily_summary", {})
         if daily_summary:
             lines.append(
@@ -61,6 +69,9 @@ class TelegramNotifier:
                 f"orders={daily_summary.get('orders_logged', 0)} / "
                 f"est_pnl={daily_summary.get('estimated_pnl_pct', 0.0)}%"
             )
+        latest_signals = current_state.get("latest_signals", [])
+        if latest_signals:
+            lines.append(f"signals: {', '.join(latest_signals[:3])}")
         return self.send("\n".join(lines))
 
     def send_error(self, message: str) -> bool:

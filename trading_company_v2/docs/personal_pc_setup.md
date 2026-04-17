@@ -69,6 +69,22 @@ Default alert policy:
 - Send when regime changes
 - Send when new entries become blocked/unblocked
 - Send on runtime errors
+- Include desk plan, latest paper order, and daily summary when an alert is sent
+
+### Quick Setup Flow
+
+1. In Telegram, open `@BotFather`
+2. Run `/newbot`
+3. Copy the bot token into `.env` as `TELEGRAM_BOT_TOKEN`
+4. Send any message to your new bot from your Telegram account
+5. In a browser, open:
+
+```text
+https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
+```
+
+6. Find your chat id in the JSON response and put it into `.env` as `TELEGRAM_CHAT_ID`
+7. Restart `run_local.bat` and `run_company_loop.bat`
 
 ## Mobile Access Later
 

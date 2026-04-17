@@ -59,6 +59,7 @@ def root() -> str:
       --muted: #5b6257;
       --accent: #0f766e;
       --danger: #b91c1c;
+      --soft: #efe7d8;
       --border: #d8d2c6;
     }}
     * {{ box-sizing: border-box; }}
@@ -92,6 +93,10 @@ def root() -> str:
       padding: 16px;
       box-shadow: 0 8px 24px rgba(27,31,24,0.05);
     }}
+    .priority {{
+      border: 1px solid rgba(15,118,110,0.25);
+      background: linear-gradient(180deg, rgba(15,118,110,0.08), var(--card));
+    }}
     h1, h2, p {{ margin: 0; }}
     h1 {{ font-size: 2rem; margin-bottom: 8px; }}
     h2 {{ font-size: 1rem; margin-bottom: 10px; }}
@@ -120,6 +125,41 @@ def root() -> str:
       cursor: pointer;
     }}
     .danger {{ color: var(--danger); }}
+    .metrics {{
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 14px;
+    }}
+    .metric {{
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: var(--soft);
+      border: 1px solid var(--border);
+    }}
+    .metric strong {{
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }}
+    .metric span {{
+      font-size: 1rem;
+    }}
+    @media (max-width: 640px) {{
+      main {{
+        padding: 14px 12px 28px;
+      }}
+      .hero {{
+        padding: 18px;
+      }}
+      h1 {{
+        font-size: 1.5rem;
+      }}
+      .metrics {{
+        grid-template-columns: 1fr 1fr;
+      }}
+    }}
   </style>
 </head>
 <body>
@@ -129,20 +169,52 @@ def root() -> str:
       <p class="muted">Local-first paper trading company for {settings.operator_name}. Free to run, easy to move to your home PC, mobile-viewable later through Tailscale.</p>
       <div class="pill">Paper trading only</div>
       <button onclick="runCycle()">Run One Cycle</button>
+      <div class="metrics">
+        <div class="metric">
+          <strong>Focus</strong>
+          <span id="focus-metric">Loading...</span>
+        </div>
+        <div class="metric">
+          <strong>Risk Budget</strong>
+          <span id="risk-metric">Loading...</span>
+        </div>
+        <div class="metric">
+          <strong>Daily Cycles</strong>
+          <span id="cycles-metric">Loading...</span>
+        </div>
+        <div class="metric">
+          <strong>Est. PnL</strong>
+          <span id="pnl-metric">Loading...</span>
+        </div>
+      </div>
     </section>
     <section class="grid">
-      <article class="card">
+      <article class="card priority">
         <h2>Company State</h2>
         <p id="state-line">Loading...</p>
         <p class="muted" id="updated-line"></p>
       </article>
+      <article class="card priority">
+        <h2>Desk Plans</h2>
+        <ul id="desk-plans"></ul>
+      </article>
+      <article class="card priority">
+        <h2>Daily Summary</h2>
+        <ul id="daily-summary"></ul>
+      </article>
+    </section>
+    <section class="grid" style="margin-top:14px;">
       <article class="card">
         <h2>Signals</h2>
         <ul id="signals"></ul>
       </article>
       <article class="card">
-        <h2>Trader Principles</h2>
-        <ul id="principles"></ul>
+        <h2>Session State</h2>
+        <ul id="session-state"></ul>
+      </article>
+      <article class="card">
+        <h2>Strategy Book</h2>
+        <ul id="strategy-book"></ul>
       </article>
     </section>
     <section class="grid" style="margin-top:14px;">
@@ -157,20 +229,6 @@ def root() -> str:
       <article class="card">
         <h2>Desk Views</h2>
         <ul id="desks"></ul>
-      </article>
-    </section>
-    <section class="grid" style="margin-top:14px;">
-      <article class="card">
-        <h2>Session State</h2>
-        <ul id="session-state"></ul>
-      </article>
-      <article class="card">
-        <h2>Strategy Book</h2>
-        <ul id="strategy-book"></ul>
-      </article>
-      <article class="card">
-        <h2>Desk Plans</h2>
-        <ul id="desk-plans"></ul>
       </article>
     </section>
     <section class="grid" style="margin-top:14px;">
@@ -197,6 +255,10 @@ def root() -> str:
       const res = await fetch('/dashboard-data', {{ cache: 'no-store' }});
       const data = await res.json();
       const state = data.state;
+      document.getElementById('focus-metric').textContent = state.strategy_book.company_focus || 'n/a';
+      document.getElementById('risk-metric').textContent = state.risk_budget ?? 'n/a';
+      document.getElementById('cycles-metric').textContent = state.daily_summary.cycles_run ?? 0;
+      document.getElementById('pnl-metric').textContent = `${{state.daily_summary.estimated_pnl_pct ?? 0}}%`;
       document.getElementById('state-line').textContent =
         `${{state.stance}} stance / ${{state.regime}} regime / risk budget ${{state.risk_budget}} / new entries ${{state.allow_new_entries ? 'ON' : 'BLOCKED'}}`;
       document.getElementById('updated-line').textContent = `Updated: ${{state.updated_at}}`;
@@ -221,7 +283,8 @@ def root() -> str:
         `<li><strong>cycles</strong>: ${{state.daily_summary.cycles_run || 0}}</li>`,
         `<li><strong>orders</strong>: ${{state.daily_summary.orders_logged || 0}}</li>`,
         `<li><strong>planned_orders</strong>: ${{state.daily_summary.planned_orders || 0}}</li>`,
-        `<li><strong>est_pnl_pct</strong>: ${{state.daily_summary.estimated_pnl_pct || 0}}</li>`
+        `<li><strong>est_pnl_pct</strong>: ${{state.daily_summary.estimated_pnl_pct || 0}}</li>`,
+        `<li><strong>active_desks</strong>: ${{(state.daily_summary.active_desks || []).join(', ') || 'n/a'}}</li>`
       ].join('');
       document.getElementById('agents').innerHTML = (state.agent_runs || []).map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
     }}
