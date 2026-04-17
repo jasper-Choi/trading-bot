@@ -59,8 +59,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+from api.routers.insights import agent_router as insights_agent_router
 from api.routers.insights import router as insights_router
 app.include_router(insights_router, prefix="/api")
+app.include_router(insights_agent_router, prefix="/api")
 app.include_router(insights_router)
 
 # ---------------------------------------------------------------------------

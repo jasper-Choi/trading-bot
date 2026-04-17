@@ -30,6 +30,7 @@ from src.stock_strategy  import (
     manage_stock_positions, run_gap_momentum,
     run_news_momentum, run_premarket_screening,
 )
+from src.agents.orchestrator import run_agent_cycle
 from api.models          import BotStatusOut, BotControlOut, MarketRegimeOut, LogsOut
 
 router = APIRouter(prefix="/api/bot", tags=["bot"])
@@ -223,6 +224,11 @@ class _BotRunner:
 
     def _run_15m(self):
         """15분 전체 스캔 + 추세 업데이트."""
+        try:
+            run_agent_cycle(log_fn=log)
+        except Exception as exc:
+            log(f"{TAG} agent cycle error: {exc}")
+
         new_regime = market_regime.check_15m()
         if new_regime:
             log(f"{TAG} 추세 → {new_regime}")

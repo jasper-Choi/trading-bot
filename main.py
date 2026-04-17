@@ -45,6 +45,7 @@ from src.stock_strategy  import (
     manage_stock_positions, run_gap_momentum,
     run_news_momentum, run_premarket_screening,
 )
+from src.agents.orchestrator import run_agent_cycle
 
 TAG_1M  = "[1M]"
 TAG_5M  = "[5M]"
@@ -215,6 +216,11 @@ def run_15m():
     now_str = datetime.now(config.KST).strftime("%Y-%m-%d %H:%M")
     log(f"\n{'='*56}")
     log(f"{TAG_15M} 전략 실행 — {now_str}")
+
+    try:
+        run_agent_cycle(log_fn=log)
+    except Exception as exc:
+        log(f"{TAG_15M} agent cycle error: {exc}")
 
     # 15분봉 추세 업데이트
     new_regime = market_regime.check_15m()

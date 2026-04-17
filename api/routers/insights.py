@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from src.agents.state import STATE_FILE, load_json_artifact, load_state
 
 router = APIRouter(prefix="/insights", tags=["insights"])
+agent_router = APIRouter(prefix="/agents", tags=["agents"])
 
 @router.get("/")
 def get_insights():
@@ -19,8 +20,7 @@ def get_insights():
             "fallback_reason": f"missing dependency: {exc.name}",
         }
 
-@router.get("/agents/status")
-def get_agents_status():
+def _build_agents_status():
     state = load_state()
     coin_signals = load_json_artifact(state["artifacts"]["coin_signal_file"], default={"signal_count": 0})
     stock_signals = load_json_artifact(state["artifacts"]["stock_signal_file"], default={"signal_count": 0})
@@ -44,6 +44,16 @@ def get_agents_status():
         },
         "state_file": str(STATE_FILE),
     }
+
+
+@router.get("/agents/status")
+def get_agents_status():
+    return _build_agents_status()
+
+
+@agent_router.get("/status")
+def get_agents_status_alias():
+    return _build_agents_status()
 
 @router.get("/debug")
 def debug():
