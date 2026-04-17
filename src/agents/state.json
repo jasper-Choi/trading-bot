@@ -1,0 +1,93 @@
+{
+  "version": 1,
+  "updated_at": null,
+  "strategy": {
+    "direction": "NEUTRAL",
+    "insight_score": null,
+    "market_regime": null,
+    "risk_budget": null,
+    "notes": [],
+    "last_decision_at": null
+  },
+  "parameters": {
+    "applied_at": null,
+    "coin": {
+      "K": null,
+      "ATR_STOP_MULT": null,
+      "ATR_TRAIL_MULT": null,
+      "RSI_PERIOD": null,
+      "RSI_OVERSOLD": null
+    },
+    "stock": {
+      "gap_min_pct": null,
+      "top_n": null
+    }
+  },
+  "risk": {
+    "allow_new_entries": true,
+    "daily_loss_limit_pct": null,
+    "current_daily_pnl": null,
+    "drawdown_pct": null,
+    "position_scale": 1.0,
+    "warnings": [],
+    "last_checked_at": null
+  },
+  "agents": {
+    "ceo_agent": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "strategy_agent": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "coin_data_agent": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "stock_data_agent": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "coin_signal_agent": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "stock_signal_agent": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "risk_agent": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "coin_executor": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "stock_executor": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    },
+    "notifier": {
+      "status": "idle",
+      "last_run_at": null,
+      "summary": {}
+    }
+  },
+  "artifacts": {
+    "coin_cache_file": "src/agents/cache/coin_data.json",
+    "stock_cache_file": "src/agents/cache/stock_data.json",
+    "coin_signal_file": "src/agents/signals/coin_signals.json",
+    "stock_signal_file": "src/agents/signals/stock_signals.json"
+  }
+}
