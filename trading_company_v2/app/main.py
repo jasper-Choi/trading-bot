@@ -213,8 +213,8 @@ def root() -> str:
         <ul id="session-state"></ul>
       </article>
       <article class="card">
-        <h2>Strategy Book</h2>
-        <ul id="strategy-book"></ul>
+        <h2>Trader Principles</h2>
+        <ul id="principles"></ul>
       </article>
     </section>
     <section class="grid" style="margin-top:14px;">
@@ -233,6 +233,12 @@ def root() -> str:
     </section>
     <section class="grid" style="margin-top:14px;">
       <article class="card">
+        <h2>Strategy Book</h2>
+        <ul id="strategy-book"></ul>
+      </article>
+    </section>
+    <section class="grid" style="margin-top:14px;">
+      <article class="card">
         <h2>Paper Blotter</h2>
         <ul id="paper-blotter"></ul>
       </article>
@@ -241,8 +247,8 @@ def root() -> str:
         <ul id="cycle-journal"></ul>
       </article>
       <article class="card">
-        <h2>Daily Summary</h2>
-        <ul id="daily-summary"></ul>
+        <h2>Daily Desk Count</h2>
+        <ul id="daily-desk-count"></ul>
       </article>
     </section>
     <section class="card" style="margin-top:14px;">
@@ -286,6 +292,7 @@ def root() -> str:
         `<li><strong>est_pnl_pct</strong>: ${{state.daily_summary.estimated_pnl_pct || 0}}</li>`,
         `<li><strong>active_desks</strong>: ${{(state.daily_summary.active_desks || []).join(', ') || 'n/a'}}</li>`
       ].join('');
+      document.getElementById('daily-desk-count').innerHTML = (state.daily_summary.active_desks || []).map(item => `<li>${{item}}</li>`).join('') || '<li>No active desks yet</li>';
       document.getElementById('agents').innerHTML = (state.agent_runs || []).map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
     }}
     async function runCycle() {{
