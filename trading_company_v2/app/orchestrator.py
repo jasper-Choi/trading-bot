@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+from app.agents.chief_market_officer import CIOAgent
+from app.agents.execution_agent import ExecutionAgent
+from app.agents.macro_sentiment_agent import MacroSentimentAgent
+from app.agents.ops_agent import OpsAgent
+from app.agents.risk_committee_agent import RiskCommitteeAgent
+from app.agents.trend_structure_agent import TrendStructureAgent
+from app.config import settings
+from app.core.models import AgentResult, AgentSnapshot, CompanyState
+from app.core.state_store import load_company_state, save_company_state
+
+
+class CompanyOrchestrator:
+    def __init__(self):
+        self.agents = [
+            MacroSentimentAgent(),
+            TrendStructureAgent(),
+            CIOAgent(),
+            RiskCommitteeAgent(),
+            ExecutionAgent(),
+            OpsAgent(),
+        ]
+
+    @staticmethod
+    def _determine_stance(macro_score: float, trend_score: float) -> str:
+        combined = (macro_score + trend_score) / 2
+        if combined >= 0.66:
+            return "OFFENSE"
+        if combined <= 0.42:
+            return "DEFENSE"
+        return "BALANCED"
+
+    @staticmethod
+    def _determine_regime(macro_score: float, trend_score: float) -> str:
+        if macro_score <= 0.35:
+            return "STRESSED"
+        if abs(trend_score - 0.5) <= 0.08:
+            return "RANGING"
+        return "TRENDING"
+
+    def run_cycle(self) -> dict:
+        results: list[AgentResult] = [agent.safe_run() for agent in self.agents]
+        state = load_company_state()
+
+        macro_result = next((r for r in results if r.name == "macro_sentiment_agent"), AgentResult(name="macro_sentiment_agent", reason="missing"))
+        trend_result = next((r for r in results if r.name == "trend_structure_agent"), AgentResult(name="trend_structure_agent", reason="missing"))
+        state.stance = self._determine_stance(macro_result.score, trend_result.score)
+        state.regime = self._determine_regime(macro_result.score, trend_result.score)
+        state.risk_budget = 0.5 if state.stance == "BALANCED" else 0.7 if state.stance == "OFFENSE" else 0.3
+        state.execution_mode = "paper"
+        state.notes = [
+            f"{settings.company_name} operating on {settings.operator_name}'s personal-PC-first stack",
+            "paper trading only",
+            "portable to personal PC",
+        ]
+        state.trader_principles = [
+            "Paul Tudor Jones: defense first",
+            "Stan Druckenmiller: size with conviction",
+            "Linda Raschke: price confirms",
+            "Ed Seykota: systems and risk over prediction",
+        ]
+        state.latest_signals = [
+            f"macro_bias={macro_result.payload.get('macro_bias', 'unknown')}",
+            f"trend_bias={trend_result.payload.get('trend_bias', 'unknown')}",
+            f"regime={state.regime.lower()}",
+        ]
+        state.agent_runs = [
+            AgentSnapshot(
+                name=result.name,
+                score=result.score,
+                reason=result.reason,
+                payload=result.payload,
+                generated_at=result.generated_at,
+            )
+            for result in results
+        ]
+
+        risk_agent = RiskCommitteeAgent()
+        state = risk_agent.apply(state)
+        save_company_state(state)
+
+        return {
+            "state": state.model_dump(),
+            "results": [result.model_dump() for result in results],
+        }
