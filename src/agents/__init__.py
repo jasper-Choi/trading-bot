@@ -3,6 +3,7 @@
 from .base import TradingAgent
 from .ceo_agent import CEOAgent
 from .coin_data_agent import CoinDataAgent
+from .coin_executor import CoinExecutor
 from .coin_signal_agent import CoinSignalAgent
 from .risk_agent import RiskAgent
 from .state import (
@@ -18,6 +19,7 @@ from .state import (
     write_json_artifact,
 )
 from .stock_data_agent import StockDataAgent
+from .stock_executor import StockExecutor
 from .stock_signal_agent import StockSignalAgent
 from .strategy_agent import StrategyAgent
 
@@ -26,11 +28,13 @@ __all__ = [
     "CACHE_DIR",
     "CEOAgent",
     "CoinDataAgent",
+    "CoinExecutor",
     "CoinSignalAgent",
     "RiskAgent",
     "SIGNALS_DIR",
     "STATE_FILE",
     "StockDataAgent",
+    "StockExecutor",
     "StockSignalAgent",
     "StrategyAgent",
     "TradingAgent",
