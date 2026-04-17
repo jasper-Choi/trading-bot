@@ -2,10 +2,30 @@
 // Railway 諛고룷: VITE_API_BASE_URL 誘몄꽕?????곷?寃쎈줈 /api/... (媛숈? ?꾨찓??
 const BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
+const RETRY_DELAYS_MS = [0, 400, 1200]
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, options)
-  if (!res.ok) throw new Error(`HTTP ${res.status} ??${path}`)
-  return res.json()
+  let lastError
+
+  for (const delay of RETRY_DELAYS_MS) {
+    if (delay > 0) await sleep(delay)
+    try {
+      const res = await fetch(`${BASE}${path}`, {
+        cache: 'no-store',
+        ...options,
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status} @ ${path}`)
+      return await res.json()
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError
 }
 
 export const api = {
