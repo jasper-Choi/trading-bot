@@ -26,6 +26,8 @@ class StateRecord(Base):
     notes: Mapped[list] = mapped_column(JSON, default=list)
     trader_principles: Mapped[list] = mapped_column(JSON, default=list)
     latest_signals: Mapped[list] = mapped_column(JSON, default=list)
+    market_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    desk_views: Mapped[dict] = mapped_column(JSON, default=dict)
     agent_runs: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[str] = mapped_column(String(40), default="")
 
@@ -66,6 +68,8 @@ def load_company_state() -> CompanyState:
                 notes=rec.notes or [],
                 trader_principles=rec.trader_principles or [],
                 latest_signals=rec.latest_signals or [],
+                market_snapshot=rec.market_snapshot or {},
+                desk_views=rec.desk_views or {},
                 agent_runs=[AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
                 updated_at=rec.updated_at or utcnow_iso(),
             )
@@ -89,6 +93,8 @@ def save_company_state(state: CompanyState) -> CompanyState:
         rec.notes = state.notes
         rec.trader_principles = state.trader_principles
         rec.latest_signals = state.latest_signals
+        rec.market_snapshot = state.market_snapshot
+        rec.desk_views = state.desk_views
         rec.agent_runs = [item.model_dump() for item in state.agent_runs]
         rec.updated_at = utcnow_iso()
         state.updated_at = rec.updated_at

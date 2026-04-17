@@ -34,6 +34,7 @@ class Settings:
     app_env: str = os.environ.get("APP_ENV", "local")
     host: str = os.environ.get("APP_HOST", "127.0.0.1")
     port: int = int(os.environ.get("APP_PORT", "8080"))
+    cycle_interval_minutes: int = int(os.environ.get("CYCLE_INTERVAL_MINUTES", "15"))
     timezone: str = os.environ.get("APP_TIMEZONE", "Asia/Seoul")
     db_path: Path = Path(os.environ.get("APP_DB_PATH", str(DATA_DIR / "trading_company_v2.db")))
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")

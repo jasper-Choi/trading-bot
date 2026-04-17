@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from app.agents.chief_market_officer import CIOAgent
+from app.agents.crypto_desk_agent import CryptoDeskAgent
 from app.agents.execution_agent import ExecutionAgent
+from app.agents.korea_stock_desk_agent import KoreaStockDeskAgent
 from app.agents.macro_sentiment_agent import MacroSentimentAgent
+from app.agents.market_data_agent import MarketDataAgent
 from app.agents.ops_agent import OpsAgent
 from app.agents.risk_committee_agent import RiskCommitteeAgent
 from app.agents.trend_structure_agent import TrendStructureAgent
@@ -14,8 +17,11 @@ from app.core.state_store import load_company_state, save_company_state
 class CompanyOrchestrator:
     def __init__(self):
         self.agents = [
+            MarketDataAgent(),
             MacroSentimentAgent(),
             TrendStructureAgent(),
+            CryptoDeskAgent(),
+            KoreaStockDeskAgent(),
             CIOAgent(),
             RiskCommitteeAgent(),
             ExecutionAgent(),
@@ -45,6 +51,9 @@ class CompanyOrchestrator:
 
         macro_result = next((r for r in results if r.name == "macro_sentiment_agent"), AgentResult(name="macro_sentiment_agent", reason="missing"))
         trend_result = next((r for r in results if r.name == "trend_structure_agent"), AgentResult(name="trend_structure_agent", reason="missing"))
+        market_data_result = next((r for r in results if r.name == "market_data_agent"), AgentResult(name="market_data_agent", reason="missing"))
+        crypto_desk_result = next((r for r in results if r.name == "crypto_desk_agent"), AgentResult(name="crypto_desk_agent", reason="missing"))
+        stock_desk_result = next((r for r in results if r.name == "korea_stock_desk_agent"), AgentResult(name="korea_stock_desk_agent", reason="missing"))
         state.stance = self._determine_stance(macro_result.score, trend_result.score)
         state.regime = self._determine_regime(macro_result.score, trend_result.score)
         state.risk_budget = 0.5 if state.stance == "BALANCED" else 0.7 if state.stance == "OFFENSE" else 0.3
@@ -64,7 +73,19 @@ class CompanyOrchestrator:
             f"macro_bias={macro_result.payload.get('macro_bias', 'unknown')}",
             f"trend_bias={trend_result.payload.get('trend_bias', 'unknown')}",
             f"regime={state.regime.lower()}",
+            f"crypto_desk={crypto_desk_result.payload.get('desk_bias', 'unknown')}",
+            f"korea_gap_candidates={stock_desk_result.payload.get('active_gap_count', 0)}",
         ]
+        state.market_snapshot = {
+            "as_of": market_data_result.payload.get("as_of"),
+            "crypto_leaders": market_data_result.payload.get("crypto_leaders", []),
+            "stock_leaders": market_data_result.payload.get("stock_leaders", []),
+            "gap_candidates": market_data_result.payload.get("gap_candidates", []),
+        }
+        state.desk_views = {
+            "crypto_desk": crypto_desk_result.payload,
+            "korea_stock_desk": stock_desk_result.payload,
+        }
         state.agent_runs = [
             AgentSnapshot(
                 name=result.name,

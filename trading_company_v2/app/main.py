@@ -147,6 +147,20 @@ def root() -> str:
         <ul id="principles"></ul>
       </article>
     </section>
+    <section class="grid" style="margin-top:14px;">
+      <article class="card">
+        <h2>Crypto Leaders</h2>
+        <ul id="crypto-leaders"></ul>
+      </article>
+      <article class="card">
+        <h2>KOSDAQ Leaders</h2>
+        <ul id="stock-leaders"></ul>
+      </article>
+      <article class="card">
+        <h2>Desk Views</h2>
+        <ul id="desks"></ul>
+      </article>
+    </section>
     <section class="card" style="margin-top:14px;">
       <h2>Agent Desk</h2>
       <ul id="agents"></ul>
@@ -162,6 +176,9 @@ def root() -> str:
       document.getElementById('updated-line').textContent = `Updated: ${{state.updated_at}}`;
       document.getElementById('signals').innerHTML = state.latest_signals.map(item => `<li>${{item}}</li>`).join('') || '<li>No signals yet</li>';
       document.getElementById('principles').innerHTML = state.trader_principles.map(item => `<li>${{item}}</li>`).join('');
+      document.getElementById('crypto-leaders').innerHTML = (state.market_snapshot.crypto_leaders || []).slice(0, 5).map(item => `<li>${{item.market}} / ${{item.change_rate}}% / ₩${{Number(item.trade_price).toLocaleString()}}</li>`).join('') || '<li>No crypto snapshot yet</li>';
+      document.getElementById('stock-leaders').innerHTML = (state.market_snapshot.gap_candidates || state.market_snapshot.stock_leaders || []).slice(0, 5).map(item => `<li>${{item.name || item.ticker}} / gap ${{item.gap_pct}}% / vol ${{Number(item.volume || 0).toLocaleString()}}</li>`).join('') || '<li>No KOSDAQ snapshot yet</li>';
+      document.getElementById('desks').innerHTML = Object.entries(state.desk_views || {{}}).map(([name, payload]) => `<li><strong>${{name}}</strong>: ${{JSON.stringify(payload)}}</li>`).join('') || '<li>No desk output yet</li>';
       document.getElementById('agents').innerHTML = state.agent_runs.map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
     }}
     async function runCycle() {{

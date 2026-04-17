@@ -32,6 +32,12 @@ Personal-PC-first auto trading bot stack.
   - Tracks market trend, relative strength, range expansion
 - `RiskCommitteeAgent`
   - Enforces loss limits, exposure caps, block rules
+- `MarketDataAgent`
+  - Pulls free public crypto and KOSDAQ market snapshots
+- `CryptoDeskAgent`
+  - Reads BTC-led crypto structure for the global desk
+- `KoreaStockDeskAgent`
+  - Ranks domestic gap/liquidity leaders for the Korea desk
 - `ExecutionAgent`
   - Simulated execution only in this phase
 - `OpsAgent`
@@ -57,6 +63,11 @@ See [docs/trader_principles.md](./docs/trader_principles.md).
 3. Create `.env` from `.env.example`
 4. Install dependencies
 5. Run `python -m app.main`
+
+For the always-on bot loop on your home PC:
+
+- Dashboard/API: `run_local.bat`
+- 15-minute company loop: `run_company_loop.bat`
 
 Detailed instructions are in [docs/personal_pc_setup.md](./docs/personal_pc_setup.md).
 

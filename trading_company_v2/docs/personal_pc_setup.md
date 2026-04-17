@@ -41,6 +41,22 @@ Open http://127.0.0.1:8080 and press "Run One Cycle"
 
 That writes the first company state into SQLite and confirms the agent chain is working.
 
+## Continuous Local Bot Loop
+
+If you want the company cycle to keep running every 15 minutes on your home PC:
+
+```powershell
+python -m app.runtime
+```
+
+Or just use:
+
+```text
+run_company_loop.bat
+```
+
+You can change the interval with `CYCLE_INTERVAL_MINUTES` in `.env`.
+
 ## Mobile Access Later
 
 - Free recommended path: Tailscale
@@ -60,3 +76,4 @@ That writes the first company state into SQLite and confirms the agent chain is 
 - Keep this in paper trading mode until at least two weeks of clean observation
 - Run it on a dedicated folder, not inside cloud-synced desktop folders
 - Add Windows Task Scheduler later if you want auto-start on boot
+- Keep `run_local.bat` and `run_company_loop.bat` as separate windows in phase 1
