@@ -12,6 +12,7 @@ from app.agents.trend_structure_agent import TrendStructureAgent
 from app.config import settings
 from app.core.models import AgentResult, AgentSnapshot, CompanyState
 from app.core.state_store import load_company_state, save_company_state
+from app.notifier import notifier
 
 
 class CompanyOrchestrator:
@@ -46,8 +47,9 @@ class CompanyOrchestrator:
         return "TRENDING"
 
     def run_cycle(self) -> dict:
-        results: list[AgentResult] = [agent.safe_run() for agent in self.agents]
         state = load_company_state()
+        previous_state = state.model_dump()
+        results: list[AgentResult] = [agent.safe_run() for agent in self.agents]
 
         macro_result = next((r for r in results if r.name == "macro_sentiment_agent"), AgentResult(name="macro_sentiment_agent", reason="missing"))
         trend_result = next((r for r in results if r.name == "trend_structure_agent"), AgentResult(name="trend_structure_agent", reason="missing"))
@@ -100,6 +102,7 @@ class CompanyOrchestrator:
         risk_agent = RiskCommitteeAgent()
         state = risk_agent.apply(state)
         save_company_state(state)
+        notifier.send_cycle_summary(previous_state=previous_state, current_state=state.model_dump())
 
         return {
             "state": state.model_dump(),

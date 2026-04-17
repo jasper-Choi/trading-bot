@@ -16,6 +16,7 @@ class OpsAgent(BaseAgent):
             reason="ops agent online for home PC runtime and mobile check-ins",
             payload={
                 "telegram_configured": bool(settings.telegram_bot_token and settings.telegram_chat_id),
+                "notify_every_cycle": settings.telegram_notify_every_cycle,
                 "operator": settings.operator_name,
             },
         )

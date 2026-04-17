@@ -57,6 +57,19 @@ run_company_loop.bat
 
 You can change the interval with `CYCLE_INTERVAL_MINUTES` in `.env`.
 
+## Telegram Alerts
+
+1. Create a Telegram bot with BotFather
+2. Put `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` into `.env`
+3. Keep `TELEGRAM_NOTIFY_EVERY_CYCLE=false` at first
+
+Default alert policy:
+
+- Send when stance changes
+- Send when regime changes
+- Send when new entries become blocked/unblocked
+- Send on runtime errors
+
 ## Mobile Access Later
 
 - Free recommended path: Tailscale
@@ -77,3 +90,16 @@ You can change the interval with `CYCLE_INTERVAL_MINUTES` in `.env`.
 - Run it on a dedicated folder, not inside cloud-synced desktop folders
 - Add Windows Task Scheduler later if you want auto-start on boot
 - Keep `run_local.bat` and `run_company_loop.bat` as separate windows in phase 1
+
+## Windows Auto-Start
+
+After you confirm the bot runs cleanly by hand:
+
+```text
+register_windows_tasks.bat
+```
+
+That registers two Windows startup tasks:
+
+- dashboard app
+- 15-minute company loop

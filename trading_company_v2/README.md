@@ -83,3 +83,10 @@ Detailed instructions are in [docs/personal_pc_setup.md](./docs/personal_pc_setu
   - Dashboard JSON payload
 - `POST /cycle`
   - Run one end-to-end decision cycle
+
+## Telegram And Startup
+
+- Set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` in `.env` for alerts
+- Default behavior: notify only on stance/regime/risk changes or runtime errors
+- Set `TELEGRAM_NOTIFY_EVERY_CYCLE=true` if you want every loop reported
+- On Windows, `register_windows_tasks.bat` creates logon startup tasks for dashboard and loop

@@ -41,6 +41,7 @@ class Settings:
     huggingface_api_key: str = os.environ.get("HUGGINGFACE_API_KEY", "")
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
+    telegram_notify_every_cycle: bool = os.environ.get("TELEGRAM_NOTIFY_EVERY_CYCLE", "false").lower() == "true"
     operator_name: str = os.environ.get("OPERATOR_NAME", "Owner")
 
 

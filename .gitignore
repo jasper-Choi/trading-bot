@@ -23,6 +23,9 @@ data/trading.db
 # Windows automation scripts (local only)
 *.bat
 *.vbs
+!trading_company_v2/run_local.bat
+!trading_company_v2/run_company_loop.bat
+!trading_company_v2/register_windows_tasks.bat
 
 # IDE
 .vscode/

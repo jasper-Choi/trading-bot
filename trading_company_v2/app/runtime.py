@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 
 from app.config import settings
+from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 
 
@@ -23,9 +24,9 @@ def run_company_loop() -> None:
             )
         except Exception as exc:
             print(f"[runtime] {started_at} cycle failed: {exc}")
+            notifier.send_error(f"{started_at} cycle failed: {exc}")
         time.sleep(interval_seconds)
 
 
 if __name__ == "__main__":
     run_company_loop()
-
