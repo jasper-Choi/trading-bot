@@ -11,8 +11,8 @@ from app.agents.risk_committee_agent import RiskCommitteeAgent
 from app.agents.strategy_allocator_agent import StrategyAllocatorAgent
 from app.agents.trend_structure_agent import TrendStructureAgent
 from app.config import settings
-from app.core.models import AgentResult, AgentSnapshot, CompanyState
-from app.core.state_store import load_company_state, save_company_state
+from app.core.models import AgentResult, AgentSnapshot, CompanyState, CycleJournalEntry, PaperOrder
+from app.core.state_store import load_company_state, save_company_state, save_cycle_journal, save_paper_orders
 from app.notifier import notifier
 from app.services.recommendation_engine import build_crypto_plan, build_korea_plan
 
@@ -60,6 +60,7 @@ class CompanyOrchestrator:
         strategy_allocator_result = next((r for r in results if r.name == "strategy_allocator_agent"), AgentResult(name="strategy_allocator_agent", reason="missing"))
         crypto_desk_result = next((r for r in results if r.name == "crypto_desk_agent"), AgentResult(name="crypto_desk_agent", reason="missing"))
         stock_desk_result = next((r for r in results if r.name == "korea_stock_desk_agent"), AgentResult(name="korea_stock_desk_agent", reason="missing"))
+        execution_result = next((r for r in results if r.name == "execution_agent"), AgentResult(name="execution_agent", reason="missing"))
         state.stance = self._determine_stance(macro_result.score, trend_result.score)
         state.regime = self._determine_regime(macro_result.score, trend_result.score)
         state.risk_budget = 0.5 if state.stance == "BALANCED" else 0.7 if state.stance == "OFFENSE" else 0.3
@@ -105,6 +106,20 @@ class CompanyOrchestrator:
                 strategy_allocator_result.payload.get("session", {}),
             ),
         }
+        paper_orders = [PaperOrder.model_validate(item) for item in execution_result.payload.get("orders", [])]
+        save_paper_orders(paper_orders)
+        save_cycle_journal(
+            CycleJournalEntry(
+                stance=state.stance,
+                regime=state.regime,
+                company_focus=state.strategy_book.get("company_focus", ""),
+                summary=state.latest_signals[:5],
+                orders=paper_orders,
+            )
+        )
+        refreshed_state = load_company_state()
+        state.execution_log = refreshed_state.execution_log
+        state.recent_journal = refreshed_state.recent_journal
         state.agent_runs = [
             AgentSnapshot(
                 name=result.name,

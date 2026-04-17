@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import JSON, Boolean, Float, String, create_engine
+from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.config import settings
-from app.core.models import AgentSnapshot, CompanyState, utcnow_iso
+from app.core.models import AgentSnapshot, CompanyState, CycleJournalEntry, PaperOrder, utcnow_iso
 
 
 class Base(DeclarativeBase):
@@ -32,6 +32,30 @@ class StateRecord(Base):
     strategy_book: Mapped[dict] = mapped_column(JSON, default=dict)
     agent_runs: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class PaperOrderRecord(Base):
+    __tablename__ = "paper_orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    desk: Mapped[str] = mapped_column(String(50), default="")
+    action: Mapped[str] = mapped_column(String(50), default="")
+    focus: Mapped[str] = mapped_column(String(200), default="")
+    size: Mapped[str] = mapped_column(String(20), default="")
+    rationale: Mapped[list] = mapped_column(JSON, default=list)
+
+
+class CycleJournalRecord(Base):
+    __tablename__ = "cycle_journal"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_at: Mapped[str] = mapped_column(String(40), default="")
+    stance: Mapped[str] = mapped_column(String(20), default="")
+    regime: Mapped[str] = mapped_column(String(20), default="")
+    company_focus: Mapped[str] = mapped_column(String(200), default="")
+    summary: Mapped[list] = mapped_column(JSON, default=list)
+    orders: Mapped[list] = mapped_column(JSON, default=list)
 
 
 db_path = Path(settings.db_path)
@@ -74,6 +98,8 @@ def load_company_state() -> CompanyState:
                 session_state=rec.session_state or {},
                 desk_views=rec.desk_views or {},
                 strategy_book=rec.strategy_book or {},
+                execution_log=load_recent_orders(limit=10),
+                recent_journal=load_recent_journal(limit=8),
                 agent_runs=[AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
                 updated_at=rec.updated_at or utcnow_iso(),
             )
@@ -106,3 +132,80 @@ def save_company_state(state: CompanyState) -> CompanyState:
         state.updated_at = rec.updated_at
         db.commit()
     return state
+
+
+def save_paper_orders(orders: list[PaperOrder]) -> None:
+    if not orders:
+        return
+    init_db()
+    with SessionLocal() as db:
+        for order in orders:
+            db.add(
+                PaperOrderRecord(
+                    created_at=order.created_at,
+                    desk=order.desk,
+                    action=order.action,
+                    focus=order.focus,
+                    size=order.size,
+                    rationale=order.rationale,
+                )
+            )
+        db.commit()
+
+
+def save_cycle_journal(entry: CycleJournalEntry) -> None:
+    init_db()
+    with SessionLocal() as db:
+        db.add(
+            CycleJournalRecord(
+                run_at=entry.run_at,
+                stance=entry.stance,
+                regime=entry.regime,
+                company_focus=entry.company_focus,
+                summary=entry.summary,
+                orders=[order.model_dump() for order in entry.orders],
+            )
+        )
+        db.commit()
+
+
+def load_recent_orders(limit: int = 10) -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(select(PaperOrderRecord).order_by(PaperOrderRecord.id.desc()).limit(limit)).scalars().all()
+            return [
+                {
+                    "created_at": row.created_at,
+                    "desk": row.desk,
+                    "action": row.action,
+                    "focus": row.focus,
+                    "size": row.size,
+                    "rationale": row.rationale or [],
+                }
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_recent_journal(limit: int = 8) -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(select(CycleJournalRecord).order_by(CycleJournalRecord.id.desc()).limit(limit)).scalars().all()
+            return [
+                {
+                    "run_at": row.run_at,
+                    "stance": row.stance,
+                    "regime": row.regime,
+                    "company_focus": row.company_focus,
+                    "summary": row.summary or [],
+                    "orders": row.orders or [],
+                }
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []

@@ -30,6 +30,24 @@ class AgentSnapshot(BaseModel):
     generated_at: str = Field(default_factory=utcnow_iso)
 
 
+class PaperOrder(BaseModel):
+    desk: str
+    action: str
+    focus: str
+    size: str
+    rationale: list[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=utcnow_iso)
+
+
+class CycleJournalEntry(BaseModel):
+    run_at: str = Field(default_factory=utcnow_iso)
+    stance: str
+    regime: str
+    company_focus: str = ""
+    summary: list[str] = Field(default_factory=list)
+    orders: list[PaperOrder] = Field(default_factory=list)
+
+
 class CompanyState(BaseModel):
     stance: MarketStance = "BALANCED"
     regime: MarketRegime = "RANGING"
@@ -43,5 +61,7 @@ class CompanyState(BaseModel):
     session_state: dict = Field(default_factory=dict)
     desk_views: dict = Field(default_factory=dict)
     strategy_book: dict = Field(default_factory=dict)
+    execution_log: list[dict] = Field(default_factory=list)
+    recent_journal: list[dict] = Field(default_factory=list)
     agent_runs: list[AgentSnapshot] = Field(default_factory=list)
     updated_at: str = Field(default_factory=utcnow_iso)

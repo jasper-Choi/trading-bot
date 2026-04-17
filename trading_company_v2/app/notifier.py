@@ -50,6 +50,10 @@ class TelegramNotifier:
             f"new entries: {'ON' if current_state.get('allow_new_entries') else 'BLOCKED'}",
             f"signals: {', '.join(current_state.get('latest_signals', [])[:4])}",
         ]
+        execution_log = current_state.get("execution_log", [])
+        if execution_log:
+            latest = execution_log[0]
+            lines.append(f"latest paper order: {latest.get('desk')} / {latest.get('action')} / {latest.get('size')}")
         return self.send("\n".join(lines))
 
     def send_error(self, message: str) -> bool:
@@ -62,4 +66,3 @@ notifier = TelegramNotifier(
     token=settings.telegram_bot_token,
     chat_id=settings.telegram_chat_id,
 )
-

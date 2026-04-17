@@ -173,6 +173,16 @@ def root() -> str:
         <ul id="desk-plans"></ul>
       </article>
     </section>
+    <section class="grid" style="margin-top:14px;">
+      <article class="card">
+        <h2>Paper Blotter</h2>
+        <ul id="paper-blotter"></ul>
+      </article>
+      <article class="card">
+        <h2>Cycle Journal</h2>
+        <ul id="cycle-journal"></ul>
+      </article>
+    </section>
     <section class="card" style="margin-top:14px;">
       <h2>Agent Desk</h2>
       <ul id="agents"></ul>
@@ -200,6 +210,8 @@ def root() -> str:
         `<li><strong>crypto</strong>: ${{state.strategy_book.crypto_plan ? state.strategy_book.crypto_plan.action + ' / ' + state.strategy_book.crypto_plan.size + ' / ' + state.strategy_book.crypto_plan.focus : 'n/a'}}</li>`,
         `<li><strong>korea</strong>: ${{state.strategy_book.korea_plan ? state.strategy_book.korea_plan.action + ' / ' + state.strategy_book.korea_plan.size + ' / ' + state.strategy_book.korea_plan.focus : 'n/a'}}</li>`
       ].join('');
+      document.getElementById('paper-blotter').innerHTML = (state.execution_log || []).slice(0, 6).map(item => `<li>${{item.created_at}} / ${{item.desk}} / ${{item.action}} / ${{item.size}} / ${{item.focus}}</li>`).join('') || '<li>No paper orders yet</li>';
+      document.getElementById('cycle-journal').innerHTML = (state.recent_journal || []).slice(0, 5).map(item => `<li>${{item.run_at}} / ${{item.stance}} / ${{item.regime}} / ${{item.company_focus}}</li>`).join('') || '<li>No journal yet</li>';
       document.getElementById('agents').innerHTML = (state.agent_runs || []).map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
     }}
     async function runCycle() {{
