@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
+from app.services.backtest_advisor import get_crypto_weights
 from app.services.session_clock import current_session_snapshot
 
 
@@ -11,11 +12,13 @@ class StrategyAllocatorAgent(BaseAgent):
 
     def run(self) -> AgentResult:
         session = current_session_snapshot()
+        weights = get_crypto_weights()
+        top_symbol = next(iter(weights), "KRW-BTC")
         priorities: list[str] = []
         if session["korea_open"]:
             priorities.append("KOSDAQ opening drive and liquidity leaders")
         if session["crypto_focus"]:
-            priorities.append("BTC-led crypto continuation and risk rotation")
+            priorities.append(f"{top_symbol}-led crypto continuation and risk rotation")
         if session["us_premarket"] or session["us_regular"]:
             priorities.append("U.S. macro spillover and overnight sentiment check")
         if not priorities:
@@ -29,6 +32,7 @@ class StrategyAllocatorAgent(BaseAgent):
                 "session": session,
                 "desk_priorities": priorities,
                 "company_focus": priorities[0],
+                "crypto_weights": weights,
             },
         )
 

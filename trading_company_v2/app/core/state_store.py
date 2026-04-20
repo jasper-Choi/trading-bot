@@ -7,7 +7,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.config import settings
-from app.core.models import AgentSnapshot, CompanyState, CycleJournalEntry, PaperOrder, utcnow_iso
+from app.core.models import AgentSnapshot, ClosedPosition, CompanyState, CycleJournalEntry, PaperOrder, Position, utcnow_iso
 
 
 class Base(DeclarativeBase):
@@ -58,6 +58,35 @@ class CycleJournalRecord(Base):
     orders: Mapped[list] = mapped_column(JSON, default=list)
 
 
+class PositionRecord(Base):
+    __tablename__ = "positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    desk: Mapped[str] = mapped_column(String(50), default="")
+    symbol: Mapped[str] = mapped_column(String(100), default="")
+    entry_price: Mapped[float] = mapped_column(Float, default=0.0)
+    current_price: Mapped[float] = mapped_column(Float, default=0.0)
+    notional_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    action: Mapped[str] = mapped_column(String(50), default="")
+    unrealized_pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    opened_at: Mapped[str] = mapped_column(String(40), default="")
+
+
+class ClosedPositionRecord(Base):
+    __tablename__ = "closed_positions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    desk: Mapped[str] = mapped_column(String(50), default="")
+    symbol: Mapped[str] = mapped_column(String(100), default="")
+    entry_price: Mapped[float] = mapped_column(Float, default=0.0)
+    exit_price: Mapped[float] = mapped_column(Float, default=0.0)
+    notional_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    realized_pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    won: Mapped[bool] = mapped_column(Boolean, default=False)
+    opened_at: Mapped[str] = mapped_column(String(40), default="")
+    closed_at: Mapped[str] = mapped_column(String(40), default="")
+
+
 db_path = Path(settings.db_path)
 db_path.parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
@@ -99,6 +128,7 @@ def load_company_state() -> CompanyState:
                 desk_views=rec.desk_views or {},
                 strategy_book=rec.strategy_book or {},
                 daily_summary=load_daily_summary(),
+                performance_stats=load_performance_quick_stats(),
                 execution_log=load_recent_orders(limit=10),
                 recent_journal=load_recent_journal(limit=8),
                 agent_runs=[AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
@@ -255,3 +285,191 @@ def load_recent_journal(limit: int = 8) -> list[dict]:
     except OperationalError:
         rebuild_db()
         return []
+
+
+# ── Position management ────────────────────────────────────────────────────────
+
+def open_or_skip_position(desk: str, symbol: str, entry_price: float, notional_pct: float, action: str) -> bool:
+    """Open a new position for desk+symbol. Skips if one already exists. Returns True if opened."""
+    init_db()
+    with SessionLocal() as db:
+        existing = db.execute(
+            select(PositionRecord).where(
+                PositionRecord.desk == desk,
+                PositionRecord.symbol == symbol,
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return False
+        db.add(PositionRecord(
+            desk=desk,
+            symbol=symbol,
+            entry_price=entry_price,
+            current_price=entry_price,
+            notional_pct=notional_pct,
+            action=action,
+            unrealized_pnl_pct=0.0,
+            opened_at=utcnow_iso(),
+        ))
+        db.commit()
+        return True
+
+
+def close_positions_for_desk(desk: str, prices: dict[str, float]) -> list[ClosedPosition]:
+    """Close all open positions for a desk at current prices. Records realized P&L."""
+    init_db()
+    closed: list[ClosedPosition] = []
+    with SessionLocal() as db:
+        positions = db.execute(
+            select(PositionRecord).where(PositionRecord.desk == desk)
+        ).scalars().all()
+        for pos in positions:
+            exit_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
+            realized_pnl_pct = (
+                round(((exit_price - pos.entry_price) / pos.entry_price) * 100, 4)
+                if pos.entry_price > 0 else 0.0
+            )
+            db.add(ClosedPositionRecord(
+                desk=pos.desk,
+                symbol=pos.symbol,
+                entry_price=pos.entry_price,
+                exit_price=exit_price,
+                notional_pct=pos.notional_pct,
+                realized_pnl_pct=realized_pnl_pct,
+                won=realized_pnl_pct > 0,
+                opened_at=pos.opened_at,
+                closed_at=utcnow_iso(),
+            ))
+            closed.append(ClosedPosition(
+                desk=pos.desk,
+                symbol=pos.symbol,
+                entry_price=pos.entry_price,
+                exit_price=exit_price,
+                notional_pct=pos.notional_pct,
+                realized_pnl_pct=realized_pnl_pct,
+                won=realized_pnl_pct > 0,
+                opened_at=pos.opened_at,
+            ))
+            db.delete(pos)
+        db.commit()
+    return closed
+
+
+def update_positions_unrealized(prices: dict[str, float]) -> None:
+    """Refresh unrealized P&L for all open positions using latest market prices."""
+    if not prices:
+        return
+    init_db()
+    with SessionLocal() as db:
+        positions = db.execute(select(PositionRecord)).scalars().all()
+        for pos in positions:
+            current_price = prices.get(pos.symbol)
+            if current_price and current_price > 0 and pos.entry_price > 0:
+                pos.current_price = current_price
+                pos.unrealized_pnl_pct = round(
+                    ((current_price - pos.entry_price) / pos.entry_price) * 100, 4
+                )
+        db.commit()
+
+
+def load_open_positions() -> list[Position]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(select(PositionRecord)).scalars().all()
+            return [
+                Position(
+                    id=row.id,
+                    desk=row.desk,
+                    symbol=row.symbol,
+                    entry_price=row.entry_price,
+                    current_price=row.current_price,
+                    notional_pct=row.notional_pct,
+                    action=row.action,
+                    unrealized_pnl_pct=row.unrealized_pnl_pct,
+                    opened_at=row.opened_at,
+                )
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_closed_positions(limit: int = 50) -> list[ClosedPosition]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(ClosedPositionRecord)
+                .order_by(ClosedPositionRecord.id.desc())
+                .limit(limit)
+            ).scalars().all()
+            return [
+                ClosedPosition(
+                    id=row.id,
+                    desk=row.desk,
+                    symbol=row.symbol,
+                    entry_price=row.entry_price,
+                    exit_price=row.exit_price,
+                    notional_pct=row.notional_pct,
+                    realized_pnl_pct=row.realized_pnl_pct,
+                    won=row.won,
+                    opened_at=row.opened_at,
+                    closed_at=row.closed_at,
+                )
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_performance_quick_stats() -> dict:
+    """All-time compounded performance stats. Never resets."""
+    init_db()
+    try:
+        with SessionLocal() as db:
+            closed = db.execute(
+                select(ClosedPositionRecord).order_by(ClosedPositionRecord.id)
+            ).scalars().all()
+            open_pos = db.execute(select(PositionRecord)).scalars().all()
+
+        total_trades = len(closed)
+        winning_trades = sum(1 for row in closed if row.won)
+        win_rate_pct = round(winning_trades / total_trades * 100, 1) if total_trades > 0 else 0.0
+
+        equity = 1.0
+        peak = 1.0
+        max_drawdown = 0.0
+        for row in closed:
+            equity *= 1 + row.realized_pnl_pct / 100
+            if equity > peak:
+                peak = equity
+            dd = (equity - peak) / peak * 100
+            if dd < max_drawdown:
+                max_drawdown = dd
+
+        cumulative_realized_pnl_pct = round((equity - 1.0) * 100, 2)
+        total_unrealized_pnl_pct = round(sum(p.unrealized_pnl_pct for p in open_pos), 2)
+
+        return {
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "win_rate_pct": win_rate_pct,
+            "cumulative_realized_pnl_pct": cumulative_realized_pnl_pct,
+            "max_drawdown_pct": round(max_drawdown, 2),
+            "open_positions": len(open_pos),
+            "total_unrealized_pnl_pct": total_unrealized_pnl_pct,
+        }
+    except OperationalError:
+        rebuild_db()
+        return {
+            "total_trades": 0,
+            "winning_trades": 0,
+            "win_rate_pct": 0.0,
+            "cumulative_realized_pnl_pct": 0.0,
+            "max_drawdown_pct": 0.0,
+            "open_positions": 0,
+            "total_unrealized_pnl_pct": 0.0,
+        }

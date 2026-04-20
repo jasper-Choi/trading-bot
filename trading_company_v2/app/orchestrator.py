@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from app.agents.chief_market_officer import CIOAgent
 from app.agents.crypto_desk_agent import CryptoDeskAgent
 from app.agents.execution_agent import ExecutionAgent
@@ -12,9 +14,59 @@ from app.agents.strategy_allocator_agent import StrategyAllocatorAgent
 from app.agents.trend_structure_agent import TrendStructureAgent
 from app.config import settings
 from app.core.models import AgentResult, AgentSnapshot, CompanyState, CycleJournalEntry, PaperOrder
-from app.core.state_store import load_company_state, save_company_state, save_cycle_journal, save_paper_orders
+from app.core.state_store import (
+    close_positions_for_desk,
+    load_company_state,
+    open_or_skip_position,
+    save_company_state,
+    save_cycle_journal,
+    save_paper_orders,
+    update_positions_unrealized,
+)
 from app.notifier import notifier
 from app.services.recommendation_engine import build_crypto_plan, build_korea_plan
+
+_BUY_ACTIONS = {"probe_longs", "attack_opening_drive", "selective_probe"}
+_SELL_ACTIONS = {"reduce_risk", "capital_preservation"}
+
+
+def _extract_prices(market_snapshot: dict) -> dict[str, float]:
+    prices: dict[str, float] = {}
+    for item in market_snapshot.get("crypto_leaders", []):
+        market = item.get("market")
+        price = item.get("trade_price")
+        if market and price:
+            prices[str(market)] = float(price)
+    for item in list(market_snapshot.get("stock_leaders", [])) + list(market_snapshot.get("gap_candidates", [])):
+        ticker = item.get("ticker")
+        price = item.get("current_price")
+        if ticker and price:
+            prices[str(ticker)] = float(price)
+    return prices
+
+
+def _extract_symbol(order: PaperOrder, market_snapshot: dict) -> str:
+    if order.desk == "crypto":
+        match = re.search(r"KRW-[A-Z]+", order.focus)
+        if match:
+            return match.group(0)
+        leaders = market_snapshot.get("crypto_leaders", [])
+        return str(leaders[0]["market"]) if leaders else ""
+    candidates = market_snapshot.get("gap_candidates") or market_snapshot.get("stock_leaders", [])
+    return str(candidates[0].get("ticker", "")) if candidates else ""
+
+
+def _manage_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> None:
+    prices = _extract_prices(market_snapshot)
+    update_positions_unrealized(prices)
+    for order in paper_orders:
+        if order.action in _BUY_ACTIONS:
+            symbol = _extract_symbol(order, market_snapshot)
+            entry_price = prices.get(symbol, 0.0)
+            if symbol and entry_price > 0:
+                open_or_skip_position(order.desk, symbol, entry_price, order.notional_pct, order.action)
+        elif order.action in _SELL_ACTIONS:
+            close_positions_for_desk(order.desk, prices)
 
 
 class CompanyOrchestrator:
@@ -112,6 +164,7 @@ class CompanyOrchestrator:
         results.extend([execution_result, ops_result])
         paper_orders = [PaperOrder.model_validate(item) for item in execution_result.payload.get("orders", [])]
         save_paper_orders(paper_orders)
+        _manage_positions(paper_orders, state.market_snapshot)
         save_cycle_journal(
             CycleJournalEntry(
                 stance=state.stance,

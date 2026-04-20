@@ -51,6 +51,31 @@ class CycleJournalEntry(BaseModel):
     orders: list[PaperOrder] = Field(default_factory=list)
 
 
+class Position(BaseModel):
+    id: int = 0
+    desk: str
+    symbol: str
+    entry_price: float
+    current_price: float = 0.0
+    notional_pct: float = 0.0
+    action: str = ""
+    unrealized_pnl_pct: float = 0.0
+    opened_at: str = Field(default_factory=utcnow_iso)
+
+
+class ClosedPosition(BaseModel):
+    id: int = 0
+    desk: str
+    symbol: str
+    entry_price: float
+    exit_price: float
+    notional_pct: float = 0.0
+    realized_pnl_pct: float = 0.0
+    won: bool = False
+    opened_at: str = ""
+    closed_at: str = Field(default_factory=utcnow_iso)
+
+
 class CompanyState(BaseModel):
     stance: MarketStance = "BALANCED"
     regime: MarketRegime = "RANGING"
@@ -65,6 +90,7 @@ class CompanyState(BaseModel):
     desk_views: dict = Field(default_factory=dict)
     strategy_book: dict = Field(default_factory=dict)
     daily_summary: dict = Field(default_factory=dict)
+    performance_stats: dict = Field(default_factory=dict)
     execution_log: list[dict] = Field(default_factory=list)
     recent_journal: list[dict] = Field(default_factory=list)
     agent_runs: list[AgentSnapshot] = Field(default_factory=list)

@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 from app.config import settings
-from app.core.state_store import init_db, load_company_state
+from app.core.state_store import init_db, load_closed_positions, load_company_state, load_open_positions, load_performance_quick_stats
 from app.orchestrator import CompanyOrchestrator
 
 
@@ -40,6 +40,15 @@ def dashboard_data() -> dict:
 @app.post("/cycle")
 def cycle() -> dict:
     return orchestrator.run_cycle()
+
+
+@app.get("/performance")
+def performance() -> dict:
+    return {
+        "stats": load_performance_quick_stats(),
+        "open_positions": [p.model_dump() for p in load_open_positions()],
+        "closed_positions": [p.model_dump() for p in load_closed_positions(limit=50)],
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -183,8 +192,24 @@ def root() -> str:
           <span id="cycles-metric">Loading...</span>
         </div>
         <div class="metric">
-          <strong>Est. PnL</strong>
+          <strong>Daily Est. PnL</strong>
           <span id="pnl-metric">Loading...</span>
+        </div>
+        <div class="metric">
+          <strong>All-time P&amp;L (compounded)</strong>
+          <span id="alltime-pnl-metric">Loading...</span>
+        </div>
+        <div class="metric">
+          <strong>Win Rate</strong>
+          <span id="winrate-metric">Loading...</span>
+        </div>
+        <div class="metric">
+          <strong>Max Drawdown</strong>
+          <span id="mdd-metric">Loading...</span>
+        </div>
+        <div class="metric">
+          <strong>Open Positions</strong>
+          <span id="openpos-metric">Loading...</span>
         </div>
       </div>
     </section>
@@ -251,6 +276,16 @@ def root() -> str:
         <ul id="daily-desk-count"></ul>
       </article>
     </section>
+    <section class="grid" style="margin-top:14px;">
+      <article class="card priority">
+        <h2>Open Positions</h2>
+        <ul id="open-positions"></ul>
+      </article>
+      <article class="card priority">
+        <h2>Closed Positions (last 10)</h2>
+        <ul id="closed-positions"></ul>
+      </article>
+    </section>
     <section class="card" style="margin-top:14px;">
       <h2>Agent Desk</h2>
       <ul id="agents"></ul>
@@ -261,10 +296,18 @@ def root() -> str:
       const res = await fetch('/dashboard-data', {{ cache: 'no-store' }});
       const data = await res.json();
       const state = data.state;
+      const perf = state.performance_stats || {{}};
       document.getElementById('focus-metric').textContent = state.strategy_book.company_focus || 'n/a';
       document.getElementById('risk-metric').textContent = state.risk_budget ?? 'n/a';
       document.getElementById('cycles-metric').textContent = state.daily_summary.cycles_run ?? 0;
       document.getElementById('pnl-metric').textContent = `${{state.daily_summary.estimated_pnl_pct ?? 0}}%`;
+      const atPnl = perf.cumulative_realized_pnl_pct ?? 0;
+      document.getElementById('alltime-pnl-metric').textContent = `${{atPnl > 0 ? '+' : ''}}${{atPnl}}%`;
+      document.getElementById('alltime-pnl-metric').style.color = atPnl >= 0 ? 'var(--accent)' : 'var(--danger)';
+      document.getElementById('winrate-metric').textContent = perf.total_trades > 0 ? `${{perf.win_rate_pct}}% (${{perf.winning_trades}}/${{perf.total_trades}})` : 'No trades yet';
+      document.getElementById('mdd-metric').textContent = `${{perf.max_drawdown_pct ?? 0}}%`;
+      document.getElementById('mdd-metric').style.color = (perf.max_drawdown_pct ?? 0) < -5 ? 'var(--danger)' : 'inherit';
+      document.getElementById('openpos-metric').textContent = `${{perf.open_positions ?? 0}} (${{perf.total_unrealized_pnl_pct >= 0 ? '+' : ''}}${{perf.total_unrealized_pnl_pct ?? 0}}% unrealized)`;
       document.getElementById('state-line').textContent =
         `${{state.stance}} stance / ${{state.regime}} regime / risk budget ${{state.risk_budget}} / new entries ${{state.allow_new_entries ? 'ON' : 'BLOCKED'}}`;
       document.getElementById('updated-line').textContent = `Updated: ${{state.updated_at}}`;
@@ -294,6 +337,25 @@ def root() -> str:
       ].join('');
       document.getElementById('daily-desk-count').innerHTML = (state.daily_summary.active_desks || []).map(item => `<li>${{item}}</li>`).join('') || '<li>No active desks yet</li>';
       document.getElementById('agents').innerHTML = (state.agent_runs || []).map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('');
+      // Load live position data from /performance
+      try {{
+        const perfRes = await fetch('/performance', {{ cache: 'no-store' }});
+        const perfData = await perfRes.json();
+        document.getElementById('open-positions').innerHTML = (perfData.open_positions || []).length > 0
+          ? perfData.open_positions.map(p => {{
+              const pnlColor = p.unrealized_pnl_pct >= 0 ? 'var(--accent)' : 'var(--danger)';
+              return `<li><strong>${{p.desk}}</strong> ${{p.symbol}} | entry ${{p.entry_price.toLocaleString()}} → current ${{p.current_price.toLocaleString()}} | <span style="color:${{pnlColor}}">${{p.unrealized_pnl_pct >= 0 ? '+' : ''}}${{p.unrealized_pnl_pct}}%</span> | ${{p.notional_pct}}x | opened ${{p.opened_at.slice(0,16)}}</li>`;
+            }}).join('')
+          : '<li>No open positions</li>';
+        document.getElementById('closed-positions').innerHTML = (perfData.closed_positions || []).slice(0, 10).length > 0
+          ? perfData.closed_positions.slice(0, 10).map(p => {{
+              const pnlColor = p.realized_pnl_pct >= 0 ? 'var(--accent)' : 'var(--danger)';
+              return `<li><strong>${{p.desk}}</strong> ${{p.symbol}} | <span style="color:${{pnlColor}}">${{p.realized_pnl_pct >= 0 ? '+' : ''}}${{p.realized_pnl_pct}}%</span> ${{p.won ? '✓' : '✗'}} | ${{p.closed_at.slice(0,16)}}</li>`;
+            }}).join('')
+          : '<li>No closed positions yet</li>';
+      }} catch (_) {{
+        document.getElementById('open-positions').innerHTML = '<li>Unavailable</li>';
+      }}
     }}
     async function runCycle() {{
       await fetch('/cycle', {{ method: 'POST' }});
