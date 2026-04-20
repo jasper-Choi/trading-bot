@@ -11,7 +11,7 @@ from app.config import settings
 from app.agents.execution_agent import ExecutionAgent
 from app.agents.us_stock_desk_agent import USStockDeskAgent
 from app.core.models import CompanyState
-from app.core.state_store import init_db, load_closed_positions, load_company_state
+from app.core.state_store import init_db, load_closed_positions, load_company_state, load_open_positions, load_performance_quick_stats
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_us_daily_prices, get_us_data_status
@@ -589,6 +589,15 @@ def cycle() -> dict:
 def telegram_test() -> dict:
     success = notifier.send(f"[{settings.company_name}] telegram manual test")
     return {"ok": success, "error": notifier.last_error or None}
+
+
+@app.get("/performance")
+def performance() -> dict:
+    return {
+        "stats": load_performance_quick_stats(),
+        "open_positions": [p.model_dump() for p in load_open_positions()],
+        "closed_positions": [p.model_dump() for p in load_closed_positions(limit=50)],
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
