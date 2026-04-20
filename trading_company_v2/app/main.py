@@ -746,6 +746,13 @@ def root() -> str:
       border-radius: 20px;
       padding: 16px;
     }}
+    .metric-card.alltime {{
+      border: 1.5px solid rgba(99,102,241,0.35);
+      background: linear-gradient(135deg, rgba(99,102,241,0.08), var(--surface));
+    }}
+    .metric-card.alltime strong {{
+      color: #6366f1;
+    }}
     .hero-title {{
       margin: 8px 0 10px;
       font-size: clamp(2rem, 4vw, 3rem);
@@ -1258,13 +1265,16 @@ def root() -> str:
 
     <section class="metrics-strip">
       <article class="metric-card"><strong>장세</strong><span id="regime-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>승률</strong><span id="winrate-metric">불러오는 중...</span></article>
+      <article class="metric-card"><strong>오늘 승률</strong><span id="winrate-metric">불러오는 중...</span></article>
       <article class="metric-card"><strong>열린 포지션</strong><span id="open-positions-metric">불러오는 중...</span></article>
       <article class="metric-card"><strong>청산 거래</strong><span id="closed-positions-metric">불러오는 중...</span></article>
       <article class="metric-card"><strong>기준 자본</strong><span id="capital-base-metric">불러오는 중...</span></article>
       <article class="metric-card"><strong>평가 자산</strong><span id="capital-total-metric">불러오는 중...</span></article>
       <article class="metric-card"><strong>실현 손익 KRW</strong><span id="capital-realized-metric">불러오는 중...</span></article>
       <article class="metric-card"><strong>미실현 손익 KRW</strong><span id="capital-unrealized-metric">불러오는 중...</span></article>
+      <article class="metric-card alltime"><strong>누적 복리 수익률</strong><span id="alltime-pnl-metric">불러오는 중...</span></article>
+      <article class="metric-card alltime"><strong>올타임 승률</strong><span id="alltime-winrate-metric">불러오는 중...</span></article>
+      <article class="metric-card alltime"><strong>최대 낙폭 (MDD)</strong><span id="alltime-mdd-metric">불러오는 중...</span></article>
     </section>
 
     <section class="content-grid">
@@ -1656,6 +1666,19 @@ def root() -> str:
       document.getElementById('capital-total-metric').textContent = `KRW ${{Number(capital.total_krw || 0).toLocaleString()}}`;
       document.getElementById('capital-realized-metric').textContent = `KRW ${{Number(capital.realized_krw || 0).toLocaleString()}}`;
       document.getElementById('capital-unrealized-metric').textContent = `KRW ${{Number(capital.unrealized_krw || 0).toLocaleString()}}`;
+      const perf = state.performance_stats || {{}};
+      const atPnl = perf.cumulative_realized_pnl_pct ?? 0;
+      const atPnlEl = document.getElementById('alltime-pnl-metric');
+      atPnlEl.textContent = `${{atPnl >= 0 ? '+' : ''}}${{atPnl.toFixed(2)}}%`;
+      atPnlEl.style.color = atPnl >= 0 ? '#22c55e' : '#ef4444';
+      const atWinEl = document.getElementById('alltime-winrate-metric');
+      atWinEl.textContent = perf.total_trades > 0
+        ? `${{perf.win_rate_pct}}% (${{perf.winning_trades}}/${{perf.total_trades}})`
+        : '거래 없음';
+      const atMddEl = document.getElementById('alltime-mdd-metric');
+      const mdd = perf.max_drawdown_pct ?? 0;
+      atMddEl.textContent = `${{mdd.toFixed(2)}}%`;
+      atMddEl.style.color = mdd < -5 ? '#ef4444' : mdd < -2 ? '#f59e0b' : '#22c55e';
       document.getElementById('insight-score').textContent = dashboard.insight_score ?? '--';
       document.getElementById('equity-summary').textContent = dashboard.equity_summary
         ? `Current ${{dashboard.equity_summary.current}} / Net ${{dashboard.equity_summary.change_pct}}%`
