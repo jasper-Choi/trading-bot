@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -35,11 +35,30 @@ class PaperOrder(BaseModel):
     action: str
     focus: str
     size: str
+    symbol: str = ""
+    reference_price: float = 0.0
     notional_pct: float = 0.0
     status: str = "planned"
     pnl_estimate_pct: float = 0.0
-    rationale: list[str] = Field(default_factory=list)
+    rationale: list[Any] = Field(default_factory=list)
     created_at: str = Field(default_factory=utcnow_iso)
+
+
+class PaperPosition(BaseModel):
+    desk: str
+    symbol: str
+    status: str = "open"
+    action: str = ""
+    size: str = "0.00x"
+    opened_at: str = Field(default_factory=utcnow_iso)
+    closed_at: str | None = None
+    entry_price: float = 0.0
+    current_price: float = 0.0
+    exit_price: float = 0.0
+    pnl_pct: float = 0.0
+    cycles_open: int = 0
+    closed_reason: str = ""
+    focus: str = ""
 
 
 class CycleJournalEntry(BaseModel):
@@ -66,6 +85,7 @@ class CompanyState(BaseModel):
     strategy_book: dict = Field(default_factory=dict)
     daily_summary: dict = Field(default_factory=dict)
     execution_log: list[dict] = Field(default_factory=list)
+    open_positions: list[dict] = Field(default_factory=list)
     recent_journal: list[dict] = Field(default_factory=list)
     agent_runs: list[AgentSnapshot] = Field(default_factory=list)
     updated_at: str = Field(default_factory=utcnow_iso)

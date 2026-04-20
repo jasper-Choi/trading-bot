@@ -13,6 +13,10 @@ class CryptoDeskAgent(BaseAgent):
     def run(self) -> AgentResult:
         candles = get_upbit_15m_candles("KRW-BTC", count=40)
         signal = summarize_crypto_signal(candles)
+        recent_change = float(signal.get("recent_change_pct", 0.0) or 0.0)
+        burst_change = float(signal.get("burst_change_pct", 0.0) or 0.0)
+        ema_gap = float(signal.get("ema_gap_pct", 0.0) or 0.0)
+        rsi_value = signal.get("rsi")
         return AgentResult(
             name=self.name,
             score=float(signal["score"]),
@@ -22,5 +26,9 @@ class CryptoDeskAgent(BaseAgent):
                 "desk_bias": signal["bias"],
                 "reasons": signal["reasons"],
                 "signal_score": signal["score"],
+                "recent_change_pct": recent_change,
+                "burst_change_pct": burst_change,
+                "ema_gap_pct": ema_gap,
+                "rsi": rsi_value,
             },
         )

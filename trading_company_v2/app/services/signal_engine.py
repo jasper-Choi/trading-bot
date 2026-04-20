@@ -39,6 +39,7 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     ema30 = ema(closes, 30)
     last_close = closes[-1]
     last_rsi = rsi(closes, 14)
+    ema_gap_pct = round(((ema10[-1] - ema30[-1]) / ema30[-1]) * 100, 2) if ema30[-1] else 0.0
     reasons: list[str] = []
     score = 0.5
 
@@ -59,12 +60,20 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
             reasons.append(f"rsi extended at {last_rsi:.1f}")
 
     recent_change = ((last_close - closes[-5]) / closes[-5]) * 100 if closes[-5] else 0
+    burst_change = ((last_close - closes[-3]) / closes[-3]) * 100 if closes[-3] else 0
     if recent_change > 1.0:
         score += 0.1
         reasons.append(f"5-candle momentum {recent_change:.2f}%")
     elif recent_change < -1.0:
         score -= 0.1
         reasons.append(f"5-candle drawdown {recent_change:.2f}%")
+
+    if burst_change > 2.8:
+        score -= 0.06
+        reasons.append(f"3-candle burst {burst_change:.2f}%")
+    elif burst_change < -2.5:
+        score -= 0.08
+        reasons.append(f"3-candle flush {burst_change:.2f}%")
 
     score = max(0.0, min(1.0, round(score, 2)))
     if score >= 0.62:
@@ -73,5 +82,76 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         bias = "defense"
     else:
         bias = "balanced"
-    return {"bias": bias, "score": score, "reasons": reasons}
+    return {
+        "bias": bias,
+        "score": score,
+        "reasons": reasons,
+        "recent_change_pct": round(recent_change, 2),
+        "burst_change_pct": round(burst_change, 2),
+        "ema_gap_pct": ema_gap_pct,
+        "rsi": round(last_rsi, 1) if last_rsi is not None else None,
+    }
 
+
+def summarize_equity_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
+    closes = [float(item["close"]) for item in candles]
+    if len(closes) < 30:
+        return {"bias": "neutral", "score": 0.5, "reasons": ["not enough candles"]}
+
+    ema8 = ema(closes, 8)
+    ema21 = ema(closes, 21)
+    last_close = closes[-1]
+    last_rsi = rsi(closes, 14)
+    ema_gap_pct = round(((ema8[-1] - ema21[-1]) / ema21[-1]) * 100, 2) if ema21[-1] else 0.0
+    reasons: list[str] = []
+    score = 0.5
+
+    if ema8[-1] > ema21[-1]:
+        score += 0.16
+        reasons.append("ema8 above ema21")
+    else:
+        score -= 0.16
+        reasons.append("ema8 below ema21")
+
+    if last_rsi is not None:
+        if 48 <= last_rsi <= 67:
+            score += 0.08
+            reasons.append(f"rsi constructive at {last_rsi:.1f}")
+        elif last_rsi < 38:
+            score -= 0.06
+            reasons.append(f"rsi weak at {last_rsi:.1f}")
+        else:
+            reasons.append(f"rsi extended at {last_rsi:.1f}")
+
+    recent_change = ((last_close - closes[-6]) / closes[-6]) * 100 if closes[-6] else 0
+    short_burst = ((last_close - closes[-3]) / closes[-3]) * 100 if closes[-3] else 0
+    if recent_change > 2.0:
+        score += 0.12
+        reasons.append(f"6-day momentum {recent_change:.2f}%")
+    elif recent_change < -2.0:
+        score -= 0.12
+        reasons.append(f"6-day drawdown {recent_change:.2f}%")
+
+    if short_burst > 8.0:
+        score -= 0.06
+        reasons.append(f"3-day burst {short_burst:.2f}%")
+    elif short_burst < -6.0:
+        score -= 0.06
+        reasons.append(f"3-day flush {short_burst:.2f}%")
+
+    score = max(0.0, min(1.0, round(score, 2)))
+    if score >= 0.64:
+        bias = "offense"
+    elif score <= 0.4:
+        bias = "defense"
+    else:
+        bias = "balanced"
+    return {
+        "bias": bias,
+        "score": score,
+        "reasons": reasons,
+        "recent_change_pct": round(recent_change, 2),
+        "burst_change_pct": round(short_burst, 2),
+        "ema_gap_pct": ema_gap_pct,
+        "rsi": round(last_rsi, 1) if last_rsi is not None else None,
+    }

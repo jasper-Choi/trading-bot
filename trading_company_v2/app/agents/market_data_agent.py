@@ -14,13 +14,17 @@ class MarketDataAgent(BaseAgent):
         return AgentResult(
             name=self.name,
             score=0.7,
-            reason=f"captured {len(snapshot.crypto_leaders)} crypto leaders and {len(snapshot.stock_leaders)} KOSDAQ leaders",
+            reason=(
+                f"captured {len(snapshot.crypto_leaders)} crypto leaders, "
+                f"{len(snapshot.stock_leaders)} KOSDAQ leaders, and {len(snapshot.us_leaders)} U.S. leaders"
+            ),
             payload={
                 "crypto_leaders": snapshot.crypto_leaders,
                 "crypto_watchlist": snapshot.crypto_watchlist,
                 "stock_leaders": snapshot.stock_leaders,
                 "gap_candidates": snapshot.gap_candidates,
+                "us_leaders": snapshot.us_leaders,
+                "us_watchlist": snapshot.us_watchlist,
                 "as_of": snapshot.as_of,
             },
         )
-

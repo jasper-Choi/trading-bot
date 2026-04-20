@@ -1,87 +1,135 @@
 {
   "version": 1,
-  "updated_at": null,
+  "updated_at": "2026-04-20T23:31:55+00:00",
   "strategy": {
-    "direction": "NEUTRAL",
-    "insight_score": null,
-    "market_regime": null,
-    "risk_budget": null,
-    "notes": [],
-    "last_decision_at": null
+    "direction": "DEFENSIVE",
+    "insight_score": 0.5,
+    "market_regime": "VOLATILE",
+    "risk_budget": 0.015,
+    "notes": [
+      "market_regime=VOLATILE",
+      "insight_score=0.5000",
+      "daily_loss_limit_pct=0.0300",
+      "favor capital preservation and tighter filters"
+    ],
+    "last_decision_at": "2026-04-20T23:30:53+00:00"
   },
   "parameters": {
-    "applied_at": null,
+    "applied_at": "2026-04-20T23:30:53+00:00",
     "coin": {
-      "K": null,
-      "ATR_STOP_MULT": null,
-      "ATR_TRAIL_MULT": null,
-      "RSI_PERIOD": null,
-      "RSI_OVERSOLD": null
+      "K": 0.6,
+      "ATR_STOP_MULT": 1.5,
+      "ATR_TRAIL_MULT": 3.0,
+      "RSI_PERIOD": 14,
+      "RSI_OVERSOLD": 28
     },
     "stock": {
-      "gap_min_pct": null,
-      "top_n": null
+      "gap_min_pct": 1.5,
+      "top_n": 30
     }
   },
   "risk": {
     "allow_new_entries": true,
-    "daily_loss_limit_pct": null,
-    "current_daily_pnl": null,
-    "drawdown_pct": null,
-    "position_scale": 1.0,
-    "warnings": [],
-    "last_checked_at": null
+    "daily_loss_limit_pct": 0.03,
+    "current_daily_pnl": 0.0,
+    "drawdown_pct": 13.1208,
+    "position_scale": 0.5,
+    "warnings": [
+      "volatile regime: reduce position size",
+      "drawdown elevated at 13.12%"
+    ],
+    "last_checked_at": "2026-04-20T23:31:54+00:00"
   },
   "agents": {
     "ceo_agent": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:30:53+00:00",
+      "summary": {
+        "score": 0.5,
+        "reason": "defensive stance from insight 0.50 in VOLATILE",
+        "updated_at": "2026-04-20T23:30:53+00:00"
+      }
     },
     "strategy_agent": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:30:53+00:00",
+      "summary": {
+        "score": 0.5,
+        "reason": "applied defensive parameters with K=0.60",
+        "updated_at": "2026-04-20T23:30:53+00:00"
+      }
     },
     "coin_data_agent": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:45+00:00",
+      "summary": {
+        "score": 1.0,
+        "reason": "cached 30/30 coin datasets",
+        "updated_at": "2026-04-20T23:31:45+00:00"
+      }
     },
     "stock_data_agent": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:54+00:00",
+      "summary": {
+        "score": 1.0,
+        "reason": "cached 30 stocks and 0 gap-up candidates",
+        "updated_at": "2026-04-20T23:31:54+00:00"
+      }
     },
     "coin_signal_agent": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:54+00:00",
+      "summary": {
+        "score": 0.5,
+        "reason": "generated 0 coin signals",
+        "updated_at": "2026-04-20T23:31:54+00:00"
+      }
     },
     "stock_signal_agent": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:54+00:00",
+      "summary": {
+        "score": 0.5,
+        "reason": "generated 0 stock signals",
+        "updated_at": "2026-04-20T23:31:54+00:00"
+      }
     },
     "risk_agent": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:55+00:00",
+      "summary": {
+        "score": 1.0,
+        "reason": "risk check complete for 0 open positions",
+        "updated_at": "2026-04-20T23:31:54+00:00"
+      }
     },
     "coin_executor": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:55+00:00",
+      "summary": {
+        "score": 0.5,
+        "reason": "executed 0 coin entries",
+        "updated_at": "2026-04-20T23:31:55+00:00"
+      }
     },
     "stock_executor": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:55+00:00",
+      "summary": {
+        "score": 0.5,
+        "reason": "executed 0 stock entries",
+        "updated_at": "2026-04-20T23:31:55+00:00"
+      }
     },
     "notifier": {
-      "status": "idle",
-      "last_run_at": null,
-      "summary": {}
+      "status": "ok",
+      "last_run_at": "2026-04-20T23:31:55+00:00",
+      "summary": {
+        "score": 0.5,
+        "reason": "telegram not configured",
+        "updated_at": "2026-04-20T23:31:55+00:00"
+      }
     }
   },
   "artifacts": {

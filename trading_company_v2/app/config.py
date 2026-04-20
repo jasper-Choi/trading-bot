@@ -35,14 +35,21 @@ class Settings:
     host: str = os.environ.get("APP_HOST", "127.0.0.1")
     port: int = int(os.environ.get("APP_PORT", "8080"))
     cycle_interval_minutes: int = int(os.environ.get("CYCLE_INTERVAL_MINUTES", "15"))
+    realtime_active_interval_seconds: int = int(os.environ.get("REALTIME_ACTIVE_INTERVAL_SECONDS", "20"))
+    realtime_watch_interval_seconds: int = int(os.environ.get("REALTIME_WATCH_INTERVAL_SECONDS", "45"))
+    realtime_idle_interval_seconds: int = int(os.environ.get("REALTIME_IDLE_INTERVAL_SECONDS", "120"))
     timezone: str = os.environ.get("APP_TIMEZONE", "Asia/Seoul")
+    paper_capital_krw: int = int(os.environ.get("PAPER_CAPITAL_KRW", "10000000"))
     db_path: Path = Path(os.environ.get("APP_DB_PATH", str(DATA_DIR / "trading_company_v2.db")))
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     huggingface_api_key: str = os.environ.get("HUGGINGFACE_API_KEY", "")
+    alphavantage_api_key: str = os.environ.get("ALPHAVANTAGE_API_KEY", "")
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
     telegram_notify_every_cycle: bool = os.environ.get("TELEGRAM_NOTIFY_EVERY_CYCLE", "false").lower() == "true"
     operator_name: str = os.environ.get("OPERATOR_NAME", "Owner")
+    app_username: str = os.environ.get("APP_USERNAME", "")
+    app_password: str = os.environ.get("APP_PASSWORD", "")
 
 
 settings = Settings()

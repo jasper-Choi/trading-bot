@@ -14,10 +14,12 @@ class StrategyAllocatorAgent(BaseAgent):
         priorities: list[str] = []
         if session["korea_open"]:
             priorities.append("KOSDAQ opening drive and liquidity leaders")
-        if session["crypto_focus"]:
-            priorities.append("BTC-led crypto continuation and risk rotation")
         if session["us_premarket"] or session["us_regular"]:
-            priorities.append("U.S. macro spillover and overnight sentiment check")
+            priorities.append("U.S. core leaders and ETF momentum rotation")
+        if session["crypto_focus"] and not session["us_regular"]:
+            priorities.append("BTC-led crypto continuation and risk rotation")
+        elif session["crypto_focus"]:
+            priorities.append("Crypto watch and non-Korea market continuity")
         if not priorities:
             priorities.append("Capital preservation and watchlist maintenance")
 
@@ -31,4 +33,3 @@ class StrategyAllocatorAgent(BaseAgent):
                 "company_focus": priorities[0],
             },
         )
-
