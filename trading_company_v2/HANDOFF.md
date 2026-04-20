@@ -7,7 +7,7 @@
 
 ## 마지막 업데이트
 
-- **날짜**: 2026-04-21
+- **날짜**: 2026-04-21 (2차)
 - **작업자**: Claude (Sonnet 4.6)
 
 ---
@@ -91,10 +91,9 @@ launch_trading_app.vbs  ← 더블클릭으로 전체 실행
 ## 다음에 할 작업 (우선순위 순)
 
 ### 🔴 HIGH — 실전 전환 준비
-1. **올타임 P&L 대시보드 카드 추가**
-   - 현재 한국어 라이브 대시보드에 `alltime-pnl-metric`, `mdd-metric` 카드가 없음
-   - `app/main.py`의 히어로 섹션에 올타임 복리 수익률 / MDD 표시 추가
-   - JS에서 `state.performance_stats.cumulative_realized_pnl_pct` 렌더링
+1. ~~**올타임 P&L 대시보드 카드 추가**~~ ✅ 완료 (2026-04-21)
+   - `metrics-strip`에 누적 복리 수익률 / 올타임 승률 / MDD 카드 3개 추가
+   - commit: `b99c14a`
 
 2. **실제 브로커 연동 준비 (Upbit)**
    - `ExecutionAgent`가 현재 paper only
@@ -106,20 +105,24 @@ launch_trading_app.vbs  ← 더블클릭으로 전체 실행
    - KIS API 토큰 관리 (만료 처리 포함)
 
 ### 🟡 MEDIUM — 정확도 향상
-4. **백테스트 결과 갱신 자동화**
-   - `Desktop/backtest/coin_result_v4.json` 이후 새 버전 실행 후 업데이트
-   - `backtest_advisor.py`가 자동으로 최신 버전을 선택하도록 개선
+4. **미국 주식 백테스트 결과 생성 및 연동**
+   - `USStockDeskAgent`는 구현됐으나 백테스트 가중치 없음
+   - `Desktop/backtest/stock_backtest.py`에 US 종목 추가 or 별도 `us_backtest.py` 작성
+   - `backtest_advisor.py`에 `get_us_weights()` 추가 → `USStockDeskAgent` 연동
 
-5. **주식 백테스트 결과 연동**
+5. **한국 주식 백테스트 결과 연동**
    - `Desktop/backtest/stock_result.json` 없음 → `stock_backtest.py` 실행 후 생성
    - `KoreaStockDeskAgent`에 백테스트 가중치 적용
 
-6. **Tailscale 외부 접속 설정**
+6. **코인 백테스트 결과 갱신 자동화**
+   - `backtest_advisor.py`가 자동으로 최신 버전(v1→v4 중 가장 높은 번호) 선택하도록 개선
+
+7. **Tailscale 외부 접속 설정**
    - README에 TODO로 명시됨
    - 홈 PC에서 모바일로 대시보드 접근
 
 ### 🟢 LOW — 품질 개선
-7. **포지션 추적 고도화**
+8. **포지션 추적 고도화**
    - `PositionRecord` (올타임)와 `PaperPositionRecord` (세션) 통합 검토
    - 현재 두 시스템이 병렬 운영 중 — 중복 여부 확인
 
