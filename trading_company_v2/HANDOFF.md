@@ -7,12 +7,26 @@
 
 ## 마지막 업데이트
 
-- **날짜**: 2026-04-21 (2차)
+- **날짜**: 2026-04-21 (3차)
 - **작업자**: Claude (Sonnet 4.6)
 
 ---
 
 ## 이번 세션에서 완료한 것
+
+### 0.8 내장 대시보드 다크 네이비 리디자인 (commit: `17c3db7`)
+- `app/main.py` `root()` 함수 HTML을 React 프론트엔드와 동일한 시각 언어로 전면 교체
+- **CSS 디자인 토큰**: `--bg:#09111f`, `--surface:rgba(10,19,35,.84)`, `--green:#67e8a5`, `--blue:#6bc7ff` 등 React `index.css` 변수 그대로 이식
+- **새 레이아웃**:
+  - `.hero-shell`: 회사명 + 상태 pill + 사이클 버튼 헤더
+  - `.hero-overview`: Stance / Regime / Exposure / Ops 4개 카드
+  - `.dashboard` 2컬럼 그리드:
+    - 좌: stat-card ×4 (실현/미실현 손익, 승률, 포트폴리오) + 데스크 현황 + 포지션 테이블 + 청산 내역
+    - 우: SVG 에쿼티 커브 + 에이전트 시그널 바 + 사이클 저널
+- **tone 클래스**: `.tone-ok/.warn/.risk/.danger/.muted/.blue` — 상태별 색상 자동 반영
+- **반응형**: 960px → 1컬럼, 600px → 컴팩트 스택
+- manifest `background_color`, `theme_color` → `#09111f` 업데이트
+- 앱 아이콘 SVG → 다크 배경 + 그린/블루 강조색으로 업데이트
 
 ### 0. 올타임 자동청산/청산이력 정합성 보강
 - `auto_exit_positions()`가 desk/action별 기존 포지션 임계값을 재사용하도록 정리
@@ -177,9 +191,9 @@ launch_trading_app.vbs  ← 더블클릭으로 전체 실행
 ## 다음에 할 작업 (우선순위 순)
 
 ### 🔴 HIGH — 실전 전환 준비
-1. ~~**올타임 P&L 대시보드 카드 추가**~~ ✅ 완료 (2026-04-21)
-   - `metrics-strip`에 누적 복리 수익률 / 올타임 승률 / MDD 카드 3개 추가
-   - commit: `b99c14a`
+1. ~~**내장 대시보드 리디자인**~~ ✅ 완료 (2026-04-21)
+   - `app/main.py` 다크 네이비 React 시각 언어로 전면 교체
+   - commit: `17c3db7`
 
 2. **실제 브로커 연동 준비 (Upbit)**
    - `ExecutionAgent`가 현재 paper only
