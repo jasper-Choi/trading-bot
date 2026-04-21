@@ -84,11 +84,11 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.12
         elif avg_gap >= 2.8:
             score += 0.06
-        if avg_volume >= 500000:
+        if avg_volume >= 50000:
             score += 0.11
-        elif avg_volume >= 250000:
+        elif avg_volume >= 20000:
             score += 0.05
-        elif avg_volume < 80000 and gap_candidates:
+        elif avg_volume < 5000 and gap_candidates:
             score -= 0.14
         if avg_signal >= 0.66:
             score += 0.12

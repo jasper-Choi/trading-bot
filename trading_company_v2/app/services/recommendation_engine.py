@@ -97,7 +97,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "candidate_symbols": candidate_symbols,
             "notes": ["risk committee blocks new Korea entries"],
         }
-    if gap_candidates and (top_signal < 0.55 or top_gap >= 24.0 or top_rsi >= 74.0 or top_burst >= 10.0 or avg_volume < 80000):
+    if gap_candidates and (top_signal < 0.55 or top_gap >= 24.0 or top_rsi >= 74.0 or top_burst >= 10.0 or avg_volume < 3000):
         return {
             "action": "stand_by",
             "size": "0.00x",
@@ -109,7 +109,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 "skip overstretched opening move until structure stabilizes",
             ],
         }
-    if opening_window and active_gap_count >= 3 and quality_score >= 0.72 and avg_gap >= 3.2 and avg_volume >= 150000 and avg_signal >= 0.64 and stance != "DEFENSE":
+    if opening_window and active_gap_count >= 3 and quality_score >= 0.72 and avg_gap >= 3.2 and avg_volume >= 20000 and avg_signal >= 0.64 and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",
             "size": "0.50x" if stance == "BALANCED" else "0.70x",
@@ -121,7 +121,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"quality score {quality_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
             ],
         }
-    if active_gap_count >= 2 and quality_score >= 0.6 and avg_signal >= 0.54 and avg_volume >= 90000:
+    if active_gap_count >= 2 and quality_score >= 0.6 and avg_signal >= 0.54 and avg_volume >= 10000:
         return {
             "action": "selective_probe",
             "size": "0.30x",

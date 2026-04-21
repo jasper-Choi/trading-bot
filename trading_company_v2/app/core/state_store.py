@@ -309,7 +309,7 @@ def load_company_state() -> CompanyState:
                 daily_summary=load_daily_summary(),
                 performance_stats=load_performance_quick_stats(),
                 execution_log=load_recent_orders(limit=10),
-                open_positions=load_open_positions(),
+                open_positions=[p.model_dump() for p in load_open_positions()],
                 recent_journal=load_recent_journal(limit=8),
                 agent_runs=[AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
                 updated_at=rec.updated_at or utcnow_iso(),

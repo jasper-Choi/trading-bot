@@ -13,10 +13,12 @@ class CryptoDeskAgent(BaseAgent):
 
     def run(self) -> AgentResult:
         weights = get_crypto_weights()
-        # Pick the highest backtest-weighted symbol as lead market
-        lead_market = next(iter(weights), "KRW-BTC")
-        candles = get_upbit_15m_candles(lead_market, count=40)
+        # BTC always drives direction — it leads the market; ETH/XRP follow
+        direction_symbol = "KRW-BTC"
+        candles = get_upbit_15m_candles(direction_symbol, count=40)
         signal = summarize_crypto_signal(candles)
+        # Execution targets the highest backtest-weighted symbol
+        lead_market = next(iter(weights), "KRW-BTC")
         recent_change = float(signal.get("recent_change_pct", 0.0) or 0.0)
         burst_change = float(signal.get("burst_change_pct", 0.0) or 0.0)
         ema_gap = float(signal.get("ema_gap_pct", 0.0) or 0.0)
@@ -24,9 +26,10 @@ class CryptoDeskAgent(BaseAgent):
         return AgentResult(
             name=self.name,
             score=float(signal["score"]),
-            reason=f"crypto desk evaluated {lead_market} (backtest weight {weights.get(lead_market, 0):.2f})",
+            reason=f"BTC direction {signal['bias']} → execute {lead_market} (weight {weights.get(lead_market, 0):.2f})",
             payload={
                 "lead_market": lead_market,
+                "direction_market": direction_symbol,
                 "desk_bias": signal["bias"],
                 "reasons": signal["reasons"],
                 "signal_score": signal["score"],
