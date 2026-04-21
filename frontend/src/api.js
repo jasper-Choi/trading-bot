@@ -51,6 +51,10 @@ export const api = {
   stockHistory:   (limit = 30) => request(`/api/stock/history?limit=${limit}`),
   insights:       () => request('/api/insights/'),
   agentsStatus:   () => request('/api/insights/agents/status'),
+  dashboardData:  () => request('/dashboard-data'),
+  mobileSummary:  () => request('/mobile-summary'),
+  readiness:      () => request('/diagnostics/live-readiness-checklist'),
+  brokerHealth:   () => request('/diagnostics/broker-live-health'),
 }
 
 

@@ -11,53 +11,53 @@ import InsightPanel       from './components/InsightPanel'
 
 const T = {
   ko: {
-    title:         '모의투자 봇 대시보드',
-    running:       '실행 중',
-    stopped:       '중지됨',
-    start:         '봇 시작',
-    stop:          '봇 중지',
-    refresh:       '새로고침',
-    lastUpdate:    '업데이트',
-    nextRun:       '다음 실행',
-    totalInvested: '투자금',
-    cumPnl:        '누적손익',
-    winRate:       '승률',
-    sharpe:        '샤프지수',
-    mdd:           'MDD',
-    trades:        '거래',
-    noData:        '--',
-    openPositions: '보유 포지션',
-    pnlChart:      '누적 손익 곡선',
-    recentTrades:  '최근 거래 이력',
-    liveLog:       '실시간 로그',
-    coin:          '코인',
-    entryPrice:    '진입가',
-    currentPrice:  '현재가',
-    stopLoss:      '손절가',
-    unrealizedPnl: '미실현손익',
-    entryDate:     '진입일',
-    exitDate:      '청산일',
-    exitReason:    '사유',
-    exitPrice:     '청산가',
-    pnl:           '손익',
-    pnlPct:        '손익률',
-    noPosition:    '보유 포지션이 없습니다',
-    noTradeData:   '거래 이력이 없습니다',
-    noLog:         '로그가 없습니다',
-    apiError:      'API 서버에 연결할 수 없습니다',
-    tabCoin:       '코인',
-    tabStock:      '주식',
-  },
-  en: {
-    title:         'Paper Trading Dashboard',
+    title:         'Trading Control Center',
     running:       'Running',
     stopped:       'Stopped',
-    start:         'Start Bot',
-    stop:          'Stop Bot',
+    start:         'Start',
+    stop:          'Stop',
     refresh:       'Refresh',
     lastUpdate:    'Updated',
     nextRun:       'Next run',
-    totalInvested: 'Invested',
+    totalInvested: 'Capital',
+    cumPnl:        'Cum. PnL',
+    winRate:       'Win Rate',
+    sharpe:        'Sharpe',
+    mdd:           'MDD',
+    trades:        'trades',
+    noData:        '--',
+    openPositions: 'Open Positions',
+    pnlChart:      'Cumulative PnL',
+    recentTrades:  'Trade History',
+    liveLog:       'Live Logs',
+    coin:          'Coin',
+    entryPrice:    'Entry',
+    currentPrice:  'Current',
+    stopLoss:      'Stop',
+    unrealizedPnl: 'Unrealized PnL',
+    entryDate:     'Entry Date',
+    exitDate:      'Exit Date',
+    exitReason:    'Reason',
+    exitPrice:     'Exit',
+    pnl:           'PnL',
+    pnlPct:        'PnL %',
+    noPosition:    'No open positions',
+    noTradeData:   'No trade history',
+    noLog:         'No logs yet',
+    apiError:      'Cannot connect to API server',
+    tabCoin:       'Coin',
+    tabStock:      'Stock',
+  },
+  en: {
+    title:         'Trading Control Center',
+    running:       'Running',
+    stopped:       'Stopped',
+    start:         'Start',
+    stop:          'Stop',
+    refresh:       'Refresh',
+    lastUpdate:    'Updated',
+    nextRun:       'Next run',
+    totalInvested: 'Capital',
     cumPnl:        'Cum. PnL',
     winRate:       'Win Rate',
     sharpe:        'Sharpe',
@@ -89,10 +89,7 @@ const T = {
 }
 
 const fmtMoney = (n) =>
-  n != null ? `₩${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : null
-
-const fmtPct = (n) =>
-  n != null ? `${(n * 100).toFixed(1)}%` : null
+  n != null ? `KRW ${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : null
 
 function isMarketOpen() {
   const now     = new Date()
@@ -139,6 +136,7 @@ export default function App() {
   const [stockPositions, setStockPositions] = useState([])
   const [insights,       setInsights]       = useState(null)
   const [agentStatus,    setAgentStatus]    = useState(null)
+  const [dashboardData,  setDashboardData]  = useState(null)
   const [error,          setError]          = useState(null)
   const [lastUpdate,     setLastUpdate]     = useState(null)
   const [countdown,      setCountdown]      = useState(REFRESH_SEC)
@@ -147,7 +145,7 @@ export default function App() {
   const t = T[lang]
 
   const fetchAll = useCallback(async () => {
-    const [s, p, tr, st, lg, reg, sp, ins, agents] = await Promise.all([
+    const [s, p, tr, st, lg, reg, sp, ins, agents, dash] = await Promise.all([
       settle(api.status(), null),
       settle(api.positions(), []),
       settle(api.trades(50), []),
@@ -157,6 +155,7 @@ export default function App() {
       settle(api.stockPositions(), []),
       settle(api.insights(), null),
       settle(api.agentsStatus(), null),
+      settle(api.dashboardData(), null),
     ])
 
     if (s) setStatus(s)
@@ -168,8 +167,9 @@ export default function App() {
     setStockPositions(sp)
     if (ins) setInsights(ins)
     if (agents) setAgentStatus(agents)
+    if (dash) setDashboardData(dash)
 
-    const hasCoreData = Boolean(s || st || ins || agents)
+    const hasCoreData = Boolean(s || st || ins || agents || dash)
     setError(hasCoreData ? null : 'Dashboard data temporarily unavailable')
     setLastUpdate(
       new Date().toLocaleTimeString('ko-KR', {
@@ -205,47 +205,104 @@ export default function App() {
   const pnlPositive   = pnlVal == null ? null : pnlVal >= 0
   const winRateVal    = stats ? stats.win_rate * 100 : null
   const marketOpen    = isMarketOpen()
+  const dashboard     = dashboardData?.dashboard ?? null
+  const executionSummary = dashboard?.execution_summary ?? {}
+  const opsFlags      = dashboard?.ops_flags ?? { severity: 'stable', items: [] }
+  const readiness     = dashboardData?.live_readiness_checklist ?? null
+  const brokerHealth  = dashboardData?.broker_live_health ?? null
+  const latestLive    = executionSummary?.latest_live ?? null
+  const recentLive    = (dashboardData?.state?.execution_log ?? [])
+    .filter((item) => item?.source === 'live')
+    .slice(0, 3)
+  const readinessToneClass =
+    readiness?.overall === 'blocked' ? 'tone-risk'
+      : readiness?.overall === 'caution' ? 'tone-warn'
+      : readiness?.overall === 'ready' ? 'tone-ok'
+      : 'tone-muted'
+  const prioritySignals = [
+    readiness?.overall === 'blocked'
+      ? `Execution blocked: ${readiness?.block_count ?? 0} hard stop`
+      : null,
+    Number(executionSummary.stale_count || 0) > 0
+      ? `Stale live orders: ${executionSummary.stale_count || 0}`
+      : null,
+    Number(executionSummary.partial_count || 0) > 0
+      ? `Partial fills pending review: ${executionSummary.partial_count || 0}`
+      : null,
+    Number(executionSummary.pending_count || 0) > 0
+      ? `Pending live orders: ${executionSummary.pending_count || 0}`
+      : null,
+    brokerHealth?.upbit?.configured === false && brokerHealth?.kis?.configured === false
+      ? 'No live broker credentials configured'
+      : null,
+  ].filter(Boolean)
+  const liveToneClass =
+    readiness?.overall === 'blocked' ? 'tone-risk'
+      : Number(executionSummary.stale_count || 0) > 0 ? 'tone-risk'
+      : Number(executionSummary.partial_count || 0) > 0 ? 'tone-warn'
+      : Number(executionSummary.pending_count || 0) > 0 ? 'tone-info'
+      : Number(executionSummary.live_count || 0) > 0 ? 'tone-ok'
+      : 'tone-muted'
+  const modeLabel = readiness?.overall || opsFlags?.severity || 'stable'
+  const primaryNote = prioritySignals[0] || `Runtime ${status?.next_run ? `next ${status.next_run.slice(11, 16)}` : 'cycle active'}`
+  const readinessItems = (readiness?.checklist || []).slice(0, 6)
+  const statusCards = [
+    { label: 'Runtime', value: isRunning ? t.running : t.stopped, sub: status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : 'Awaiting schedule' },
+    { label: 'Readiness', value: String(modeLabel).toUpperCase(), sub: `${readiness?.block_count ?? 0} blocks / ${readiness?.warn_count ?? 0} warns` },
+    { label: 'Exposure', value: `${openPositions.length}`, sub: `${t.openPositions} / ${executionSummary.live_count || 0} live` },
+    { label: 'Ops', value: String(opsFlags?.severity || 'stable').toUpperCase(), sub: primaryNote },
+  ]
 
   return (
-    <div className="app">
+    <div className="app app-shell">
+      <div className="app-glow app-glow-a" />
+      <div className="app-glow app-glow-b" />
 
-      <header className="header">
-        <span className="header-title">📈 {t.title}</span>
+      <header className="hero-shell">
+        <div className="hero-copy">
+          <span className="hero-kicker">Operator cockpit</span>
+          <div className="hero-title-row">
+            <h1 className="hero-title">{t.title}</h1>
+            <span className={`hero-pill ${readinessToneClass}`}>{String(modeLabel).toUpperCase()}</span>
+          </div>
+          <p className="hero-summary">{primaryNote}</p>
+          <div className="hero-meta">
+            <span className={`status-dot ${isRunning ? 'on' : 'off'}`} />
+            <span>{isRunning ? t.running : t.stopped}</span>
+            <span>{t.lastUpdate}: {lastUpdate || '--:--:--'}</span>
+            <span>{status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : 'No next run yet'}</span>
+          </div>
+        </div>
 
-        <span className={`status-dot ${isRunning ? 'on' : 'off'}`} />
-        <span className="status-text">{isRunning ? t.running : t.stopped}</span>
-
-        {status?.next_run && (
-          <span className="next-run c-muted">
-            {t.nextRun}: {status.next_run.slice(11, 16)}
-          </span>
-        )}
-
-        <div className="header-sep" />
-
-        <button className="btn btn-start" onClick={handleStart} disabled={isRunning}>
-          ▶ {t.start}
-        </button>
-        <button className="btn btn-stop" onClick={handleStop} disabled={!isRunning}>
-          ■ {t.stop}
-        </button>
-
-        <div className="header-sep" />
-
-        <button className="btn btn-ghost" onClick={fetchAll}>
-          ↻ {countdown}s
-        </button>
-
-        {lastUpdate && (
-          <span className="last-update c-muted">{t.lastUpdate}: {lastUpdate}</span>
-        )}
-
-        <div className="header-sep" />
-
-        <button className="btn btn-lang" onClick={() => setLang((l) => (l === 'ko' ? 'en' : 'ko'))}>
-          {lang === 'ko' ? 'EN' : 'KO'}
-        </button>
+        <div className="hero-actions">
+          <div className="hero-action-group">
+            <button className="btn btn-start" onClick={handleStart} disabled={isRunning}>
+              {t.start}
+            </button>
+            <button className="btn btn-stop" onClick={handleStop} disabled={!isRunning}>
+              {t.stop}
+            </button>
+          </div>
+          <div className="hero-action-group">
+            <button className="btn btn-ghost" onClick={fetchAll}>
+              Refresh {countdown}s
+            </button>
+            <button className="btn btn-lang" onClick={() => setLang((l) => (l === 'ko' ? 'en' : 'ko'))}>
+              {lang === 'ko' ? 'EN' : 'KO'}
+            </button>
+          </div>
+        </div>
       </header>
+
+      <section className="hero-overview">
+        {statusCards.map((item) => (
+          <div className="overview-card" key={item.label}>
+            <span className="overview-label">{item.label}</span>
+            <strong className="overview-value">{item.value}</strong>
+            <span className="overview-sub">{item.sub}</span>
+          </div>
+        ))}
+      </section>
 
       <MarketRegimeBanner
         regime={regime?.regime ?? 'NEUTRAL'}
@@ -255,12 +312,11 @@ export default function App() {
 
       {error && (
         <div className="error-banner">
-          ⚠ {t.apiError} — {error}
+          {t.apiError}: {error}
         </div>
       )}
 
       <main className="dashboard">
-
         <div className="area-cards">
           <div className="stat-row">
             <StatCard
@@ -291,33 +347,104 @@ export default function App() {
               sub={stats?.max_drawdown_pct ? `${t.mdd} ${stats.max_drawdown_pct.toFixed(1)}%` : t.noData}
               valueClass={
                 stats?.sharpe_ratio == null ? 'c-text'
-                  : stats.sharpe_ratio >= 1   ? 'c-green'
-                  : stats.sharpe_ratio >= 0   ? 'c-yellow'
+                  : stats.sharpe_ratio >= 1 ? 'c-green'
+                  : stats.sharpe_ratio >= 0 ? 'c-yellow'
                   : 'c-red'
               }
             />
           </div>
+
+          <div className="signal-deck">
+            <div className={`execution-strip ${liveToneClass}`}>
+              <div className="execution-strip-main">
+                <strong>Live execution</strong>
+                <span>Total {executionSummary.live_count || 0}</span>
+                <span>Partial {executionSummary.partial_count || 0}</span>
+                <span>Pending {executionSummary.pending_count || 0}</span>
+                <span>Stale {executionSummary.stale_count || 0}</span>
+                <span>Severity {opsFlags.severity || 'stable'}</span>
+              </div>
+              {prioritySignals.length > 0 && (
+                <div className="priority-strip">
+                  {prioritySignals.map((item, idx) => (
+                    <span className="priority-chip" key={`${item}-${idx}`}>{item}</span>
+                  ))}
+                </div>
+              )}
+              <div className="execution-strip-sub">
+                {latestLive
+                  ? `Latest ${latestLive.desk || 'n/a'} / ${latestLive.action || 'n/a'} / ${latestLive.symbol || latestLive.focus || 'n/a'} / ${latestLive.status || 'n/a'} / ${latestLive.effect_status || 'n/a'}`
+                  : 'No live execution yet'}
+              </div>
+              {recentLive.length > 0 && (
+                <div className="execution-strip-list">
+                  {recentLive.map((item, idx) => (
+                    <div className="execution-strip-item" key={`${item.broker_order_id || item.created_at || idx}-${idx}`}>
+                      <strong>{item.desk || 'n/a'} / {item.action || 'n/a'}</strong>
+                      <span>{item.symbol || item.focus || 'n/a'}</span>
+                      <span>{item.status || 'n/a'} / {item.effect_status || 'n/a'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className={`readiness-strip ${readinessToneClass}`}>
+              <div className="readiness-head">
+                <strong>Live readiness</strong>
+                <span>{readiness?.overall || 'n/a'}</span>
+                <span>Blocks {readiness?.block_count ?? 0}</span>
+                <span>Warns {readiness?.warn_count ?? 0}</span>
+              </div>
+              <div className="readiness-grid">
+                {readinessItems.map((item, idx) => (
+                  <div className={`readiness-item readiness-${item.status || 'warn'}`} key={`${item.label || idx}-${idx}`}>
+                    <strong>{item.label || 'n/a'}</strong>
+                    <span>{item.detail || 'n/a'}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="broker-strip">
+                <div className="broker-item">
+                  <strong>Upbit</strong>
+                  <span>{brokerHealth?.upbit?.configured ? 'configured' : 'missing creds'}</span>
+                  <span>{brokerHealth?.upbit?.balances_ok ? `balances ${brokerHealth?.upbit?.balances_count || 0}` : 'balance check off'}</span>
+                </div>
+                <div className="broker-item">
+                  <strong>KIS</strong>
+                  <span>{brokerHealth?.kis?.configured ? 'configured' : 'missing creds'}</span>
+                  <span>{brokerHealth?.kis?.balances_ok ? `balances ${brokerHealth?.kis?.balances_count || 0}` : 'balance check off'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="area-insights">
+        <div className="area-insights feature-panel">
           <InsightPanel data={insights} agentStatus={agentStatus} />
         </div>
 
         <div className="area-position">
-          <div className="panel" style={{ height: '100%' }}>
-            <div className="tab-bar">
-              <button
-                className={`btn btn-tab ${activeTab === 'coin' ? 'active' : ''}`}
-                onClick={() => setActiveTab('coin')}
-              >
-                🪙 {t.tabCoin}
-              </button>
-              <button
-                className={`btn btn-tab ${activeTab === 'stock' ? 'active' : ''}`}
-                onClick={() => setActiveTab('stock')}
-              >
-                📊 {t.tabStock}
-              </button>
+          <div className="panel dock-panel" style={{ height: '100%' }}>
+            <div className="section-intro">
+              <div>
+                <div className="panel-title">Position Dock</div>
+                <div className="panel-subcopy">Switch desks and inspect exposure like a mobile dealing app.</div>
+              </div>
+              <div className="tab-bar">
+                <button
+                  className={`btn btn-tab ${activeTab === 'coin' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('coin')}
+                >
+                  Coin
+                </button>
+                <button
+                  className={`btn btn-tab ${activeTab === 'stock' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('stock')}
+                >
+                  Stock
+                </button>
+              </div>
             </div>
 
             {activeTab === 'coin' ? (
@@ -328,18 +455,17 @@ export default function App() {
           </div>
         </div>
 
-        <div className="area-chart">
+        <div className="area-chart feature-panel">
           <PnlChart chartData={chartData} t={t} />
         </div>
 
-        <div className="area-trades">
+        <div className="area-trades feature-panel">
           <TradeHistory trades={trades.slice(0, 15)} t={t} />
         </div>
 
-        <div className="area-logs">
+        <div className="area-logs feature-panel">
           <LogViewer lines={logs} t={t} />
         </div>
-
       </main>
     </div>
   )
