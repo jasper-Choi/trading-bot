@@ -50,6 +50,9 @@ def _extract_prices(market_snapshot: dict) -> dict[str, float]:
 
 
 def _extract_symbol(order: PaperOrder, market_snapshot: dict) -> str:
+    # Use the symbol the execution agent already picked
+    if order.symbol:
+        return order.symbol
     if order.desk == "crypto":
         match = re.search(r"KRW-[A-Z]+", order.focus)
         if match:
@@ -64,12 +67,12 @@ def _manage_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> 
     prices = _extract_prices(market_snapshot)
     update_positions_unrealized(prices)
     for order in paper_orders:
-        if order.action in _BUY_ACTIONS:
+        if order.action in _BUY_ACTIONS and order.status == "planned":
             symbol = _extract_symbol(order, market_snapshot)
             entry_price = prices.get(symbol, 0.0)
             if symbol and entry_price > 0:
                 open_or_skip_position(order.desk, symbol, entry_price, order.notional_pct, order.action)
-        elif order.action in _SELL_ACTIONS:
+        elif order.action in _SELL_ACTIONS and order.status == "planned":
             close_positions_for_desk(order.desk, prices)
 
 
