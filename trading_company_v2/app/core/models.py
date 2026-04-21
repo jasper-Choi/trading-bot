@@ -93,6 +93,7 @@ class ClosedPosition(BaseModel):
     won: bool = False
     opened_at: str = ""
     closed_at: str = Field(default_factory=utcnow_iso)
+    closed_reason: str = ""
 
 
 class CompanyState(BaseModel):

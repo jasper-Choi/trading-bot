@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import re
 
 from app.agents.chief_market_officer import CIOAgent
@@ -16,22 +17,76 @@ from app.agents.us_stock_desk_agent import USStockDeskAgent
 from app.config import settings
 from app.core.models import AgentResult, AgentSnapshot, CompanyState, CycleJournalEntry, PaperOrder
 from app.core.state_store import (
+    auto_exit_positions,
     close_positions_for_desk,
+    close_position_by_symbol,
     load_closed_positions,
     load_company_state,
+    load_active_live_order_locks,
     open_or_skip_position,
+    reconcile_live_order_effects,
+    refresh_live_order_statuses,
     save_company_state,
     save_cycle_journal,
+    save_live_order_attempts,
     save_paper_orders,
+    sync_live_positions,
     sync_paper_positions,
     update_positions_unrealized,
 )
 from app.notifier import notifier
+from app.services.broker_router import normalize_execution_mode, route_orders
+from app.services.kis_broker import (
+    get_account_positions as get_kis_account_positions,
+    get_order as get_kis_order,
+    normalize_order_state as normalize_kis_order_state,
+)
 from app.services.market_gateway import get_us_data_status
 from app.services.recommendation_engine import build_crypto_plan, build_korea_plan, build_us_plan
+from app.services.upbit_broker import get_account_positions, get_order, get_ticker_prices, normalize_order_state
 
 _BUY_ACTIONS = {"probe_longs", "attack_opening_drive", "selective_probe"}
 _SELL_ACTIONS = {"reduce_risk", "capital_preservation"}
+
+
+def _safe_parse_utc(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _execution_summary_snapshot(current_state: dict) -> dict[str, int]:
+    execution_log = list(current_state.get("execution_log", []) or [])
+    live_rows = [item for item in execution_log if item.get("source") == "live"]
+    partial_count = sum(
+        1
+        for item in live_rows
+        if str(item.get("status") or "") == "partial"
+        or str(item.get("effect_status") or "").startswith("partial")
+    )
+    pending_rows = [
+        item
+        for item in live_rows
+        if str(item.get("status") or "") in {"submitted", "partial"}
+        or str(item.get("effect_status") or "") in {"pending", "awaiting_balance_sync", "partial_balance_sync"}
+    ]
+    now_utc = datetime.now(timezone.utc)
+    stale_count = 0
+    for item in pending_rows:
+        created_at = _safe_parse_utc(str(item.get("created_at") or ""))
+        if created_at is None:
+            continue
+        if (now_utc - created_at).total_seconds() / 60 >= 15:
+            stale_count += 1
+    return {
+        "partial_count": partial_count,
+        "pending_count": len(pending_rows),
+        "stale_count": stale_count,
+    }
 
 
 def _extract_prices(market_snapshot: dict) -> dict[str, float]:
@@ -63,17 +118,122 @@ def _extract_symbol(order: PaperOrder, market_snapshot: dict) -> str:
     return str(candidates[0].get("ticker", "")) if candidates else ""
 
 
-def _manage_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> None:
+def _manage_positions(paper_orders: list[PaperOrder], market_snapshot: dict, skip_desks: set[str] | None = None) -> None:
+    skip_desks = skip_desks or set()
     prices = _extract_prices(market_snapshot)
     update_positions_unrealized(prices)
+    auto_exit_positions(prices, skip_desks=skip_desks)
     for order in paper_orders:
+        if order.desk in skip_desks:
+            continue
         if order.action in _BUY_ACTIONS and order.status == "planned":
             symbol = _extract_symbol(order, market_snapshot)
             entry_price = prices.get(symbol, 0.0)
             if symbol and entry_price > 0:
                 open_or_skip_position(order.desk, symbol, entry_price, order.notional_pct, order.action)
         elif order.action in _SELL_ACTIONS and order.status == "planned":
-            close_positions_for_desk(order.desk, prices)
+            if order.symbol:
+                close_position_by_symbol(order.desk, order.symbol, prices, reason="desk_exit")
+            else:
+                close_positions_for_desk(order.desk, prices)
+
+
+def _live_desks_for_mode(execution_mode: str) -> set[str]:
+    if execution_mode == "upbit_live":
+        return {"crypto"}
+    if execution_mode == "kis_live":
+        return {"korea"}
+    return set()
+
+
+def _order_intent(action: str) -> str:
+    if action in _BUY_ACTIONS:
+        return "entry"
+    if action in _SELL_ACTIONS:
+        return "exit"
+    return "other"
+
+
+def _filter_conflicting_live_orders(
+    paper_orders: list[PaperOrder],
+    requested_execution_mode: str,
+    market_snapshot: dict,
+) -> tuple[list[PaperOrder], list[str]]:
+    live_desks = _live_desks_for_mode(requested_execution_mode)
+    if not live_desks:
+        return paper_orders, []
+
+    locks = load_active_live_order_locks()
+    if not locks:
+        return paper_orders, []
+
+    lock_keys = {
+        (str(item.get("desk") or ""), str(item.get("symbol") or ""), str(item.get("intent") or ""))
+        for item in locks
+        if item.get("symbol")
+    }
+    desk_intents = {
+        (str(item.get("desk") or ""), str(item.get("intent") or ""))
+        for item in locks
+    }
+
+    kept: list[PaperOrder] = []
+    blocked_notes: list[str] = []
+    for order in paper_orders:
+        if order.status != "planned" or order.desk not in live_desks:
+            kept.append(order)
+            continue
+        intent = _order_intent(order.action)
+        symbol = str(order.symbol or _extract_symbol(order, market_snapshot) or "")
+        has_symbol_lock = bool(symbol) and (order.desk, symbol, intent) in lock_keys
+        has_desk_exit_lock = (not symbol) and intent == "exit" and (order.desk, intent) in desk_intents
+        if has_symbol_lock or has_desk_exit_lock:
+            blocked_target = symbol or order.desk
+            blocked_notes.append(f"live duplicate guard blocked {order.desk} {intent} for {blocked_target}")
+            continue
+        kept.append(order)
+    return kept, blocked_notes
+
+
+def _live_execution_guardrails(live_locks: list[dict]) -> dict[str, object]:
+    if not live_locks:
+        return {
+            "block_new_entries": False,
+            "risk_budget_cap": None,
+            "notes": [],
+        }
+
+    has_partial = any(
+        str(item.get("request_status") or "") == "partial"
+        or str(item.get("effect_status") or "").startswith("partial")
+        for item in live_locks
+    )
+    has_pending_entry = any(
+        str(item.get("intent") or "") == "entry"
+        and str(item.get("effect_status") or "") in {"pending", "awaiting_balance_sync", "partial_balance_sync", "linked_partial_open"}
+        for item in live_locks
+    )
+    has_pending_exit = any(
+        str(item.get("intent") or "") == "exit"
+        and str(item.get("effect_status") or "") in {"pending", "awaiting_balance_sync", "partial_close_pending"}
+        for item in live_locks
+    )
+
+    block_new_entries = has_partial or has_pending_entry or has_pending_exit
+    risk_budget_cap = 0.15 if (has_partial or has_pending_exit) else 0.25 if has_pending_entry else None
+    notes: list[str] = []
+    if has_partial:
+        notes.append("live conservative mode: partial fill unresolved, new entries paused")
+    elif has_pending_exit:
+        notes.append("live conservative mode: exit fill unresolved, new entries paused")
+    elif has_pending_entry:
+        notes.append("live conservative mode: entry sync pending, sizing capped")
+
+    return {
+        "block_new_entries": block_new_entries,
+        "risk_budget_cap": risk_budget_cap,
+        "notes": notes,
+    }
 
 
 class CompanyOrchestrator:
@@ -135,6 +295,7 @@ class CompanyOrchestrator:
         desk_stats = curr_daily.get("desk_stats", {}) or {}
         close_reason_stats = curr_daily.get("close_reason_stats", {}) or {}
         us_status = get_us_data_status()
+        execution_summary = _execution_summary_snapshot(current_state)
 
         if (curr_session.get("us_premarket") or curr_session.get("us_regular")) and not us_status.get("ok", False):
             alerts.append(
@@ -180,6 +341,17 @@ class CompanyOrchestrator:
                         ],
                     )
                 )
+        if int(execution_summary.get("stale_count", 0) or 0) > 0:
+            alerts.append(
+                (
+                    "Live stale execution alert",
+                    [
+                        f"stale orders: {execution_summary.get('stale_count', 0)}",
+                        f"pending: {execution_summary.get('pending_count', 0)}",
+                        f"partial: {execution_summary.get('partial_count', 0)}",
+                    ],
+                )
+            )
         return alerts
 
     @staticmethod
@@ -271,6 +443,16 @@ class CompanyOrchestrator:
             if action in {"stand_by", "watchlist_only"} and any("overheated" in note or "weakly confirmed" in note for note in notes):
                 add("info", f"{desk_name}_hold", f"{label} 데스크 보류: {plan.get('focus', 'n/a')}")
 
+        execution_summary = _execution_summary_snapshot(current_state)
+        if int(execution_summary.get("partial_count", 0) or 0) > 0:
+            add("warning", "live_partial_fill", f"live partial fill {execution_summary.get('partial_count', 0)} pending review")
+        elif int(execution_summary.get("pending_count", 0) or 0) > 0:
+            add("info", "live_pending", f"live orders pending {execution_summary.get('pending_count', 0)}")
+        if int(execution_summary.get("stale_count", 0) or 0) > 0:
+            add("warning", "live_stale_pending", f"live stale pending {execution_summary.get('stale_count', 0)} order(s)")
+        if not bool(current_state.get("allow_new_entries", True)) and int(execution_summary.get("pending_count", 0) or 0) > 0:
+            add("warning", "live_conservative_mode", "live execution unresolved, conservative entry pause active")
+
         severity = "stable"
         if any(item["level"] == "critical" for item in flags):
             severity = "critical"
@@ -293,10 +475,11 @@ class CompanyOrchestrator:
         state.stance = self._determine_stance(macro_result.score, trend_result.score)
         state.regime = self._determine_regime(macro_result.score, trend_result.score)
         state.risk_budget = 0.5 if state.stance == "BALANCED" else 0.7 if state.stance == "OFFENSE" else 0.3
-        state.execution_mode = "paper"
+        requested_execution_mode = normalize_execution_mode(settings.execution_mode)
+        state.execution_mode = requested_execution_mode
         state.notes = [
             f"{settings.company_name} operating on {settings.operator_name}'s personal-PC-first stack",
-            "paper trading only",
+            f"execution requested={requested_execution_mode}",
             "portable to personal PC",
         ]
         state.trader_principles = [
@@ -350,6 +533,16 @@ class CompanyOrchestrator:
             + float(state.daily_summary.get("unrealized_pnl_pct", 0.0) or 0.0)
             > -1.5
         )
+        live_locks = load_active_live_order_locks()
+        live_guardrails = _live_execution_guardrails(live_locks)
+        execution_risk_budget = state.risk_budget
+        risk_budget_cap = live_guardrails.get("risk_budget_cap")
+        if isinstance(risk_budget_cap, (int, float)):
+            execution_risk_budget = min(float(state.risk_budget), float(risk_budget_cap))
+        if bool(live_guardrails.get("block_new_entries")):
+            provisional_allow_new_entries = False
+        for note in list(live_guardrails.get("notes") or [])[:2]:
+            state.notes.append(str(note))
         self.execution_agent.configure(
             strategy_book=state.strategy_book,
             regime=state.regime,
@@ -357,15 +550,99 @@ class CompanyOrchestrator:
             open_positions=state.open_positions,
             closed_positions=load_closed_positions(limit=12),
             allow_new_entries=provisional_allow_new_entries,
-            risk_budget=state.risk_budget,
+            risk_budget=execution_risk_budget,
         )
         execution_result = self.execution_agent.safe_run()
         ops_result = self.ops_agent.safe_run()
         results.extend([execution_result, ops_result])
         paper_orders = [PaperOrder.model_validate(item) for item in execution_result.payload.get("orders", [])]
+        paper_orders, live_guard_notes = _filter_conflicting_live_orders(
+            paper_orders,
+            requested_execution_mode,
+            state.market_snapshot,
+        )
+        route_summary = route_orders(paper_orders, requested_execution_mode)
+        execution_result.payload["execution_router"] = route_summary
+        state.execution_mode = str(route_summary.get("applied_mode") or "paper")
+        if route_summary.get("broker_live"):
+            state.notes.append("broker live routing active")
+        elif route_summary.get("requested_mode") != route_summary.get("applied_mode"):
+            state.notes.append(f"execution fallback: {route_summary.get('requested_mode')} -> {route_summary.get('applied_mode')}")
+        for warning in route_summary.get("warnings", [])[:2]:
+            state.notes.append(warning)
+        for note in live_guard_notes[:3]:
+            state.notes.append(note)
+        save_live_order_attempts(route_summary, paper_orders)
+        broker_prices: dict[str, float] = dict(_extract_prices(state.market_snapshot))
+        if state.execution_mode == "upbit_live":
+            try:
+                refresh_summary = refresh_live_order_statuses(
+                    lambda row: normalize_order_state(get_order(str(row.get("broker_order_id") or "")))
+                )
+                if refresh_summary.get("checked"):
+                    state.notes.append(
+                        f"live order refresh checked={refresh_summary.get('checked', 0)} updated={refresh_summary.get('updated', 0)} failed={refresh_summary.get('failed', 0)}"
+                    )
+            except Exception as exc:
+                state.notes.append(f"live order refresh failed: {exc}")
+        elif state.execution_mode == "kis_live":
+            try:
+                refresh_summary = refresh_live_order_statuses(
+                    _refresh_kis_order
+                )
+                if refresh_summary.get("checked"):
+                    state.notes.append(
+                        f"live order refresh checked={refresh_summary.get('checked', 0)} updated={refresh_summary.get('updated', 0)} failed={refresh_summary.get('failed', 0)}"
+                    )
+            except Exception as exc:
+                state.notes.append(f"live order refresh failed: {exc}")
         save_paper_orders(paper_orders)
         sync_paper_positions(paper_orders=paper_orders, market_snapshot=state.market_snapshot)
-        _manage_positions(paper_orders, state.market_snapshot)
+        live_crypto_enabled = bool(route_summary.get("broker_live")) and state.execution_mode == "upbit_live"
+        if live_crypto_enabled:
+            try:
+                account_positions = get_account_positions()
+                missing_markets = [item["market"] for item in account_positions if item.get("market") and item["market"] not in broker_prices]
+                if missing_markets:
+                    broker_prices.update(get_ticker_prices(missing_markets))
+                live_sync = sync_live_positions("crypto", account_positions, broker_prices, default_action="live_sync")
+                state.notes.append(
+                    f"crypto broker sync opened={live_sync.get('opened', 0)} updated={live_sync.get('updated', 0)} closed={live_sync.get('closed', 0)}"
+                )
+            except Exception as exc:
+                state.notes.append(f"crypto broker sync failed: {exc}")
+            try:
+                effect_summary = reconcile_live_order_effects(broker_prices)
+                if effect_summary.get("checked"):
+                    state.notes.append(
+                        f"live effect reconcile checked={effect_summary.get('checked', 0)} updated={effect_summary.get('updated', 0)}"
+                    )
+            except Exception as exc:
+                state.notes.append(f"live effect reconcile failed: {exc}")
+        live_korea_enabled = bool(route_summary.get("broker_live")) and state.execution_mode == "kis_live"
+        if live_korea_enabled:
+            try:
+                account_positions = get_kis_account_positions()
+                live_sync = sync_live_positions("korea", account_positions, broker_prices, default_action="kis_live_sync")
+                state.notes.append(
+                    f"korea broker sync opened={live_sync.get('opened', 0)} updated={live_sync.get('updated', 0)} closed={live_sync.get('closed', 0)}"
+                )
+            except Exception as exc:
+                state.notes.append(f"korea broker sync failed: {exc}")
+            try:
+                effect_summary = reconcile_live_order_effects(broker_prices)
+                if effect_summary.get("checked"):
+                    state.notes.append(
+                        f"live effect reconcile checked={effect_summary.get('checked', 0)} updated={effect_summary.get('updated', 0)}"
+                    )
+            except Exception as exc:
+                state.notes.append(f"live effect reconcile failed: {exc}")
+        skip_desks: set[str] = set()
+        if live_crypto_enabled:
+            skip_desks.add("crypto")
+        if live_korea_enabled:
+            skip_desks.add("korea")
+        _manage_positions(paper_orders, state.market_snapshot, skip_desks=skip_desks or None)
         save_cycle_journal(
             CycleJournalEntry(
                 stance=state.stance,
@@ -393,12 +670,20 @@ class CompanyOrchestrator:
 
         risk_agent = RiskCommitteeAgent()
         state = risk_agent.apply(state)
+        if bool(live_guardrails.get("block_new_entries")):
+            state.allow_new_entries = False
+        if isinstance(risk_budget_cap, (int, float)):
+            state.risk_budget = min(float(state.risk_budget), float(risk_budget_cap))
         save_company_state(state)
         current_state = state.model_dump()
+        current_state["execution_router"] = route_summary
         current_state["ops_flags"] = self._ops_flag_snapshot(current_state)
         notifier.send_cycle_summary(previous_state=previous_state, current_state=state.model_dump())
         if self._risk_alert_needed(previous_state, current_state):
             notifier.send_risk_alert(current_state)
+        execution_summary = _execution_summary_snapshot(current_state)
+        if int(execution_summary.get("stale_count", 0) or 0) > 0:
+            notifier.send_stale_execution_alert(execution_summary)
         if self._realtime_decision_changed(previous_state, current_state):
             notifier.send_realtime_decision_alert(
                 {
@@ -420,3 +705,16 @@ class CompanyOrchestrator:
             "state": current_state,
             "results": [result.model_dump() for result in results],
         }
+
+
+def _refresh_kis_order(row: dict[str, str]) -> dict[str, str]:
+    action = str(row.get("action") or "")
+    side_hint = "sell" if action in _SELL_ACTIONS else "buy"
+    payload = get_kis_order(
+        str(row.get("broker_order_id") or ""),
+        symbol=str(row.get("symbol") or ""),
+        side_hint=side_hint,
+    )
+    normalized = normalize_kis_order_state(payload)
+    normalized["message"] = str(payload.get("ord_tmd") or payload.get("ORD_TMD") or "")
+    return normalized

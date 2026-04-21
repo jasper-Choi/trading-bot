@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
+import hashlib
+import time
 from typing import Any
 
 import requests
@@ -13,6 +16,8 @@ class TelegramNotifier:
     token: str
     chat_id: str
     last_error: str = ""
+    _last_sent_at: dict[str, float] = field(default_factory=dict)
+    _last_sent_hash: dict[str, str] = field(default_factory=dict)
 
     @property
     def enabled(self) -> bool:
@@ -44,6 +49,28 @@ class TelegramNotifier:
             self.last_error = str(exc)
             print(f"[notifier] telegram send failed: {self.last_error}")
             return False
+
+    @staticmethod
+    def _fingerprint(text: str) -> str:
+        return hashlib.sha1(text.strip().encode("utf-8")).hexdigest()
+
+    def _send_keyed(self, key: str, text: str, cooldown_seconds: int, suppress_duplicate_seconds: int | None = None) -> bool:
+        if not self.enabled:
+            return False
+        now = time.time()
+        fingerprint = self._fingerprint(text)
+        last_at = float(self._last_sent_at.get(key, 0.0) or 0.0)
+        last_hash = self._last_sent_hash.get(key, "")
+        duplicate_window = suppress_duplicate_seconds if suppress_duplicate_seconds is not None else cooldown_seconds
+        if last_hash == fingerprint and (now - last_at) < duplicate_window:
+            return False
+        if (now - last_at) < cooldown_seconds:
+            return False
+        sent = self.send(text)
+        if sent:
+            self._last_sent_at[key] = now
+            self._last_sent_hash[key] = fingerprint
+        return sent
 
     def send_cycle_summary(self, previous_state: dict[str, Any], current_state: dict[str, Any]) -> bool:
         if not self.enabled:
@@ -97,7 +124,12 @@ class TelegramNotifier:
         flag_items = list((ops_flags.get("items") or [])[:2]) if isinstance(ops_flags, dict) else []
         if flag_items:
             lines.append(f"ops: {ops_flags.get('severity', 'n/a')} / " + " | ".join(item.get("message", "n/a") for item in flag_items))
-        return self.send("\n".join(lines))
+        return self._send_keyed(
+            "cycle_summary",
+            "\n".join(lines),
+            cooldown_seconds=45 * 60,
+            suppress_duplicate_seconds=3 * 60 * 60,
+        )
 
     def send_error(self, message: str) -> bool:
         if not self.enabled:
@@ -126,13 +158,52 @@ class TelegramNotifier:
             lines.append(f"ops severity: {ops_flags.get('severity', 'n/a')}")
             for item in flag_items:
                 lines.append(f"- {item.get('message', 'n/a')}")
-        return self.send("\n".join(lines))
+        return self._send_keyed(
+            "risk_alert",
+            "\n".join(lines),
+            cooldown_seconds=30 * 60,
+            suppress_duplicate_seconds=3 * 60 * 60,
+        )
 
     def send_ops_alert(self, title: str, lines: list[str]) -> bool:
         if not self.enabled:
             return False
         body = "\n".join([f"[{settings.company_name}] {title}", *lines])
-        return self.send(body)
+        lowered = title.lower()
+        cooldown_seconds = 90 * 60 if "hold alert" in lowered else 45 * 60
+        duplicate_window = 6 * 60 * 60 if "hold alert" in lowered else 3 * 60 * 60
+        return self._send_keyed(
+            f"ops_alert:{lowered}",
+            body,
+            cooldown_seconds=cooldown_seconds,
+            suppress_duplicate_seconds=duplicate_window,
+        )
+
+    def send_stale_execution_alert(self, summary: dict[str, Any]) -> bool:
+        if not self.enabled:
+            return False
+        stale_items = list(summary.get("stale_live") or [])[:3]
+        stale_count = int(summary.get("stale_count", 0) or 0)
+        if stale_count <= 0 or not stale_items:
+            return False
+        lines = [
+            f"[{settings.company_name}] stale live execution alert",
+            f"stale orders: {stale_count}",
+            f"pending: {summary.get('pending_count', 0)} / partial: {summary.get('partial_count', 0)}",
+        ]
+        for item in stale_items:
+            lines.append(
+                f"- {item.get('desk', 'n/a')} / {item.get('action', 'n/a')} / "
+                f"{item.get('symbol') or item.get('focus') or 'n/a'} / "
+                f"{item.get('status', 'n/a')} / {item.get('effect_status', 'n/a')} / "
+                f"{item.get('age_minutes', 'n/a')}m"
+            )
+        return self._send_keyed(
+            "stale_live_execution",
+            "\n".join(lines),
+            cooldown_seconds=6 * 60 * 60,
+            suppress_duplicate_seconds=12 * 60 * 60,
+        )
 
     def send_realtime_decision_alert(self, snapshot: dict[str, Any]) -> bool:
         if not self.enabled:
@@ -140,6 +211,13 @@ class TelegramNotifier:
         strategy_book = snapshot.get("strategy_book", {}) or {}
         runtime_profile = snapshot.get("runtime_profile", {}) or {}
         orders = snapshot.get("orders", []) or []
+        actionable_actions = {
+            str((strategy_book.get(plan_name, {}) or {}).get("action", "n/a")).lower()
+            for plan_name in ("crypto_plan", "korea_plan", "us_plan")
+        }
+        passive_actions = {"hold", "observe", "wait", "n/a", "none", "flat", "idle"}
+        if not orders and actionable_actions.issubset(passive_actions):
+            return False
         lines = [
             f"[{settings.company_name}] realtime decision",
             f"runtime: {runtime_profile.get('mode', 'n/a')} / {runtime_profile.get('interval_seconds', 'n/a')}s",
@@ -150,7 +228,12 @@ class TelegramNotifier:
         ]
         if orders:
             lines.append("orders: " + " | ".join(f"{item.get('desk')}={item.get('action')}/{item.get('status')}" for item in orders))
-        return self.send("\n".join(lines))
+        return self._send_keyed(
+            "realtime_decision",
+            "\n".join(lines),
+            cooldown_seconds=2 * 60 * 60,
+            suppress_duplicate_seconds=6 * 60 * 60,
+        )
 
 
 notifier = TelegramNotifier(

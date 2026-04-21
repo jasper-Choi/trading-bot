@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 from base64 import b64decode
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, Response
@@ -14,13 +15,43 @@ from app.core.models import CompanyState
 from app.core.state_store import init_db, load_closed_positions, load_company_state, load_open_positions, load_performance_quick_stats
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
+from app.services.kis_broker import get_account_positions as get_kis_account_positions
+from app.services.kis_broker import get_order as get_kis_order
+from app.services.kis_broker import normalize_order_state as normalize_kis_order_state
 from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_us_daily_prices, get_us_data_status
 from app.services.recommendation_engine import build_crypto_plan, build_korea_plan, build_us_plan
+from app.services.upbit_broker import get_account_positions as get_upbit_account_positions
+from app.services.upbit_broker import get_order as get_upbit_order
+from app.services.upbit_broker import normalize_order_state as normalize_upbit_order_state
 from app.service_manager import local_access_urls
 
 
 app = FastAPI(title="Trading Company V2", version="0.1.0")
 orchestrator = CompanyOrchestrator()
+
+
+def _safe_parse_utc(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _latest_live_order_for_mode(state: CompanyState, mode: str) -> dict | None:
+    for item in list(state.execution_log or []):
+        if item.get("source") != "live":
+            continue
+        if str(item.get("applied_mode") or "") != mode:
+            continue
+        return item
+    return None
+
+
+def _check_item(status: str, label: str, detail: str) -> dict:
+    return {"status": status, "label": label, "detail": detail}
 
 
 def _auth_enabled() -> bool:
@@ -207,6 +238,40 @@ def _build_market_charts_payload(state: CompanyState) -> dict:
     }
 
 
+def _build_execution_summary(state: CompanyState) -> dict:
+    execution_log = list(state.execution_log or [])
+    live_rows = [item for item in execution_log if item.get("source") == "live"]
+    partial_rows = [
+        item
+        for item in live_rows
+        if str(item.get("status") or "") == "partial"
+        or str(item.get("effect_status") or "").startswith("partial")
+    ]
+    pending_rows = [
+        item
+        for item in live_rows
+        if str(item.get("status") or "") in {"submitted", "partial"}
+        or str(item.get("effect_status") or "") in {"pending", "awaiting_balance_sync", "partial_balance_sync"}
+    ]
+    now_utc = datetime.now(timezone.utc)
+    stale_rows = []
+    for item in pending_rows:
+        created_at = _safe_parse_utc(str(item.get("created_at") or ""))
+        if created_at is None:
+            continue
+        age_minutes = (now_utc - created_at).total_seconds() / 60
+        if age_minutes >= 15:
+            stale_rows.append({**item, "age_minutes": round(age_minutes, 1)})
+    return {
+        "live_count": len(live_rows),
+        "partial_count": len(partial_rows),
+        "pending_count": len(pending_rows),
+        "stale_count": len(stale_rows),
+        "latest_live": live_rows[0] if live_rows else None,
+        "stale_live": stale_rows[:3],
+    }
+
+
 def _build_ops_flags(state: CompanyState) -> dict:
     daily = state.daily_summary or {}
     close_reason_stats = daily.get("close_reason_stats", {}) or {}
@@ -257,6 +322,18 @@ def _build_ops_flags(state: CompanyState) -> dict:
         notes = [str(item) for item in (plan.get("notes", []) or [])]
         if action in {"stand_by", "watchlist_only"} and any("overheated" in note or "weakly confirmed" in note for note in notes):
             add_flag("info", f"{desk_name}_hold", f"{label} 데스크 보류: {plan.get('focus', 'n/a')}")
+
+    execution_summary = _build_execution_summary(state)
+    if int(execution_summary.get("partial_count", 0) or 0) > 0:
+        add_flag("warning", "live_partial_fill", f"live 부분체결 {execution_summary.get('partial_count', 0)}건 확인 필요")
+    elif int(execution_summary.get("pending_count", 0) or 0) > 0:
+        add_flag("info", "live_pending", f"live 주문 대기 {execution_summary.get('pending_count', 0)}건")
+
+    if not allow_new_entries and int(execution_summary.get("pending_count", 0) or 0) > 0:
+        add_flag("warning", "live_conservative_mode", "live execution unresolved, conservative entry pause active")
+
+    if int(execution_summary.get("stale_count", 0) or 0) > 0:
+        add_flag("warning", "live_stale_pending", f"live stale pending {execution_summary.get('stale_count', 0)} order(s)")
 
     severity = "stable"
     if any(item["level"] == "critical" for item in flags):
@@ -334,6 +411,7 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
         "closed_positions": closed_positions,
         "performance": _build_performance_payload(state, closed_positions),
         "capital": _build_capital_payload(state),
+        "execution_summary": _build_execution_summary(state),
         "exposure": {
             "gross_open_notional_pct": float(state.daily_summary.get("gross_open_notional_pct", 0.0) or 0.0),
             "allow_new_entries": bool(state.allow_new_entries),
@@ -355,6 +433,14 @@ def health() -> dict:
     return {
         "ok": True,
         "env": settings.app_env,
+        "execution": {
+            "requested_mode": settings.execution_mode,
+            "live_capital_krw": settings.live_capital_krw,
+            "upbit_allow_live": settings.upbit_allow_live,
+            "upbit_credentials_present": bool(settings.upbit_access_key and settings.upbit_secret_key),
+            "kis_allow_live": settings.kis_allow_live,
+            "kis_credentials_present": bool(settings.kis_app_key and settings.kis_app_secret and settings.kis_account_no and settings.kis_product_code),
+        },
         "telegram_enabled": notifier.enabled,
         "telegram_last_error": notifier.last_error or None,
         "us_data_status": get_us_data_status(),
@@ -375,6 +461,8 @@ def dashboard_data() -> dict:
         "operator_name": settings.operator_name,
         "state": state.model_dump(),
         "dashboard": _build_dashboard_payload(state),
+        "broker_live_health": broker_live_health(),
+        "live_readiness_checklist": live_readiness_checklist(),
     }
 
 
@@ -446,6 +534,8 @@ def mobile_summary() -> dict:
         },
         "runtime_profile": _runtime_profile(state),
         "ops_flags": _build_ops_flags(state),
+        "execution_summary": _build_execution_summary(state),
+        "live_readiness": live_readiness_checklist(),
         "headline": {
             "win_rate": daily.get("win_rate", 0.0),
             "expectancy_pct": daily.get("expectancy_pct", 0.0),
@@ -580,6 +670,247 @@ def live_decision() -> dict:
     return _simulate_decision_snapshot(state, state.session_state or {})
 
 
+@app.get("/diagnostics/live-execution-health")
+def live_execution_health() -> dict:
+    state = load_company_state()
+    execution_summary = _build_execution_summary(state)
+    ops_flags = _build_ops_flags(state)
+    stale_live = list(execution_summary.get("stale_live") or [])[:3]
+    latest_live = execution_summary.get("latest_live")
+    return {
+        "updated_at": state.updated_at,
+        "execution_mode": state.execution_mode,
+        "allow_new_entries": state.allow_new_entries,
+        "risk_budget": state.risk_budget,
+        "ops_severity": ops_flags.get("severity", "stable"),
+        "execution_summary": execution_summary,
+        "latest_live": latest_live,
+        "stale_live": stale_live,
+        "ops_items": (ops_flags.get("items") or [])[:5],
+        "notes": [
+            note
+            for note in (state.notes or [])
+            if "live" in str(note).lower() or "execution" in str(note).lower() or "broker" in str(note).lower()
+        ][:8],
+    }
+
+
+@app.get("/diagnostics/broker-live-health")
+def broker_live_health() -> dict:
+    state = load_company_state()
+    execution_summary = _build_execution_summary(state)
+    upbit_latest = _latest_live_order_for_mode(state, "upbit_live")
+    kis_latest = _latest_live_order_for_mode(state, "kis_live")
+
+    def upbit_snapshot() -> dict:
+        snapshot = {
+            "enabled": bool(settings.upbit_allow_live and settings.upbit_access_key and settings.upbit_secret_key),
+            "configured": bool(settings.upbit_access_key and settings.upbit_secret_key),
+            "balances_ok": False,
+            "balances_count": 0,
+            "latest_order_check_ok": False,
+            "latest_order_state": None,
+            "latest_order_error": None,
+        }
+        if not snapshot["configured"]:
+            snapshot["latest_order_error"] = "missing_credentials"
+            return snapshot
+        try:
+            balances = get_upbit_account_positions()
+            snapshot["balances_ok"] = True
+            snapshot["balances_count"] = len(balances)
+        except Exception as exc:
+            snapshot["latest_order_error"] = f"balances_failed: {exc}"
+        order_id = str((upbit_latest or {}).get("broker_order_id") or "")
+        if order_id:
+            try:
+                payload = get_upbit_order(order_id)
+                snapshot["latest_order_check_ok"] = True
+                snapshot["latest_order_state"] = normalize_upbit_order_state(payload)
+            except Exception as exc:
+                snapshot["latest_order_error"] = f"order_failed: {exc}"
+        return snapshot
+
+    def kis_snapshot() -> dict:
+        snapshot = {
+            "enabled": bool(
+                settings.kis_allow_live
+                and settings.kis_app_key
+                and settings.kis_app_secret
+                and settings.kis_account_no
+                and settings.kis_product_code
+            ),
+            "configured": bool(
+                settings.kis_app_key
+                and settings.kis_app_secret
+                and settings.kis_account_no
+                and settings.kis_product_code
+            ),
+            "balances_ok": False,
+            "balances_count": 0,
+            "latest_order_check_ok": False,
+            "latest_order_state": None,
+            "latest_order_error": None,
+        }
+        if not snapshot["configured"]:
+            snapshot["latest_order_error"] = "missing_credentials"
+            return snapshot
+        try:
+            balances = get_kis_account_positions()
+            snapshot["balances_ok"] = True
+            snapshot["balances_count"] = len(balances)
+        except Exception as exc:
+            snapshot["latest_order_error"] = f"balances_failed: {exc}"
+        order_id = str((kis_latest or {}).get("broker_order_id") or "")
+        symbol = str((kis_latest or {}).get("symbol") or "")
+        side_hint = "sell" if str((kis_latest or {}).get("action") or "") in {"reduce_risk", "capital_preservation"} else "buy"
+        if order_id:
+            try:
+                payload = get_kis_order(order_id, symbol=symbol, side_hint=side_hint)
+                snapshot["latest_order_check_ok"] = True
+                snapshot["latest_order_state"] = normalize_kis_order_state(payload)
+            except Exception as exc:
+                snapshot["latest_order_error"] = f"order_failed: {exc}"
+        return snapshot
+
+    return {
+        "updated_at": state.updated_at,
+        "execution_mode": state.execution_mode,
+        "execution_summary": execution_summary,
+        "upbit": upbit_snapshot(),
+        "kis": kis_snapshot(),
+        "latest_live_orders": {
+            "upbit_live": upbit_latest,
+            "kis_live": kis_latest,
+        },
+    }
+
+
+@app.get("/diagnostics/live-readiness-checklist")
+def live_readiness_checklist() -> dict:
+    state = load_company_state()
+    execution_summary = _build_execution_summary(state)
+    broker_health = broker_live_health()
+    checklist: list[dict] = []
+
+    checklist.append(
+        _check_item(
+            "pass" if settings.live_capital_krw > 0 else "block",
+            "Live Capital",
+            f"LIVE_CAPITAL_KRW={settings.live_capital_krw}",
+        )
+    )
+    checklist.append(
+        _check_item(
+            "pass" if bool(settings.app_username and settings.app_password) else "warn",
+            "App Auth",
+            "basic auth configured" if settings.app_username and settings.app_password else "dashboard basic auth not configured",
+        )
+    )
+    checklist.append(
+        _check_item(
+            "pass" if notifier.enabled else "warn",
+            "Telegram",
+            "telegram enabled" if notifier.enabled else "telegram disabled",
+        )
+    )
+
+    mode = str(state.execution_mode or "paper")
+    if mode == "paper":
+        checklist.append(_check_item("warn", "Execution Mode", "currently paper mode"))
+    else:
+        checklist.append(_check_item("pass", "Execution Mode", f"current mode {mode}"))
+
+    for broker_name in ("upbit", "kis"):
+        health = broker_health.get(broker_name, {}) or {}
+        broker_enabled = bool(health.get("enabled"))
+        configured = bool(health.get("configured"))
+        balances_ok = bool(health.get("balances_ok"))
+        latest_order_ok = bool(health.get("latest_order_check_ok"))
+        latest_order_state = health.get("latest_order_state") or {}
+        latest_error = str(health.get("latest_order_error") or "")
+
+        checklist.append(
+            _check_item(
+                "pass" if configured else "warn",
+                f"{broker_name.upper()} Credentials",
+                "configured" if configured else latest_error or "missing credentials",
+            )
+        )
+        checklist.append(
+            _check_item(
+                "pass" if broker_enabled else "warn",
+                f"{broker_name.upper()} Live Switch",
+                "live enabled" if broker_enabled else "live disabled",
+            )
+        )
+        checklist.append(
+            _check_item(
+                "pass" if balances_ok else ("warn" if configured else "warn"),
+                f"{broker_name.upper()} Balance Check",
+                f"balances_ok={balances_ok} count={health.get('balances_count', 0)}",
+            )
+        )
+        if latest_order_ok:
+            checklist.append(
+                _check_item(
+                    "pass",
+                    f"{broker_name.upper()} Order Lookup",
+                    f"latest order status={latest_order_state.get('request_status', 'n/a')} / broker={latest_order_state.get('broker_state', 'n/a')}",
+                )
+            )
+        else:
+            checklist.append(
+                _check_item(
+                    "warn" if configured else "warn",
+                    f"{broker_name.upper()} Order Lookup",
+                    latest_error or "no recent live order to verify",
+                )
+            )
+
+    pending_count = int(execution_summary.get("pending_count", 0) or 0)
+    partial_count = int(execution_summary.get("partial_count", 0) or 0)
+    stale_count = int(execution_summary.get("stale_count", 0) or 0)
+    allow_new_entries = bool(state.allow_new_entries)
+
+    checklist.append(
+        _check_item(
+            "pass" if pending_count == 0 else "warn",
+            "Pending Live Orders",
+            f"pending={pending_count} / partial={partial_count}",
+        )
+    )
+    checklist.append(
+        _check_item(
+            "pass" if stale_count == 0 else "block",
+            "Stale Live Orders",
+            f"stale={stale_count}",
+        )
+    )
+    checklist.append(
+        _check_item(
+            "pass" if allow_new_entries else "warn",
+            "Entry Gate",
+            "new entries allowed" if allow_new_entries else "new entries blocked by risk/conservative mode",
+        )
+    )
+
+    block_count = sum(1 for item in checklist if item["status"] == "block")
+    warn_count = sum(1 for item in checklist if item["status"] == "warn")
+    overall = "blocked" if block_count > 0 else "caution" if warn_count > 0 else "ready"
+
+    return {
+        "updated_at": state.updated_at,
+        "overall": overall,
+        "block_count": block_count,
+        "warn_count": warn_count,
+        "execution_mode": mode,
+        "execution_summary": execution_summary,
+        "checklist": checklist,
+        "notes": (state.notes or [])[-8:],
+    }
+
+
 @app.post("/cycle")
 def cycle() -> dict:
     return orchestrator.run_cycle()
@@ -596,7 +927,7 @@ def performance() -> dict:
     return {
         "stats": load_performance_quick_stats(),
         "open_positions": [p.model_dump() for p in load_open_positions()],
-        "closed_positions": [p.model_dump() for p in load_closed_positions(limit=50)],
+        "closed_positions": load_closed_positions(limit=50),
     }
 
 
@@ -1178,6 +1509,23 @@ def root() -> str:
         flex-direction: column;
         align-items: flex-start;
       }}
+      .live-pill,
+      .tag-cloud,
+      .realtime-panel,
+      .ops-banner {{
+        width: 100%;
+      }}
+      .realtime-panel,
+      .two-up {{
+        grid-template-columns: 1fr;
+      }}
+      .section-head,
+      .status-head,
+      .row-top,
+      .row-foot {{
+        flex-direction: column;
+        align-items: flex-start;
+      }}
       .headline h1 {{
         font-size: 1.6rem;
       }}
@@ -1191,6 +1539,26 @@ def root() -> str:
       .score-ring {{
         width: 144px;
         height: 144px;
+      }}
+      .list-row {{
+        gap: 6px;
+      }}
+    }}
+    @media (max-width: 520px) {{
+      .brand-mark {{
+        width: 42px;
+        height: 42px;
+      }}
+      .headline h1 {{
+        font-size: 1.35rem;
+      }}
+      .metric-card,
+      .section-card,
+      .realtime-card {{
+        padding: 14px;
+      }}
+      .shell {{
+        padding: 12px 10px 24px;
       }}
     }}
   </style>
@@ -1646,11 +2014,21 @@ def root() -> str:
       const liveDecision = await liveRes.json();
       const state = data.state;
       const dashboard = data.dashboard || {{}};
+      const readiness = data.live_readiness_checklist || {{}};
+      const brokerHealth = data.broker_live_health || {{}};
       const performance = dashboard.performance || {{}};
       const capital = dashboard.capital || {{}};
       const opsFlags = dashboard.ops_flags || {{ severity: 'stable', items: [] }};
       const runtimeProfile = dashboard.runtime_profile || {{}};
       const marketCharts = dashboard.market_charts || {{}};
+      const executionSummary = dashboard.execution_summary || {{}};
+      const prioritySignals = [
+        readiness.overall === 'blocked' ? `Execution blocked: ${{readiness.block_count || 0}} hard stop` : null,
+        (executionSummary.stale_count || 0) > 0 ? `Stale live orders: ${{executionSummary.stale_count || 0}}` : null,
+        (executionSummary.partial_count || 0) > 0 ? `Partial fills pending review: ${{executionSummary.partial_count || 0}}` : null,
+        (executionSummary.pending_count || 0) > 0 ? `Pending live orders: ${{executionSummary.pending_count || 0}}` : null,
+        brokerHealth.upbit?.configured === false && brokerHealth.kis?.configured === false ? 'No live broker credentials configured' : null
+      ].filter(Boolean);
       const healthRes = await fetch('/health', {{ cache: 'no-store' }});
       const health = await healthRes.json();
 
@@ -1723,8 +2101,10 @@ def root() -> str:
       document.getElementById('losses-metric').textContent = performance.losses ?? 0;
 
       document.getElementById('trade-pulse').innerHTML = [
+        ...prioritySignals.map(item => `<li><strong>Priority</strong>: ${{item}}</li>`),
         `<li><strong>Ops severity</strong>: ${{opsFlags.severity || 'stable'}}</li>`,
         `<li><strong>Runtime</strong>: ${{runtimeProfile.mode || 'n/a'}} / ${{runtimeProfile.interval_seconds || '-'}}s</li>`,
+        `<li><strong>Live execution</strong>: ${{executionSummary.live_count || 0}} total / partial ${{executionSummary.partial_count || 0}} / pending ${{executionSummary.pending_count || 0}} / stale ${{executionSummary.stale_count || 0}}</li>`,
         `<li><strong>Portfolio</strong>: KRW ${{Number(capital.total_krw || 0).toLocaleString()}}</li>`,
         `<li><strong>Expectancy</strong>: ${{performance.expectancy_pct ?? 0}}% / KRW ${{Number(performance.expectancy_krw || 0).toLocaleString()}}</li>`,
         `<li><strong>Win rate</strong>: ${{state.daily_summary.win_rate ?? 0}}% / wins ${{state.daily_summary.wins ?? 0}} / losses ${{state.daily_summary.losses ?? 0}}</li>`,
@@ -1777,13 +2157,16 @@ def root() -> str:
       ).join('') || '<li class="list-row">No U.S. snapshot yet</li>';
       document.getElementById('market-data-status').innerHTML = [
         `<li><strong>U.S. data</strong>: ${{health.us_data_status?.provider || 'n/a'}} / ${{health.us_data_status?.message || 'n/a'}}</li>`,
-        `<li><strong>Telegram</strong>: ${{health.telegram_enabled ? 'enabled' : 'disabled'}}</li>`
+        `<li><strong>Telegram</strong>: ${{health.telegram_enabled ? 'enabled' : 'disabled'}}</li>`,
+        `<li><strong>Readiness</strong>: ${{readiness.overall || 'n/a'}} / blocks ${{readiness.block_count || 0}} / warns ${{readiness.warn_count || 0}}</li>`,
+        `<li><strong>Upbit</strong>: ${{brokerHealth.upbit?.configured ? 'configured' : 'missing creds'}} / balances ${{brokerHealth.upbit?.balances_ok ? 'ok' : 'check needed'}}</li>`,
+        `<li><strong>KIS</strong>: ${{brokerHealth.kis?.configured ? 'configured' : 'missing creds'}} / balances ${{brokerHealth.kis?.balances_ok ? 'ok' : 'check needed'}}</li>`
       ].join('');
       document.getElementById('paper-blotter').innerHTML = (state.execution_log || []).slice(0, 8).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.desk}} / ${{item.action}}</strong><span class="row-meta">${{item.status}}</span></div><div class="row-foot">${{item.size}} / pnl est ${{item.pnl_estimate_pct}}% / ${{item.created_at}}</div></li>`
+        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.desk}} / ${{item.action}}</strong><span class="row-meta">${{item.source === 'live' ? `${{item.status || 'n/a'}} / ${{item.effect_status || 'n/a'}}` : (item.status || 'n/a')}}</span></div><div class="row-foot">${{item.size}} / ${{item.source || 'paper'}} / ${{item.applied_mode || 'paper'}} / ${{item.symbol || item.focus || 'n/a'}} / ${{item.created_at}}</div></li>`
       ).join('') || '<li class="list-row">No paper orders yet</li>';
       document.getElementById('open-positions').innerHTML = (dashboard.open_positions || []).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.symbol}}</strong><span class="row-meta">${{item.pnl_pct}}%</span></div><div class="row-foot">${{item.desk}} / entry KRW ${{Number(item.entry_price || 0).toLocaleString()}} / current KRW ${{Number(item.current_price || 0).toLocaleString()}} / cycles ${{item.cycles_open}}</div></li>`
+        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.symbol}}</strong><span class="row-meta">${{Number(item.unrealized_pnl_pct || 0).toFixed(2)}}%</span></div><div class="row-foot">${{item.desk}} / entry KRW ${{Number(item.entry_price || 0).toLocaleString()}} / current KRW ${{Number(item.current_price || 0).toLocaleString()}} / opened ${{item.opened_at || 'n/a'}}</div></li>`
       ).join('') || '<li class="list-row">No open positions</li>';
       document.getElementById('closed-positions').innerHTML = (dashboard.closed_positions || []).map(item =>
         `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.symbol}}</strong><span class="row-meta">${{item.pnl_pct}}%</span></div><div class="row-foot">${{item.desk}} / ${{item.closed_reason}} / ${{item.closed_at || 'n/a'}}</div></li>`

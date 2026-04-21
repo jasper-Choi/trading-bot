@@ -52,6 +52,11 @@ class ExecutionAgent(BaseAgent):
     def _desk_open_count(self, desk: str) -> int:
         return sum(1 for item in self.open_positions if item.get("desk") == desk)
 
+    def _has_open_position(self, desk: str, symbol: str) -> bool:
+        if symbol:
+            return any(item.get("desk") == desk and item.get("symbol") == symbol for item in self.open_positions)
+        return any(item.get("desk") == desk for item in self.open_positions)
+
     @staticmethod
     def _desk_limits(desk: str) -> tuple[int, float]:
         if desk == "crypto":
@@ -289,7 +294,8 @@ class ExecutionAgent(BaseAgent):
         }
         pnl_estimate_pct = pnl_map.get(action, 0.0)
         actionable_entries = {"probe_longs", "attack_opening_drive", "selective_probe"}
-        existing_open = any(item.get("desk") == desk and item.get("symbol") == symbol for item in self.open_positions)
+        actionable_exits = {"reduce_risk", "capital_preservation"}
+        existing_open = self._has_open_position(desk, symbol)
         cooldown_loss = self._recent_loss_cooldown(desk, symbol)
         repeated_loss_block = self._repeated_loss_block(desk, symbol)
         extended_symbol_block = self._extended_symbol_block(desk, symbol)
@@ -305,6 +311,7 @@ class ExecutionAgent(BaseAgent):
         desk_position_cap_hit = desk_open_count >= max_positions
         desk_notional_cap_hit = (desk_open_notional + notional_pct) > max_desk_notional and action in actionable_entries
         gross_notional_cap_hit = (gross_open_notional + notional_pct) > total_notional_cap and action in actionable_entries
+        exit_status = "planned" if action in actionable_exits and existing_open else "idle"
         meta = {
             "symbol": symbol,
             "reference_price": reference_price,
@@ -322,7 +329,7 @@ class ExecutionAgent(BaseAgent):
             and not desk_position_cap_hit
             and not desk_notional_cap_hit
             and not gross_notional_cap_hit
-            else "idle",
+            else exit_status,
             "pnl_estimate_pct": pnl_estimate_pct,
         }
         notes = list(plan.get("notes", [])) + rotation_notes + downgrade_notes
@@ -331,8 +338,12 @@ class ExecutionAgent(BaseAgent):
                 notes.append(f"risk and stop-pressure scaled size from {base_size} to {size}")
             else:
                 notes.append(f"risk budget scaled size from {base_size} to {size}")
-        if existing_open and symbol:
+        if action in actionable_exits and existing_open and symbol:
+            notes.append(f"exit requested for live/open position in {symbol}")
+        elif existing_open and symbol:
             notes.append(f"existing open paper position in {symbol}, skip duplicate entry")
+        if action in actionable_exits and not existing_open:
+            notes.append(f"no open position found for {desk} / {symbol or 'desk'}, exit kept idle")
         if cooldown_loss and symbol:
             notes.append(f"recent losing exit in {symbol}, cooldown blocks immediate re-entry")
         if repeated_loss_block and symbol:
@@ -353,13 +364,13 @@ class ExecutionAgent(BaseAgent):
             notes.append(f"{desk} desk stop pressure high, new entries paused")
         if blocked_by_risk:
             notes.append("risk gate blocks new entries this cycle")
-        if desk_position_cap_hit:
+        if desk_position_cap_hit and action in actionable_entries:
             notes.append(f"{desk} desk already has {desk_open_count} open position(s), cap {max_positions}")
-        if desk_notional_cap_hit:
+        if desk_notional_cap_hit and action in actionable_entries:
             notes.append(
                 f"{desk} desk exposure cap hit: open {desk_open_notional:.2f}x + new {notional_pct:.2f}x > {max_desk_notional:.2f}x"
             )
-        if gross_notional_cap_hit:
+        if gross_notional_cap_hit and action in actionable_entries:
             notes.append(
                 f"gross exposure cap hit: open {gross_open_notional:.2f}x + new {notional_pct:.2f}x > {total_notional_cap:.2f}x"
             )

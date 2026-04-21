@@ -5,7 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytz
-from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, select
+from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, inspect, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -108,6 +108,30 @@ class ClosedPositionRecord(Base):
     won: Mapped[bool] = mapped_column(Boolean, default=False)
     opened_at: Mapped[str] = mapped_column(String(40), default="")
     closed_at: Mapped[str] = mapped_column(String(40), default="")
+    closed_reason: Mapped[str] = mapped_column(String(100), default="")
+
+
+class LiveOrderRecord(Base):
+    __tablename__ = "live_order_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    desk: Mapped[str] = mapped_column(String(50), default="")
+    symbol: Mapped[str] = mapped_column(String(100), default="")
+    action: Mapped[str] = mapped_column(String(50), default="")
+    size: Mapped[str] = mapped_column(String(20), default="")
+    requested_mode: Mapped[str] = mapped_column(String(20), default="paper")
+    applied_mode: Mapped[str] = mapped_column(String(20), default="paper")
+    broker_live: Mapped[bool] = mapped_column(Boolean, default=False)
+    request_status: Mapped[str] = mapped_column(String(20), default="skipped")
+    broker_order_id: Mapped[str] = mapped_column(String(100), default="")
+    broker_state: Mapped[str] = mapped_column(String(50), default="")
+    reason: Mapped[str] = mapped_column(String(100), default="")
+    message: Mapped[str] = mapped_column(String(300), default="")
+    effect_status: Mapped[str] = mapped_column(String(30), default="pending")
+    linked_position_symbol: Mapped[str] = mapped_column(String(100), default="")
+    linked_closed_symbol: Mapped[str] = mapped_column(String(100), default="")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 db_path = Path(settings.db_path)
@@ -115,6 +139,14 @@ db_path.parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 ACTIONABLE_ENTRY_ACTIONS = {"probe_longs", "attack_opening_drive", "selective_probe"}
+ACTIONABLE_EXIT_ACTIONS = {"reduce_risk", "capital_preservation"}
+ACTIVE_LIVE_EFFECT_STATUSES = {
+    "pending",
+    "awaiting_balance_sync",
+    "partial_balance_sync",
+    "linked_partial_open",
+    "partial_close_pending",
+}
 
 
 def _size_to_notional(size: str) -> float:
@@ -186,6 +218,31 @@ def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
     if action == "probe_longs":
         return 1.0, -0.55, 4
     return 0.65, -0.4, 3
+
+
+def _ensure_schema() -> None:
+    inspector = inspect(engine)
+    try:
+        closed_columns = {column["name"] for column in inspector.get_columns("closed_positions")}
+    except Exception:
+        closed_columns = set()
+    if "closed_reason" not in closed_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE closed_positions ADD COLUMN closed_reason VARCHAR(100) DEFAULT ''"))
+    try:
+        live_columns = {column["name"] for column in inspector.get_columns("live_order_log")}
+    except Exception:
+        live_columns = set()
+    live_column_defs = {
+        "effect_status": "ALTER TABLE live_order_log ADD COLUMN effect_status VARCHAR(30) DEFAULT 'pending'",
+        "linked_position_symbol": "ALTER TABLE live_order_log ADD COLUMN linked_position_symbol VARCHAR(100) DEFAULT ''",
+        "linked_closed_symbol": "ALTER TABLE live_order_log ADD COLUMN linked_closed_symbol VARCHAR(100) DEFAULT ''",
+    }
+    missing_live = [ddl for column, ddl in live_column_defs.items() if column not in live_columns]
+    if missing_live:
+        with engine.begin() as connection:
+            for ddl in missing_live:
+                connection.execute(text(ddl))
 
 
 def _build_desk_stats(positions: list[PaperPositionRecord]) -> dict[str, dict]:
@@ -274,6 +331,7 @@ def _close_position(position: PaperPositionRecord, reason: str) -> None:
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_schema()
 
 
 def rebuild_db() -> None:
@@ -308,7 +366,7 @@ def load_company_state() -> CompanyState:
                 strategy_book=rec.strategy_book or {},
                 daily_summary=load_daily_summary(),
                 performance_stats=load_performance_quick_stats(),
-                execution_log=load_recent_orders(limit=10),
+                execution_log=load_recent_execution_log(limit=10),
                 open_positions=[p.model_dump() for p in load_open_positions()],
                 recent_journal=load_recent_journal(limit=8),
                 agent_runs=[AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
@@ -722,6 +780,7 @@ def close_positions_for_desk(desk: str, prices: dict[str, float]) -> list[Closed
                 won=realized_pnl_pct > 0,
                 opened_at=pos.opened_at,
                 closed_at=utcnow_iso(),
+                closed_reason="desk_exit",
             ))
             closed.append(ClosedPosition(
                 desk=pos.desk,
@@ -732,10 +791,143 @@ def close_positions_for_desk(desk: str, prices: dict[str, float]) -> list[Closed
                 realized_pnl_pct=realized_pnl_pct,
                 won=realized_pnl_pct > 0,
                 opened_at=pos.opened_at,
+                closed_reason="desk_exit",
             ))
             db.delete(pos)
         db.commit()
     return closed
+
+
+def close_position_by_symbol(desk: str, symbol: str, prices: dict[str, float], reason: str) -> ClosedPosition | None:
+    init_db()
+    with SessionLocal() as db:
+        pos = db.execute(
+            select(PositionRecord).where(
+                PositionRecord.desk == desk,
+                PositionRecord.symbol == symbol,
+            )
+        ).scalar_one_or_none()
+        if pos is None:
+            return None
+        exit_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
+        realized_pnl_pct = (
+            round(((exit_price - pos.entry_price) / pos.entry_price) * 100, 4)
+            if pos.entry_price > 0 else 0.0
+        )
+        record = ClosedPositionRecord(
+            desk=pos.desk,
+            symbol=pos.symbol,
+            entry_price=pos.entry_price,
+            exit_price=exit_price,
+            notional_pct=pos.notional_pct,
+            realized_pnl_pct=realized_pnl_pct,
+            won=realized_pnl_pct > 0,
+            opened_at=pos.opened_at,
+            closed_at=utcnow_iso(),
+            closed_reason=reason,
+        )
+        db.add(record)
+        closed = ClosedPosition(
+            desk=pos.desk,
+            symbol=pos.symbol,
+            entry_price=pos.entry_price,
+            exit_price=exit_price,
+            notional_pct=pos.notional_pct,
+            realized_pnl_pct=realized_pnl_pct,
+            won=realized_pnl_pct > 0,
+            opened_at=pos.opened_at,
+            closed_reason=reason,
+        )
+        db.delete(pos)
+        db.commit()
+        return closed
+
+
+def sync_live_crypto_positions(account_positions: list[dict], prices: dict[str, float]) -> dict:
+    """Reconcile crypto positions against live Upbit balances."""
+    return sync_live_positions("crypto", account_positions, prices, default_action="live_sync")
+
+
+def sync_live_positions(desk: str, account_positions: list[dict], prices: dict[str, float], default_action: str = "live_sync") -> dict:
+    """Reconcile broker-reported positions against persisted positions for one desk."""
+    init_db()
+    broker_markets = {str(item.get("market", "")).strip() for item in account_positions if str(item.get("market", "")).strip()}
+    opened = 0
+    updated = 0
+    closed = 0
+    with SessionLocal() as db:
+        current_rows = db.execute(select(PositionRecord).where(PositionRecord.desk == desk)).scalars().all()
+        current_by_symbol = {row.symbol: row for row in current_rows}
+
+        for row in current_rows:
+            if row.symbol in broker_markets:
+                continue
+            exit_price = prices.get(row.symbol, row.current_price) or row.current_price
+            realized_pnl_pct = (
+                round(((exit_price - row.entry_price) / row.entry_price) * 100, 4)
+                if row.entry_price > 0 and exit_price > 0 else 0.0
+            )
+            db.add(
+                ClosedPositionRecord(
+                    desk=row.desk,
+                    symbol=row.symbol,
+                    entry_price=row.entry_price,
+                    exit_price=exit_price,
+                    notional_pct=row.notional_pct,
+                    realized_pnl_pct=realized_pnl_pct,
+                    won=realized_pnl_pct > 0,
+                    opened_at=row.opened_at,
+                    closed_at=utcnow_iso(),
+                    closed_reason="broker_sync_exit",
+                )
+            )
+            db.delete(row)
+            closed += 1
+
+        capital_base = float(settings.live_capital_krw or settings.paper_capital_krw or 0.0)
+        for item in account_positions:
+            market = str(item.get("market", "")).strip()
+            if not market:
+                continue
+            current_price = float(prices.get(market) or item.get("avg_buy_price") or 0.0)
+            entry_price = float(item.get("avg_buy_price") or current_price or 0.0)
+            total_volume = float(item.get("total_volume") or 0.0)
+            market_value = current_price * total_volume
+            notional_pct = round((market_value / capital_base), 4) if capital_base > 0 and market_value > 0 else 0.0
+            unrealized_pnl_pct = (
+                round(((current_price - entry_price) / entry_price) * 100, 4)
+                if current_price > 0 and entry_price > 0 else 0.0
+            )
+            existing = current_by_symbol.get(market)
+            if existing is None:
+                db.add(
+                    PositionRecord(
+                        desk=desk,
+                        symbol=market,
+                        entry_price=entry_price,
+                        current_price=current_price,
+                        notional_pct=notional_pct,
+                        action=default_action,
+                        unrealized_pnl_pct=unrealized_pnl_pct,
+                        opened_at=utcnow_iso(),
+                    )
+                )
+                opened += 1
+                continue
+            existing.entry_price = entry_price or existing.entry_price
+            existing.current_price = current_price or existing.current_price
+            existing.notional_pct = notional_pct
+            existing.action = existing.action or default_action
+            existing.unrealized_pnl_pct = unrealized_pnl_pct
+            updated += 1
+        db.commit()
+    return {
+        "desk": desk,
+        "broker_positions": len(account_positions),
+        "opened": opened,
+        "updated": updated,
+        "closed": closed,
+    }
 
 
 def update_positions_unrealized(prices: dict[str, float]) -> None:
@@ -753,6 +945,66 @@ def update_positions_unrealized(prices: dict[str, float]) -> None:
                     ((current_price - pos.entry_price) / pos.entry_price) * 100, 4
                 )
         db.commit()
+
+
+def auto_exit_positions(prices: dict[str, float], skip_desks: set[str] | None = None) -> list[ClosedPosition]:
+    """Close all-time positions using the same desk/action thresholds as paper tracking."""
+    from datetime import datetime, timezone
+    init_db()
+    skip_desks = skip_desks or set()
+    closed: list[ClosedPosition] = []
+    with SessionLocal() as db:
+        positions = db.execute(select(PositionRecord)).scalars().all()
+        for pos in positions:
+            if pos.desk in skip_desks:
+                continue
+            current_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
+            if not current_price or pos.entry_price <= 0:
+                continue
+            unrealized = round(((current_price - pos.entry_price) / pos.entry_price) * 100, 4)
+            try:
+                opened = datetime.fromisoformat(pos.opened_at.replace("Z", "+00:00"))
+                elapsed_minutes = (datetime.now(timezone.utc) - opened).total_seconds() / 60
+            except Exception:
+                elapsed_minutes = 0
+            target_pct, stop_pct, max_cycles = _position_thresholds(pos.desk, pos.action)
+            max_open_minutes = max_cycles * settings.cycle_interval_minutes
+            reason = None
+            if unrealized >= target_pct:
+                reason = "target_hit"
+            elif unrealized <= stop_pct:
+                reason = "stop_hit"
+            elif elapsed_minutes >= max_open_minutes:
+                reason = "time_exit"
+            if reason:
+                exit_price = current_price
+                realized_pnl_pct = unrealized
+                db.add(ClosedPositionRecord(
+                    desk=pos.desk,
+                    symbol=pos.symbol,
+                    entry_price=pos.entry_price,
+                    exit_price=exit_price,
+                    notional_pct=pos.notional_pct,
+                    realized_pnl_pct=realized_pnl_pct,
+                    won=realized_pnl_pct > 0,
+                    opened_at=pos.opened_at,
+                    closed_at=utcnow_iso(),
+                    closed_reason=reason,
+                ))
+                closed.append(ClosedPosition(
+                    desk=pos.desk,
+                    symbol=pos.symbol,
+                    entry_price=pos.entry_price,
+                    exit_price=exit_price,
+                    notional_pct=pos.notional_pct,
+                    realized_pnl_pct=realized_pnl_pct,
+                    won=realized_pnl_pct > 0,
+                    opened_at=pos.opened_at,
+                    closed_reason=reason,
+                ))
+                db.delete(pos)
+        db.commit()
+    return closed
 
 
 def load_open_positions() -> list[Position]:
@@ -779,7 +1031,7 @@ def load_open_positions() -> list[Position]:
         return []
 
 
-def load_closed_positions(limit: int = 50) -> list[ClosedPosition]:
+def load_closed_positions(limit: int = 50) -> list[dict]:
     init_db()
     try:
         with SessionLocal() as db:
@@ -789,23 +1041,291 @@ def load_closed_positions(limit: int = 50) -> list[ClosedPosition]:
                 .limit(limit)
             ).scalars().all()
             return [
-                ClosedPosition(
-                    id=row.id,
-                    desk=row.desk,
-                    symbol=row.symbol,
-                    entry_price=row.entry_price,
-                    exit_price=row.exit_price,
-                    notional_pct=row.notional_pct,
-                    realized_pnl_pct=row.realized_pnl_pct,
-                    won=row.won,
-                    opened_at=row.opened_at,
-                    closed_at=row.closed_at,
-                )
+                {
+                    "id": row.id,
+                    "desk": row.desk,
+                    "symbol": row.symbol,
+                    "entry_price": row.entry_price,
+                    "exit_price": row.exit_price,
+                    "notional_pct": row.notional_pct,
+                    "pnl_pct": row.realized_pnl_pct,
+                    "realized_pnl_pct": row.realized_pnl_pct,
+                    "won": row.won,
+                    "opened_at": row.opened_at,
+                    "closed_at": row.closed_at,
+                    "closed_reason": row.closed_reason or "",
+                }
                 for row in rows
             ]
     except OperationalError:
         rebuild_db()
         return []
+
+
+def save_live_order_attempts(route_summary: dict, paper_orders: list[PaperOrder]) -> None:
+    details = list(route_summary.get("details", []) or [])
+    if not details:
+        return
+    init_db()
+    order_lookup = {
+        (order.desk, order.symbol, order.action): order
+        for order in paper_orders
+        if order.status == "planned"
+    }
+    requested_mode = str(route_summary.get("requested_mode") or "paper")
+    applied_mode = str(route_summary.get("applied_mode") or "paper")
+    broker_live = bool(route_summary.get("broker_live"))
+    with SessionLocal() as db:
+        for detail in details:
+            desk = str(detail.get("desk", "") or "")
+            symbol = str(detail.get("symbol", "") or "")
+            action = str(detail.get("action", "") or "")
+            order = order_lookup.get((desk, symbol, action))
+            broker_order_id = str(detail.get("broker_order_id") or detail.get("uuid") or detail.get("odno") or "")
+            broker_state = str(detail.get("state") or detail.get("broker_state") or "")
+            request_status = "submitted" if broker_order_id else "fallback"
+            effect_status = "pending" if broker_order_id else "noop"
+            db.add(
+                LiveOrderRecord(
+                    created_at=utcnow_iso(),
+                    desk=desk,
+                    symbol=symbol,
+                    action=action,
+                    size=str(detail.get("size") or (order.size if order else "")),
+                    requested_mode=requested_mode,
+                    applied_mode=applied_mode,
+                    broker_live=broker_live,
+                    request_status=request_status,
+                    broker_order_id=broker_order_id,
+                    broker_state=broker_state,
+                    reason=str(detail.get("reason", "") or ""),
+                    message=str(detail.get("message", "") or ""),
+                    effect_status=effect_status,
+                    payload=dict(detail),
+                )
+            )
+        db.commit()
+
+
+def load_recent_live_orders(limit: int = 10) -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(select(LiveOrderRecord).order_by(LiveOrderRecord.id.desc()).limit(limit)).scalars().all()
+            return [
+                {
+                    "created_at": row.created_at,
+                    "source": "live",
+                    "desk": row.desk,
+                    "symbol": row.symbol,
+                    "action": row.action,
+                    "focus": "",
+                    "size": row.size,
+                    "notional_pct": 0.0,
+                    "status": row.request_status,
+                    "pnl_estimate_pct": 0.0,
+                    "rationale": [],
+                    "requested_mode": row.requested_mode,
+                    "applied_mode": row.applied_mode,
+                    "broker_live": row.broker_live,
+                    "broker_order_id": row.broker_order_id,
+                    "broker_state": row.broker_state,
+                    "reason": row.reason,
+                    "message": row.message,
+                    "effect_status": row.effect_status,
+                    "linked_position_symbol": row.linked_position_symbol,
+                    "linked_closed_symbol": row.linked_closed_symbol,
+                    "payload": row.payload or {},
+                }
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_active_live_order_locks() -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(LiveOrderRecord)
+                .where(
+                    LiveOrderRecord.broker_live.is_(True),
+                    LiveOrderRecord.effect_status.in_(list(ACTIVE_LIVE_EFFECT_STATUSES)),
+                )
+                .order_by(LiveOrderRecord.id.desc())
+                .limit(50)
+            ).scalars().all()
+            locks: list[dict] = []
+            for row in rows:
+                action = str(row.action or "")
+                if action in ACTIONABLE_ENTRY_ACTIONS:
+                    intent = "entry"
+                elif action in ACTIONABLE_EXIT_ACTIONS:
+                    intent = "exit"
+                else:
+                    intent = "other"
+                locks.append(
+                    {
+                        "desk": row.desk,
+                        "symbol": row.symbol,
+                        "action": action,
+                        "intent": intent,
+                        "request_status": row.request_status,
+                        "effect_status": row.effect_status,
+                        "broker_order_id": row.broker_order_id,
+                    }
+                )
+            return locks
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_recent_execution_log(limit: int = 10) -> list[dict]:
+    paper_rows = load_recent_orders(limit=limit)
+    live_rows = load_recent_live_orders(limit=limit)
+    combined = [
+        {
+            **row,
+            "source": "paper",
+            "requested_mode": "paper",
+            "applied_mode": "paper",
+            "broker_live": False,
+        }
+        for row in paper_rows
+    ] + live_rows
+    combined.sort(key=lambda item: str(item.get("created_at", "")), reverse=True)
+    return combined[:limit]
+
+
+def refresh_live_order_statuses(fetch_order_details) -> dict:
+    """Refresh submitted live orders from broker state."""
+    init_db()
+    checked = 0
+    updated = 0
+    failed = 0
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(LiveOrderRecord)
+            .where(LiveOrderRecord.request_status.in_(["submitted", "partial"]))
+            .order_by(LiveOrderRecord.id.desc())
+            .limit(20)
+        ).scalars().all()
+        for row in rows:
+            if not row.broker_order_id:
+                continue
+            checked += 1
+            try:
+                payload = fetch_order_details(
+                    {
+                        "broker_order_id": row.broker_order_id,
+                        "desk": row.desk,
+                        "symbol": row.symbol,
+                        "action": row.action,
+                        "broker_state": row.broker_state,
+                        "payload": row.payload or {},
+                    }
+                )
+                request_status = str(payload.get("request_status") or row.request_status)
+                broker_state = str(payload.get("broker_state") or row.broker_state)
+                row.request_status = request_status
+                row.broker_state = broker_state
+                merged_payload = dict(row.payload or {})
+                merged_payload.update(payload)
+                row.payload = merged_payload
+                row.message = str(payload.get("message", "") or row.message or "")
+                row.reason = str(payload.get("reason", "") or row.reason or "")
+                updated += 1
+            except Exception as exc:
+                row.message = str(exc)
+                failed += 1
+        db.commit()
+    return {"checked": checked, "updated": updated, "failed": failed}
+
+
+def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
+    """Link finalized live order outcomes to positions/closed_positions once."""
+    init_db()
+    checked = 0
+    updated = 0
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(LiveOrderRecord)
+            .where(
+                LiveOrderRecord.broker_live.is_(True),
+                LiveOrderRecord.effect_status.in_(["pending", "awaiting_balance_sync"]),
+            )
+            .order_by(LiveOrderRecord.id.desc())
+            .limit(30)
+        ).scalars().all()
+        for row in rows:
+            checked += 1
+            payload = dict(row.payload or {})
+            executed_volume = _safe_float(payload.get("executed_volume"))
+            remaining_volume = _safe_float(payload.get("remaining_volume"))
+            if row.request_status == "cancelled":
+                row.effect_status = "cancelled_partial_fill" if executed_volume > 0 else "cancelled_no_fill"
+                updated += 1
+                continue
+            if row.request_status not in {"filled", "partial"}:
+                continue
+            if row.action in {"probe_longs", "attack_opening_drive", "selective_probe"}:
+                open_position = db.execute(
+                    select(PositionRecord).where(
+                        PositionRecord.desk == row.desk,
+                        PositionRecord.symbol == row.symbol,
+                    )
+                ).scalar_one_or_none()
+                if open_position is None:
+                    row.effect_status = "partial_balance_sync" if row.request_status == "partial" else "awaiting_balance_sync"
+                    continue
+                row.effect_status = "linked_partial_open" if row.request_status == "partial" else "linked_open"
+                row.linked_position_symbol = open_position.symbol
+                updated += 1
+                continue
+            if row.action in {"reduce_risk", "capital_preservation"}:
+                if row.request_status == "partial" or (executed_volume > 0 and remaining_volume > 0):
+                    row.effect_status = "partial_close_pending"
+                    updated += 1
+                    continue
+                open_position = db.execute(
+                    select(PositionRecord).where(
+                        PositionRecord.desk == row.desk,
+                        PositionRecord.symbol == row.symbol,
+                    )
+                ).scalar_one_or_none()
+                if open_position is None:
+                    row.effect_status = "already_reconciled"
+                    row.linked_closed_symbol = row.symbol
+                    updated += 1
+                    continue
+                exit_price = prices.get(open_position.symbol, open_position.current_price) or open_position.current_price
+                realized_pnl_pct = (
+                    round(((exit_price - open_position.entry_price) / open_position.entry_price) * 100, 4)
+                    if open_position.entry_price > 0 else 0.0
+                )
+                db.add(
+                    ClosedPositionRecord(
+                        desk=open_position.desk,
+                        symbol=open_position.symbol,
+                        entry_price=open_position.entry_price,
+                        exit_price=exit_price,
+                        notional_pct=open_position.notional_pct,
+                        realized_pnl_pct=realized_pnl_pct,
+                        won=realized_pnl_pct > 0,
+                        opened_at=open_position.opened_at,
+                        closed_at=utcnow_iso(),
+                        closed_reason="broker_order_fill",
+                    )
+                )
+                row.effect_status = "linked_close"
+                row.linked_closed_symbol = open_position.symbol
+                db.delete(open_position)
+                updated += 1
+        db.commit()
+    return {"checked": checked, "updated": updated}
 
 
 def load_performance_quick_stats() -> dict:

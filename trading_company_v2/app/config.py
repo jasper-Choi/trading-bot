@@ -32,6 +32,8 @@ load_env_file(ENV_PATH)
 class Settings:
     company_name: str = os.environ.get("COMPANY_NAME", "Solo Trading Company")
     app_env: str = os.environ.get("APP_ENV", "local")
+    execution_mode: str = os.environ.get("EXECUTION_MODE", "paper")
+    live_capital_krw: int = int(os.environ.get("LIVE_CAPITAL_KRW", "0"))
     host: str = os.environ.get("APP_HOST", "127.0.0.1")
     port: int = int(os.environ.get("APP_PORT", "8080"))
     cycle_interval_minutes: int = int(os.environ.get("CYCLE_INTERVAL_MINUTES", "15"))
@@ -44,6 +46,14 @@ class Settings:
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
     huggingface_api_key: str = os.environ.get("HUGGINGFACE_API_KEY", "")
     alphavantage_api_key: str = os.environ.get("ALPHAVANTAGE_API_KEY", "")
+    upbit_access_key: str = os.environ.get("UPBIT_ACCESS_KEY", "")
+    upbit_secret_key: str = os.environ.get("UPBIT_SECRET_KEY", "")
+    upbit_allow_live: bool = os.environ.get("UPBIT_ALLOW_LIVE", "false").lower() == "true"
+    kis_app_key: str = os.environ.get("KIS_APP_KEY", "")
+    kis_app_secret: str = os.environ.get("KIS_APP_SECRET", "")
+    kis_account_no: str = os.environ.get("KIS_ACCOUNT_NO", "")
+    kis_product_code: str = os.environ.get("KIS_PRODUCT_CODE", "")
+    kis_allow_live: bool = os.environ.get("KIS_ALLOW_LIVE", "false").lower() == "true"
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
     telegram_notify_every_cycle: bool = os.environ.get("TELEGRAM_NOTIFY_EVERY_CYCLE", "false").lower() == "true"
