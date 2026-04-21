@@ -573,8 +573,8 @@ def manifest() -> dict:
         "short_name": "TradingApp",
         "start_url": "/",
         "display": "standalone",
-        "background_color": "#f4f7fb",
-        "theme_color": "#2563eb",
+        "background_color": "#09111f",
+        "theme_color": "#09111f",
         "lang": "ko-KR",
         "icons": [
             {
@@ -609,10 +609,12 @@ self.addEventListener('fetch', (event) => {
 def app_icon() -> Response:
     svg = """
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="28" fill="#2563eb"/>
-  <path d="M26 84h76" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/>
-  <path d="M34 74l16-18 14 10 28-30" fill="none" stroke="#ffffff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="92" cy="36" r="8" fill="#93c5fd"/>
+  <rect width="128" height="128" rx="28" fill="#09111f"/>
+  <rect width="128" height="128" rx="28" fill="url(#gi)" opacity="0.6"/>
+  <defs><linearGradient id="gi" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#6bc7ff" stop-opacity="0.3"/><stop offset="100%" stop-color="#6bc7ff" stop-opacity="0.05"/></linearGradient></defs>
+  <path d="M26 84h76" stroke="#6bc7ff" stroke-width="6" stroke-linecap="round"/>
+  <path d="M34 74l16-18 14 10 28-30" fill="none" stroke="#67e8a5" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="92" cy="36" r="7" fill="#67e8a5"/>
 </svg>
 """.strip()
     return Response(content=svg, media_type="image/svg+xml")
@@ -934,1260 +936,446 @@ def performance() -> dict:
 @app.get("/", response_class=HTMLResponse)
 def root() -> str:
     return f"""<!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#2563eb">
+  <meta name="theme-color" content="#09111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="{settings.company_name}">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/app-icon.svg" type="image/svg+xml">
   <title>{settings.company_name}</title>
   <style>
     :root {{
-      color-scheme: light;
-      --bg: #f4f7fb;
-      --surface: rgba(255, 255, 255, 0.92);
-      --ink: #101828;
-      --muted: #667085;
-      --line: rgba(16, 24, 40, 0.08);
-      --accent: #2563eb;
-      --accent-strong: #1d4ed8;
-      --success: #16a34a;
-      --danger: #dc2626;
-      --shadow: 0 18px 44px rgba(16, 24, 40, 0.08);
-    }}
-    * {{ box-sizing: border-box; }}
-    body {{
-      margin: 0;
-      font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(37,99,235,0.10), transparent 28%),
-        radial-gradient(circle at top right, rgba(15,118,110,0.08), transparent 24%),
-        linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
-      color: var(--ink);
-      min-height: 100vh;
-    }}
-    .shell {{
-      max-width: 1480px;
-      margin: 0 auto;
-      padding: 24px 18px 48px;
-    }}
-    .topbar {{
-      display: flex;
-      justify-content: space-between;
-      gap: 18px;
-      align-items: center;
-      margin-bottom: 18px;
-    }}
-    .brand-stack {{
-      display: flex;
-      gap: 14px;
-      align-items: center;
-    }}
-    .brand-mark {{
-      width: 48px;
-      height: 48px;
-      border-radius: 16px;
-      background: linear-gradient(145deg, rgba(37,99,235,0.95), rgba(29,78,216,0.92));
-      color: white;
-      display: grid;
-      place-items: center;
-      font-size: 0.95rem;
-      font-weight: 700;
-      box-shadow: var(--shadow);
-    }}
-    .eyebrow {{
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      font-size: 0.72rem;
-      color: var(--muted);
-      margin-bottom: 4px;
-    }}
-    .headline {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 14px;
-      align-items: center;
-    }}
-    .headline h1 {{
-      margin: 0;
-      font-size: clamp(1.8rem, 2vw, 2.4rem);
-    }}
-    .live-pill {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border-radius: 999px;
-      padding: 7px 12px;
-      background: rgba(255,255,255,0.75);
-      border: 1px solid var(--line);
-      color: var(--muted);
-      font-size: 0.82rem;
-    }}
-    .live-dot {{
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--success);
-    }}
-    .action-row {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 14px;
-      align-items: center;
-    }}
-    .ghost-note {{
-      font-size: 0.85rem;
-      color: var(--muted);
-    }}
-    .cta {{
-      border: none;
-      border-radius: 999px;
-      background: linear-gradient(135deg, var(--ink), #2c3c35);
-      color: white;
-      padding: 12px 18px;
-      font-size: 0.92rem;
-      cursor: pointer;
-      box-shadow: 0 14px 28px rgba(23,33,28,0.14);
-    }}
-    .hero {{
-      display: grid;
-      grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-      gap: 14px;
-      margin-bottom: 18px;
-    }}
-    .panel, .section-card, .metric-card {{
-      background: var(--surface);
-      backdrop-filter: blur(16px);
-      border: 1px solid rgba(255,255,255,0.65);
-      box-shadow: var(--shadow);
-    }}
-    .panel {{
-      border-radius: 28px;
-      padding: 24px;
-    }}
-    .section-card {{
-      border-radius: 24px;
-      padding: 20px;
-    }}
-    .metric-card {{
-      border-radius: 20px;
-      padding: 16px;
-    }}
-    .metric-card.alltime {{
-      border: 1.5px solid rgba(99,102,241,0.35);
-      background: linear-gradient(135deg, rgba(99,102,241,0.08), var(--surface));
-    }}
-    .metric-card.alltime strong {{
-      color: #6366f1;
-    }}
-    .hero-title {{
-      margin: 8px 0 10px;
-      font-size: clamp(2rem, 4vw, 3rem);
-      line-height: 0.98;
-      letter-spacing: -0.04em;
-    }}
-    .hero-copy p {{
-      margin: 0;
-      max-width: 700px;
-      font-size: 1rem;
-      line-height: 1.65;
-      color: var(--muted);
-    }}
-    .hero-tags {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 18px;
-    }}
-    .tag {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,0.84);
-      border: 1px solid var(--line);
-      color: var(--ink);
-      font-size: 0.84rem;
-    }}
-    .score-panel {{
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-    }}
-    .score-ring {{
-      width: 168px;
-      height: 168px;
-      border-radius: 50%;
-      margin: 0 auto 18px;
-      background:
-        radial-gradient(circle at center, rgba(255,255,255,0.96) 0 54%, transparent 55%),
-        conic-gradient(from 210deg, #0f766e, var(--accent), var(--accent-strong), #0f766e);
-      display: grid;
-      place-items: center;
-    }}
-    .score-core {{
-      text-align: center;
-    }}
-    .score-core strong {{
-      display: block;
-      font-size: 2.4rem;
-      line-height: 1;
-    }}
-    .score-core span {{
-      color: var(--muted);
-      font-size: 0.8rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }}
-    .score-meta {{
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }}
-    .score-stat {{
-      border-radius: 16px;
-      padding: 14px;
-      background: rgba(255,255,255,0.88);
-      border: 1px solid var(--line);
-    }}
-    .score-stat strong,
-    .metric-card strong,
-    .perf-kpi strong,
-    .status-kpi strong {{
-      display: block;
-      font-size: 0.78rem;
-      color: var(--muted);
-      margin-bottom: 6px;
-    }}
-    .ops-banner {{
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 0 0 18px;
-    }}
-    .ops-flag {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      font-size: 0.86rem;
-      border: 1px solid var(--line);
-      background: rgba(255,255,255,0.9);
-    }}
-    .ops-flag.critical {{
-      background: rgba(220, 38, 38, 0.12);
-      border-color: rgba(220, 38, 38, 0.24);
-      color: #991b1b;
-    }}
-    .ops-flag.warning {{
-      background: rgba(245, 158, 11, 0.14);
-      border-color: rgba(245, 158, 11, 0.26);
-      color: #92400e;
-    }}
-    .ops-flag.info {{
-      background: rgba(37, 99, 235, 0.12);
-      border-color: rgba(37, 99, 235, 0.24);
-      color: #1d4ed8;
-    }}
-    .realtime-panel {{
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      margin-bottom: 18px;
-    }}
-    .realtime-card {{
-      border-radius: 18px;
-      padding: 14px;
-      background: rgba(255,255,255,0.88);
-      border: 1px solid var(--line);
-    }}
-    .realtime-card strong {{
-      display: block;
-      margin-bottom: 6px;
-      font-size: 0.8rem;
-      color: var(--muted);
-    }}
-    .metrics-strip {{
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      margin-bottom: 18px;
-    }}
-    .metric-card span {{
-      font-size: 1.15rem;
-    }}
-    .content-grid {{
-      display: grid;
-      gap: 18px;
-      grid-template-columns: minmax(0, 1.28fr) minmax(330px, 0.72fr);
-    }}
-    .column {{
-      display: grid;
-      gap: 18px;
-    }}
-    .section-head {{
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
-      align-items: baseline;
-      margin-bottom: 14px;
-    }}
-    .section-head h2 {{
-      margin: 0;
-      font-size: 1.06rem;
-    }}
-    .section-head span {{
-      color: var(--muted);
-      font-size: 0.84rem;
-    }}
-    .hero-chart-grid,
-    .dashboard-grid,
-    .market-grid,
-    .two-up,
-    .performance-grid {{
-      display: grid;
-      gap: 18px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }}
-    .triple-grid {{
-      display: grid;
-      gap: 18px;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-    }}
-    .equity-svg, .mini-chart {{
-      width: 100%;
-      display: block;
-    }}
-    .equity-svg {{
-      height: 240px;
-    }}
-    .mini-chart {{
-      height: 200px;
-    }}
-    .equity-grid-line {{
-      stroke: rgba(91,98,87,0.12);
-      stroke-width: 1;
-    }}
-    .equity-path {{
-      fill: none;
-      stroke: var(--accent-strong);
-      stroke-width: 3;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }}
-    .equity-area {{
-      fill: rgba(37,99,235,0.10);
-    }}
-    .equity-dot {{
-      fill: var(--accent-strong);
-    }}
-    .equity-labels {{
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      font-size: 0.78rem;
-      color: var(--muted);
-      margin-top: 8px;
-    }}
-    .chart-card {{
-      border-radius: 18px;
-      padding: 14px;
-      background: rgba(248,250,252,0.96);
-      border: 1px solid var(--line);
-    }}
-    .chart-top {{
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: baseline;
-      margin-bottom: 10px;
-    }}
-    .chart-top strong {{
-      font-size: 0.98rem;
-    }}
-    .chart-top span {{
-      color: var(--muted);
-      font-size: 0.82rem;
-    }}
-    .desk-chart {{
-      margin-top: 14px;
-    }}
-    .chart-summary {{
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      margin-top: 12px;
-    }}
-    .chart-stat {{
-      padding: 10px 12px;
-      border-radius: 14px;
-      background: rgba(255,255,255,0.86);
-      border: 1px solid var(--line);
-    }}
-    .chart-stat strong {{
-      display: block;
-      margin-bottom: 6px;
-      font-size: 0.74rem;
-      color: var(--muted);
-    }}
-    .chart-stat span {{
-      display: block;
-      font-size: 0.92rem;
-      font-weight: 600;
-    }}
-    .status-card {{
-      background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(243,247,255,0.92));
-    }}
-    .status-head {{
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: center;
-    }}
-    .status-pill {{
-      display: inline-block;
-      padding: 5px 10px;
-      border-radius: 999px;
-      background: rgba(37,99,235,0.10);
-      color: var(--accent-strong);
-      font-size: 0.76rem;
-      text-transform: uppercase;
-    }}
-    .status-subline {{
-      margin: 12px 0 0;
-      color: var(--muted);
-      line-height: 1.45;
-      min-height: 48px;
-      display: -webkit-box;
-      -webkit-line-clamp: 2;
-      -webkit-box-orient: vertical;
-      overflow: hidden;
-      word-break: break-word;
-    }}
-    .status-kpis {{
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      margin-top: 12px;
-    }}
-    .status-kpi, .perf-kpi {{
-      padding: 12px;
-      border-radius: 14px;
-      background: rgba(255,255,255,0.80);
-      border: 1px solid var(--line);
-      min-width: 0;
-    }}
-    .status-kpi span,
-    .perf-kpi span {{
-      display: block;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }}
-    .compact-list {{
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }}
-    .compact-list li {{
-      padding: 8px 0;
-      border-top: 1px solid rgba(23, 33, 28, 0.08);
-      margin-bottom: 0;
-      line-height: 1.45;
-    }}
-    .compact-list li:first-child {{
-      border-top: none;
-      padding-top: 0;
-    }}
-    .list-table {{
-      list-style: none;
-      padding: 0;
-      margin: 0;
-      display: grid;
-      gap: 10px;
-    }}
-    .list-row {{
-      display: grid;
-      gap: 8px;
-      padding: 14px 16px;
-      border-radius: 16px;
-      background: rgba(255,255,255,0.72);
-      border: 1px solid var(--line);
-    }}
-    .row-top {{
-      display: flex;
-      justify-content: space-between;
-      gap: 10px;
-      align-items: baseline;
-    }}
-    .row-title {{
-      font-size: 0.96rem;
-    }}
-    .row-meta {{
-      color: var(--muted);
-      font-size: 0.82rem;
-      white-space: nowrap;
-    }}
-    .row-foot {{
-      color: var(--muted);
-      font-size: 0.84rem;
-      line-height: 1.45;
-    }}
-    .perf-kpis {{
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      margin-top: 14px;
-    }}
-    .trade-bars {{
-      display: grid;
-      gap: 10px;
-    }}
-    .trade-bar-row {{
-      display: grid;
-      gap: 6px;
-    }}
-    .trade-bar-head {{
-      display: flex;
-      justify-content: space-between;
-      gap: 12px;
-      font-size: 0.84rem;
-    }}
-    .trade-bar-track {{
-      position: relative;
-      height: 12px;
-      border-radius: 999px;
-      background: rgba(16,24,40,0.06);
-      overflow: hidden;
-    }}
-    .trade-bar-fill {{
-      position: absolute;
-      top: 0;
-      height: 100%;
-      border-radius: 999px;
-    }}
-    .trade-bar-fill.pos {{
-      left: 50%;
-      background: linear-gradient(90deg, #22c55e, #16a34a);
-    }}
-    .trade-bar-fill.neg {{
-      right: 50%;
-      background: linear-gradient(90deg, #f97316, #dc2626);
-    }}
-    .danger {{
-      color: var(--danger);
-    }}
-    @media (max-width: 1180px) {{
-      .hero,
-      .content-grid,
-      .hero-chart-grid,
-      .triple-grid,
-      .dashboard-grid,
-      .market-grid,
-      .two-up,
-      .performance-grid {{
-        grid-template-columns: 1fr;
-      }}
-      .metrics-strip {{
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }}
-      .chart-summary {{
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }}
-    }}
-    @media (max-width: 760px) {{
-      .shell {{
-        padding: 14px 12px 28px;
-      }}
-      .topbar {{
-        flex-direction: column;
-        align-items: flex-start;
-      }}
-      .live-pill,
-      .tag-cloud,
-      .realtime-panel,
-      .ops-banner {{
-        width: 100%;
-      }}
-      .realtime-panel,
-      .two-up {{
-        grid-template-columns: 1fr;
-      }}
-      .section-head,
-      .status-head,
-      .row-top,
-      .row-foot {{
-        flex-direction: column;
-        align-items: flex-start;
-      }}
-      .headline h1 {{
-        font-size: 1.6rem;
-      }}
-      .metrics-strip,
-      .status-kpis,
-      .score-meta,
-      .perf-kpis,
-      .chart-summary {{
-        grid-template-columns: 1fr;
-      }}
-      .score-ring {{
-        width: 144px;
-        height: 144px;
-      }}
-      .list-row {{
-        gap: 6px;
-      }}
-    }}
-    @media (max-width: 520px) {{
-      .brand-mark {{
-        width: 42px;
-        height: 42px;
-      }}
-      .headline h1 {{
-        font-size: 1.35rem;
-      }}
-      .metric-card,
-      .section-card,
-      .realtime-card {{
-        padding: 14px;
-      }}
-      .shell {{
-        padding: 12px 10px 24px;
-      }}
-    }}
+      --bg:#09111f;--surface:rgba(10,19,35,.84);--surface2:rgba(19,34,57,.9);
+      --border:rgba(141,177,199,.18);--text:#eef6ff;--muted:#97aabf;
+      --green:#67e8a5;--red:#ff7c7c;--blue:#6bc7ff;--yellow:#ffd36e;--orange:#ff9a62;
+      --font:'Aptos','Bahnschrift','Malgun Gothic',sans-serif;
+      --mono:'IBM Plex Mono','D2Coding','Consolas',monospace;
+      --radius:18px;--shadow:0 30px 80px rgba(0,0,0,.28);
+    }}
+    *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+    body{{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;line-height:1.5;-webkit-font-smoothing:antialiased}}
+    .app{{position:relative;max-width:1480px;margin:0 auto;padding:20px 18px 60px}}
+    .app-glow{{position:fixed;top:0;left:50%;transform:translateX(-50%);width:900px;height:400px;background:radial-gradient(ellipse at top,rgba(107,199,255,.08) 0%,transparent 70%);pointer-events:none;z-index:0}}
+    .hero-shell{{position:relative;z-index:1;display:flex;justify-content:space-between;align-items:center;padding:18px 24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(20px);margin-bottom:16px;flex-wrap:wrap;gap:12px}}
+    .hero-brand{{display:flex;align-items:center;gap:14px}}
+    .brand-icon{{width:44px;height:44px;border-radius:12px;background:linear-gradient(145deg,rgba(107,199,255,.25),rgba(107,199,255,.08));border:1px solid rgba(107,199,255,.3);display:grid;place-items:center;font-size:.78rem;font-weight:700;color:var(--blue);letter-spacing:.04em;flex-shrink:0}}
+    .brand-eyebrow{{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}}
+    .brand-name{{font-size:1.1rem;font-weight:700;color:var(--text)}}
+    .status-pill{{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:600;background:rgba(103,232,165,.12);border:1px solid rgba(103,232,165,.3);color:var(--green)}}
+    .status-pill.loading{{background:rgba(151,170,191,.12);border-color:rgba(151,170,191,.3);color:var(--muted)}}
+    .status-pill.error{{background:rgba(255,124,124,.12);border-color:rgba(255,124,124,.3);color:var(--red)}}
+    .status-pill::before{{content:'●';font-size:.6rem}}
+    .hero-actions{{display:flex;align-items:center;gap:12px}}
+    .update-time{{font-size:.75rem;color:var(--muted);font-family:var(--mono)}}
+    .btn-cycle{{padding:8px 18px;border-radius:10px;border:1px solid rgba(107,199,255,.3);background:rgba(107,199,255,.1);color:var(--blue);font-size:.82rem;font-weight:600;cursor:pointer;transition:all .15s}}
+    .btn-cycle:hover{{background:rgba(107,199,255,.2)}}
+    .btn-cycle:disabled{{opacity:.5;cursor:not-allowed}}
+    .hero-overview{{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}}
+    .overview-card{{padding:16px 18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;backdrop-filter:blur(16px)}}
+    .ov-label{{font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:6px}}
+    .ov-value{{font-size:1.1rem;font-weight:700}}
+    .ov-sub{{font-size:.7rem;color:var(--muted);margin-top:3px}}
+    .overview-card.tone-ok{{border-color:rgba(103,232,165,.3)}}
+    .overview-card.tone-warn{{border-color:rgba(255,211,110,.3)}}
+    .overview-card.tone-risk{{border-color:rgba(255,154,98,.3)}}
+    .dashboard{{position:relative;z-index:1;display:grid;grid-template-columns:1.15fr .85fr;gap:14px}}
+    .col-left,.col-right{{display:flex;flex-direction:column;gap:14px}}
+    .panel{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(16px);overflow:hidden}}
+    .panel-title{{padding:14px 18px 10px;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}}
+    .badge,.insight-badge{{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 6px;border-radius:6px;background:rgba(107,199,255,.12);color:var(--blue);font-size:.72rem;font-weight:700}}
+    .area-cards{{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}}
+    .stat-card{{padding:16px;background:var(--surface2);border:1px solid var(--border);border-radius:14px}}
+    .sc-label{{font-size:.7rem;color:var(--muted);margin-bottom:4px}}
+    .sc-value{{font-size:1.3rem;font-weight:700}}
+    .sc-sub{{font-size:.72rem;color:var(--muted);margin-top:2px}}
+    .execution-strip{{padding:4px 0 8px}}
+    .desk-row{{display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid var(--border)}}
+    .desk-row:last-child{{border-bottom:none}}
+    .desk-tag{{width:52px;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);flex-shrink:0}}
+    .desk-size{{font-size:.72rem;color:var(--blue);font-family:var(--mono);flex-shrink:0}}
+    .desk-focus{{font-size:.72rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}}
+    .action-pill{{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.7rem;font-weight:600;white-space:nowrap;flex-shrink:0}}
+    .action-pill.buy{{background:rgba(103,232,165,.15);color:var(--green)}}
+    .action-pill.sell{{background:rgba(255,124,124,.15);color:var(--red)}}
+    .action-pill.watch{{background:rgba(151,170,191,.12);color:var(--muted)}}
+    .action-pill.probe{{background:rgba(107,199,255,.12);color:var(--blue)}}
+    .action-pill.attack{{background:rgba(255,211,110,.12);color:var(--yellow)}}
+    .pos-table{{width:100%;border-collapse:collapse;font-size:.78rem}}
+    .pos-table th{{padding:8px 14px;text-align:left;font-size:.67rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);background:rgba(19,34,57,.5)}}
+    .pos-table td{{padding:10px 14px;border-top:1px solid var(--border)}}
+    .pos-table tr:hover td{{background:rgba(107,199,255,.04)}}
+    .symbol-cell{{font-family:var(--mono);font-weight:600}}
+    .desk-chip{{display:inline-block;padding:2px 6px;border-radius:4px;font-size:.66rem;font-weight:600;background:rgba(107,199,255,.1);color:var(--blue)}}
+    .empty-msg{{padding:20px 18px;color:var(--muted);font-size:.8rem;text-align:center}}
+    #equity-svg{{width:100%;height:140px;display:block}}
+    .insights-list,.journal-list{{padding:4px 0}}
+    .insight-row{{display:flex;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid rgba(141,177,199,.08)}}
+    .insight-row:last-child{{border-bottom:none}}
+    .ins-name{{flex:1;font-size:.8rem}}
+    .ins-score{{font-family:var(--mono);font-size:.8rem;font-weight:700;min-width:36px;text-align:right}}
+    .ins-bar{{width:80px;height:4px;background:rgba(141,177,199,.15);border-radius:2px;overflow:hidden;flex-shrink:0}}
+    .ins-bar-fill{{height:100%;border-radius:2px;transition:width .4s}}
+    .journal-row{{padding:8px 18px;border-bottom:1px solid rgba(141,177,199,.08);font-size:.76rem;color:var(--muted)}}
+    .journal-row:last-child{{border-bottom:none}}
+    .journal-time{{font-family:var(--mono);color:var(--blue);margin-right:8px}}
+    .pos{{color:var(--green)!important}}.neg{{color:var(--red)!important}}.neutral{{color:var(--text)!important}}
+    .tone-ok{{color:var(--green)!important}}.tone-warn{{color:var(--yellow)!important}}.tone-risk{{color:var(--orange)!important}}.tone-danger{{color:var(--red)!important}}.tone-muted{{color:var(--muted)!important}}.tone-blue{{color:var(--blue)!important}}
+    @media(max-width:960px){{.dashboard{{grid-template-columns:1fr}}.hero-overview{{grid-template-columns:repeat(2,1fr)}}}}
+    @media(max-width:600px){{.area-cards{{grid-template-columns:repeat(2,1fr)}}.hero-shell{{flex-direction:column;align-items:flex-start}}}}
   </style>
 </head>
 <body>
-  <div class="shell">
-    <header class="topbar">
-      <div class="brand-stack">
-        <div class="brand-mark">BOT</div>
-        <div>
-          <div class="eyebrow">트레이딩 대시보드</div>
-          <div class="headline">
-            <h1>{settings.company_name}</h1>
-            <div class="live-pill">
-              <span class="live-dot"></span>
-              <span id="updated-line">실시간 동기화 대기 중</span>
-            </div>
-          </div>
-        </div>
+<div class="app">
+  <div class="app-glow"></div>
+  <header class="hero-shell">
+    <div class="hero-brand">
+      <div class="brand-icon">TC</div>
+      <div>
+        <div class="brand-eyebrow">Trading Company</div>
+        <div class="brand-name">{settings.company_name}</div>
       </div>
-      <div class="action-row">
-        <span class="ghost-note">운영자: {settings.operator_name}</span>
-        <span class="ghost-note">모드: 모의매매</span>
-        <button class="cta" onclick="runCycle()">사이클 1회 실행</button>
-      </div>
-    </header>
-
-    <section class="hero">
-      <article class="panel">
-        <div class="eyebrow">운영 센터</div>
-        <h2 class="hero-title">차트와 자금 흐름을 먼저 보고, 텍스트는 뒤로 둡니다.</h2>
-        <div class="hero-copy">
-          <p>이 화면은 수익성과 실행 품질을 한눈에 판단할 수 있도록 정리합니다. 자본, 데스크 차트, 열린 포지션, 청산 흐름을 먼저 보도록 구성합니다.</p>
-        </div>
-        <div class="hero-tags">
-          <span class="tag">집중: <strong id="focus-metric">불러오는 중...</strong></span>
-          <span class="tag">리스크 예산: <strong id="risk-metric">불러오는 중...</strong></span>
-          <span class="tag">오늘 사이클: <strong id="cycles-metric">불러오는 중...</strong></span>
-          <span class="tag">모의 기대값: <strong id="pnl-metric">불러오는 중...</strong></span>
-        </div>
-      </article>
-      <aside class="panel score-panel">
-        <div>
-          <div class="eyebrow">시그널 품질</div>
-          <div class="score-ring">
-            <div class="score-core">
-              <strong id="insight-score">--</strong>
-              <span>인사이트 점수</span>
-            </div>
-          </div>
-        </div>
-        <div class="score-meta">
-          <div class="score-stat">
-            <strong>회사 상태</strong>
-            <span id="state-line">불러오는 중...</span>
-          </div>
-          <div class="score-stat">
-            <strong>자산 스냅샷</strong>
-            <span id="equity-summary">불러오는 중...</span>
-          </div>
-        </div>
-      </aside>
-    </section>
-
-    <section class="ops-banner" id="ops-banner"></section>
-
-    <section class="realtime-panel">
-      <article class="realtime-card"><strong>실시간 루프</strong><span id="runtime-live">불러오는 중..</span></article>
-      <article class="realtime-card"><strong>즉시 판단</strong><span id="decision-live">불러오는 중..</span></article>
-      <article class="realtime-card"><strong>다음 재평가</strong><span id="next-live">불러오는 중..</span></article>
-    </section>
-
-    <section class="metrics-strip">
-      <article class="metric-card"><strong>장세</strong><span id="regime-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>오늘 승률</strong><span id="winrate-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>열린 포지션</strong><span id="open-positions-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>청산 거래</strong><span id="closed-positions-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>기준 자본</strong><span id="capital-base-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>평가 자산</strong><span id="capital-total-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>실현 손익 KRW</strong><span id="capital-realized-metric">불러오는 중...</span></article>
-      <article class="metric-card"><strong>미실현 손익 KRW</strong><span id="capital-unrealized-metric">불러오는 중...</span></article>
-      <article class="metric-card alltime"><strong>누적 복리 수익률</strong><span id="alltime-pnl-metric">불러오는 중...</span></article>
-      <article class="metric-card alltime"><strong>올타임 승률</strong><span id="alltime-winrate-metric">불러오는 중...</span></article>
-      <article class="metric-card alltime"><strong>최대 낙폭 (MDD)</strong><span id="alltime-mdd-metric">불러오는 중...</span></article>
-    </section>
-
-    <section class="content-grid">
-      <div class="column">
-        <article class="section-card">
-          <div class="section-head">
-            <h2>자산 곡선</h2>
-            <span>전체 자산 흐름</span>
-          </div>
-          <svg class="equity-svg" viewBox="0 0 640 210" preserveAspectRatio="none">
-            <line class="equity-grid-line" x1="0" y1="35" x2="640" y2="35"></line>
-            <line class="equity-grid-line" x1="0" y1="105" x2="640" y2="105"></line>
-            <line class="equity-grid-line" x1="0" y1="175" x2="640" y2="175"></line>
-            <path id="equity-area" class="equity-area"></path>
-            <path id="equity-path" class="equity-path"></path>
-            <g id="equity-dots"></g>
-          </svg>
-          <div class="equity-labels" id="equity-labels"></div>
-        </article>
-
-        <section class="triple-grid">
-          <article class="section-card status-card">
-            <div class="status-head">
-              <h2>코인 데스크</h2>
-              <span class="status-pill" id="crypto-bias">Loading...</span>
-            </div>
-            <p class="status-subline" id="crypto-focus"></p>
-            <div class="status-kpis">
-              <div class="status-kpi"><strong>액션</strong><span id="crypto-action">-</span></div>
-              <div class="status-kpi"><strong>비중</strong><span id="crypto-size">-</span></div>
-              <div class="status-kpi"><strong>최근 주문</strong><span id="crypto-order">-</span></div>
-            </div>
-            <div class="chart-card desk-chart">
-              <div class="chart-top">
-                <strong id="crypto-chart-symbol">KRW-BTC</strong>
-                <span id="crypto-chart-meta">Loading...</span>
-              </div>
-              <svg class="mini-chart" viewBox="0 0 640 200" preserveAspectRatio="none">
-                <line class="equity-grid-line" x1="0" y1="40" x2="640" y2="40"></line>
-                <line class="equity-grid-line" x1="0" y1="100" x2="640" y2="100"></line>
-                <line class="equity-grid-line" x1="0" y1="160" x2="640" y2="160"></line>
-                <g id="crypto-chart-candles"></g>
-              </svg>
-              <div class="chart-summary">
-                <div class="chart-stat"><strong>현재가</strong><span id="crypto-last">-</span></div>
-                <div class="chart-stat"><strong>변화율</strong><span id="crypto-change">-</span></div>
-                <div class="chart-stat"><strong>범위</strong><span id="crypto-range">-</span></div>
-                <div class="chart-stat"><strong>거래량</strong><span id="crypto-volume">-</span></div>
-              </div>
-            </div>
-          </article>
-
-          <article class="section-card status-card">
-            <div class="status-head">
-              <h2>국내주식 데스크</h2>
-              <span class="status-pill" id="korea-bias">Loading...</span>
-            </div>
-            <p class="status-subline" id="korea-focus"></p>
-            <div class="status-kpis">
-              <div class="status-kpi"><strong>액션</strong><span id="korea-action">-</span></div>
-              <div class="status-kpi"><strong>비중</strong><span id="korea-size">-</span></div>
-              <div class="status-kpi"><strong>최근 주문</strong><span id="korea-order">-</span></div>
-            </div>
-            <div class="chart-card desk-chart">
-              <div class="chart-top">
-                <strong id="stock-chart-symbol">-</strong>
-                <span id="stock-chart-meta">Loading...</span>
-              </div>
-              <svg class="mini-chart" viewBox="0 0 640 200" preserveAspectRatio="none">
-                <line class="equity-grid-line" x1="0" y1="40" x2="640" y2="40"></line>
-                <line class="equity-grid-line" x1="0" y1="100" x2="640" y2="100"></line>
-                <line class="equity-grid-line" x1="0" y1="160" x2="640" y2="160"></line>
-                <g id="stock-chart-candles"></g>
-              </svg>
-              <div class="chart-summary">
-                <div class="chart-stat"><strong>현재가</strong><span id="stock-last">-</span></div>
-                <div class="chart-stat"><strong>변화율</strong><span id="stock-change">-</span></div>
-                <div class="chart-stat"><strong>범위</strong><span id="stock-range">-</span></div>
-                <div class="chart-stat"><strong>거래량</strong><span id="stock-volume">-</span></div>
-              </div>
-            </div>
-          </article>
-
-          <article class="section-card status-card">
-            <div class="status-head">
-              <h2>미국주식 데스크</h2>
-              <span class="status-pill" id="us-bias">Loading...</span>
-            </div>
-            <p class="status-subline" id="us-focus"></p>
-            <div class="status-kpis">
-              <div class="status-kpi"><strong>액션</strong><span id="us-action">-</span></div>
-              <div class="status-kpi"><strong>비중</strong><span id="us-size">-</span></div>
-              <div class="status-kpi"><strong>최근 주문</strong><span id="us-order">-</span></div>
-            </div>
-            <div class="chart-card desk-chart">
-              <div class="chart-top">
-                <strong id="us-chart-symbol">-</strong>
-                <span id="us-chart-meta">Loading...</span>
-              </div>
-              <svg class="mini-chart" viewBox="0 0 640 200" preserveAspectRatio="none">
-                <line class="equity-grid-line" x1="0" y1="40" x2="640" y2="40"></line>
-                <line class="equity-grid-line" x1="0" y1="100" x2="640" y2="100"></line>
-                <line class="equity-grid-line" x1="0" y1="160" x2="640" y2="160"></line>
-                <g id="us-chart-candles"></g>
-              </svg>
-              <div class="chart-summary">
-                <div class="chart-stat"><strong>현재가</strong><span id="us-last">-</span></div>
-                <div class="chart-stat"><strong>변화율</strong><span id="us-change">-</span></div>
-                <div class="chart-stat"><strong>범위</strong><span id="us-range">-</span></div>
-                <div class="chart-stat"><strong>거래량</strong><span id="us-volume">-</span></div>
-              </div>
-            </div>
-          </article>
-        </section>
-
-        <section class="performance-grid">
-          <article class="section-card">
-            <div class="section-head">
-              <h2>거래 성과 곡선</h2>
-              <span>청산 거래 누적 흐름</span>
-            </div>
-            <svg class="mini-chart" viewBox="0 0 640 200" preserveAspectRatio="none">
-              <line class="equity-grid-line" x1="0" y1="40" x2="640" y2="40"></line>
-              <line class="equity-grid-line" x1="0" y1="100" x2="640" y2="100"></line>
-              <line class="equity-grid-line" x1="0" y1="160" x2="640" y2="160"></line>
-              <path id="trade-curve-area" class="equity-area"></path>
-              <path id="trade-curve-path" class="equity-path"></path>
-              <g id="trade-curve-dots"></g>
-            </svg>
-            <div class="equity-labels" id="trade-curve-labels"></div>
-            <div class="perf-kpis">
-              <div class="perf-kpi"><strong>실현 손익</strong><span id="realized-metric">-</span></div>
-              <div class="perf-kpi"><strong>미실현 손익</strong><span id="unrealized-metric">-</span></div>
-              <div class="perf-kpi"><strong>승</strong><span id="wins-metric">-</span></div>
-              <div class="perf-kpi"><strong>패</strong><span id="losses-metric">-</span></div>
-            </div>
-          </article>
-
-          <article class="section-card">
-            <div class="section-head">
-              <h2>청산 거래 상세</h2>
-              <span>거래별 손익 막대</span>
-            </div>
-            <div class="trade-bars" id="trade-bars"></div>
-          </article>
-        </section>
-
-        <div class="two-up">
-          <article class="section-card">
-            <div class="section-head"><h2>열린 포지션</h2><span>현재 보유 위험</span></div>
-            <ul class="list-table" id="open-positions"></ul>
-          </article>
-          <article class="section-card">
-            <div class="section-head"><h2>청산 거래</h2><span>최근 종료 거래</span></div>
-            <ul class="list-table" id="closed-positions"></ul>
-          </article>
-        </div>
-      </div>
-
-      <aside class="column">
-        <article class="section-card">
-          <div class="section-head"><h2>핵심 상태</h2><span>빠른 판단</span></div>
-          <ul class="compact-list" id="trade-pulse"></ul>
-        </article>
-        <article class="section-card">
-          <div class="section-head"><h2>데스크 계획</h2><span>현재 배치</span></div>
-          <ul class="compact-list" id="desk-plans"></ul>
-        </article>
-        <article class="section-card">
-          <div class="section-head"><h2>일일 요약</h2><span>오늘 집계</span></div>
-          <ul class="compact-list" id="daily-summary"></ul>
-        </article>
-        <article class="section-card">
-          <div class="section-head"><h2>문제 심볼</h2><span>손실 반복 감시</span></div>
-          <ul class="compact-list" id="problem-symbols"></ul>
-        </article>
-        <article class="section-card">
-          <div class="section-head"><h2>시그널</h2><span>현재 스택 출력</span></div>
-          <ul class="compact-list" id="signals"></ul>
-        </article>
-        <article class="section-card">
-          <div class="section-head"><h2>세션 상태</h2><span>시장 운영 구간</span></div>
-          <ul class="compact-list" id="session-state"></ul>
-        </article>
-      </aside>
-    </section>
-
-    <section class="market-grid" style="margin-top:18px;">
-      <article class="section-card">
-        <div class="section-head"><h2>코인 리더보드</h2><span>관심도 높은 KRW 마켓</span></div>
-        <ul class="list-table" id="crypto-leaders"></ul>
-      </article>
-      <article class="section-card">
-        <div class="section-head"><h2>코스닥 리더보드</h2><span>갭과 유동성 상위</span></div>
-        <ul class="list-table" id="stock-leaders"></ul>
-      </article>
-    </section>
-
-    <section class="market-grid" style="margin-top:18px;">
-      <article class="section-card">
-        <div class="section-head"><h2>미국 리더보드</h2><span>핵심 ETF와 대형주 상위</span></div>
-        <ul class="list-table" id="us-leaders"></ul>
-      </article>
-      <article class="section-card">
-        <div class="section-head"><h2>시장 데이터 상태</h2><span>외부 피드 상태</span></div>
-        <ul class="compact-list" id="market-data-status"></ul>
-      </article>
-    </section>
-
-    <section class="market-grid" style="margin-top:18px;">
-      <article class="section-card">
-        <div class="section-head"><h2>실행 장부</h2><span>최근 모의 주문</span></div>
-        <ul class="list-table" id="paper-blotter"></ul>
-      </article>
-      <article class="section-card">
-        <div class="section-head"><h2>사이클 저널</h2><span>판단 스냅샷</span></div>
-        <ul class="list-table" id="cycle-journal"></ul>
-      </article>
-    </section>
-
-    <section class="dashboard-grid" style="margin-top:18px;">
-      <article class="section-card">
-        <div class="section-head"><h2>전략집</h2><span>회사 단위 플레이북</span></div>
-        <ul class="compact-list" id="strategy-book"></ul>
-      </article>
-      <article class="section-card">
-        <div class="section-head"><h2>트레이더 원칙</h2><span>내장 제약</span></div>
-        <ul class="compact-list" id="principles"></ul>
-      </article>
-      <article class="section-card">
-        <div class="section-head"><h2>데스크 뷰</h2><span>원시 데스크 payload</span></div>
-        <ul class="compact-list" id="desks"></ul>
-      </article>
-      <article class="section-card">
-        <div class="section-head"><h2>에이전트 뷰</h2><span>에이전트별 메모</span></div>
-        <ul class="compact-list" id="agents"></ul>
-      </article>
-    </section>
+      <span class="status-pill loading" id="status-pill">연결 중...</span>
+    </div>
+    <div class="hero-actions">
+      <span class="update-time" id="update-time">--:--</span>
+      <button class="btn-cycle" id="cycle-btn" onclick="runCycle()">사이클 실행</button>
+    </div>
+  </header>
+  <div class="hero-overview">
+    <div class="overview-card" id="ov-stance">
+      <div class="ov-label">Stance</div>
+      <div class="ov-value" id="ov-stance-val">--</div>
+    </div>
+    <div class="overview-card" id="ov-regime">
+      <div class="ov-label">Regime</div>
+      <div class="ov-value" id="ov-regime-val">--</div>
+    </div>
+    <div class="overview-card" id="ov-exposure">
+      <div class="ov-label">Exposure</div>
+      <div class="ov-value" id="ov-exposure-val">--</div>
+      <div class="ov-sub" id="ov-entries">--</div>
+    </div>
+    <div class="overview-card" id="ov-ops">
+      <div class="ov-label">Ops</div>
+      <div class="ov-value" id="ov-ops-val">--</div>
+    </div>
   </div>
-
-  <script>
-    if ('serviceWorker' in navigator) {{
-      window.addEventListener('load', () => {{
-        navigator.serviceWorker.register('/service-worker.js').catch(() => null);
-      }});
+  <div class="dashboard">
+    <div class="col-left">
+      <div class="area-cards">
+        <div class="stat-card">
+          <div class="sc-label">실현 손익</div>
+          <div class="sc-value" id="sc-realized">--</div>
+          <div class="sc-sub" id="sc-realized-krw">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-label">미실현 손익</div>
+          <div class="sc-value" id="sc-unrealized">--</div>
+          <div class="sc-sub" id="sc-unrealized-krw">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-label">승률 / 기대값</div>
+          <div class="sc-value" id="sc-winrate">--</div>
+          <div class="sc-sub" id="sc-trades">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="sc-label">포트폴리오</div>
+          <div class="sc-value" id="sc-capital">--</div>
+          <div class="sc-sub" id="sc-capital-base">--</div>
+        </div>
+      </div>
+      <div class="panel execution-strip">
+        <div class="panel-title">데스크 현황</div>
+        <div id="desk-rows"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">오픈 포지션 <span class="badge" id="pos-count">0</span></div>
+        <div id="positions-body"><div class="empty-msg">포지션 없음</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">최근 청산</div>
+        <div id="trades-body"><div class="empty-msg">청산 내역 없음</div></div>
+      </div>
+    </div>
+    <div class="col-right">
+      <div class="panel">
+        <div class="panel-title">에쿼티 커브</div>
+        <svg id="equity-svg" viewBox="0 0 400 140" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="panel">
+        <div class="panel-title">에이전트 시그널 <span class="insight-badge" id="insight-score">--</span></div>
+        <div id="insights-body" class="insights-list"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">사이클 저널</div>
+        <div id="journal-body" class="journal-list"><div class="empty-msg">저널 없음</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+  function fmtPct(v) {{
+    var n = parseFloat(v) || 0;
+    return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+  }}
+  function fmtKrw(v) {{
+    var n = parseInt(v) || 0;
+    return (n >= 0 ? '+' : '') + n.toLocaleString('ko-KR') + '원';
+  }}
+  function pctCls(v) {{
+    var n = parseFloat(v) || 0;
+    return n > 0 ? 'pos' : n < 0 ? 'neg' : 'neutral';
+  }}
+  function actionCls(a) {{
+    if (!a) return 'watch';
+    var s = a.toLowerCase();
+    if (s.indexOf('attack') >= 0 || s.indexOf('probe_long') >= 0) return 'buy';
+    if (s.indexOf('reduce') >= 0 || s.indexOf('preservation') >= 0) return 'sell';
+    if (s.indexOf('probe') >= 0 || s.indexOf('selective') >= 0) return 'probe';
+    return 'watch';
+  }}
+  function stanceTone(s) {{
+    if (!s) return 'tone-muted';
+    var v = s.toUpperCase();
+    return v === 'OFFENSE' ? 'tone-ok' : v === 'DEFENSE' ? 'tone-risk' : 'tone-blue';
+  }}
+  function regimeTone(r) {{
+    if (!r) return 'tone-muted';
+    var v = r.toUpperCase();
+    if (v === 'TRENDING') return 'tone-ok';
+    if (v === 'STRESSED') return 'tone-danger';
+    if (v === 'RANGING') return 'tone-warn';
+    return 'tone-muted';
+  }}
+  function renderEquity(pts) {{
+    var svg = document.getElementById('equity-svg');
+    if (!pts || pts.length < 2) {{
+      svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#97aabf" font-size="12">데이터 없음</text>';
+      return;
     }}
-
-    function renderCurve(pathId, areaId, series, labelsTarget = null, dotsTarget = null) {{
-      const safeSeries = series && series.length ? series : [100, 100];
-      const values = safeSeries.map(item => typeof item === 'number' ? item : Number(item.equity || 100));
-      const labels = safeSeries.map((item, idx) => typeof item === 'number' ? `${{idx + 1}}` : item.label);
-      const min = Math.min(...values);
-      const max = Math.max(...values);
-      const range = Math.max(max - min, 1);
-      const width = 640;
-      const height = 200;
-      const baseY = height - 16;
-      const pts = values.map((value, index) => {{
-        const x = values.length === 1 ? width / 2 : (index / (values.length - 1)) * (width - 24) + 12;
-        const y = baseY - ((Number(value) - min) / range) * (height - 40);
-        return {{ x, y, value, label: labels[index] }};
-      }});
-      const pathD = pts.map((pt, idx) => `${{idx === 0 ? 'M' : 'L'}}${{pt.x.toFixed(2)}},${{pt.y.toFixed(2)}}`).join(' ');
-      const areaD = `${{pathD}} L ${{pts[pts.length - 1].x.toFixed(2)}},${{baseY}} L ${{pts[0].x.toFixed(2)}},${{baseY}} Z`;
-      document.getElementById(pathId).setAttribute('d', pathD);
-      document.getElementById(areaId).setAttribute('d', areaD);
-      if (dotsTarget) {{
-        document.getElementById(dotsTarget).innerHTML = pts.map(pt =>
-          `<circle class="equity-dot" cx="${{pt.x.toFixed(2)}}" cy="${{pt.y.toFixed(2)}}" r="4"></circle>`
-        ).join('');
+    var W = 400, H = 140, PAD = 24;
+    var vals = pts.map(function(p) {{ return p.equity; }});
+    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), rng = mx - mn || 1;
+    var toX = function(i) {{ return PAD + (i / (pts.length - 1)) * (W - PAD * 2); }};
+    var toY = function(val) {{ return PAD + ((mx - val) / rng) * (H - PAD * 2); }};
+    var coords = pts.map(function(p, i) {{ return toX(i).toFixed(1) + ',' + toY(p.equity).toFixed(1); }}).join(' ');
+    var last = pts[pts.length - 1];
+    var col = last.equity >= 100 ? '#67e8a5' : '#ff7c7c';
+    var fillPts = toX(0).toFixed(1) + ',' + H + ' ' + coords + ' ' + toX(pts.length - 1).toFixed(1) + ',' + H;
+    var dots = pts.map(function(p, i) {{
+      return i === pts.length - 1
+        ? '<circle cx="' + toX(i).toFixed(1) + '" cy="' + toY(p.equity).toFixed(1) + '" r="4" fill="' + col + '"/>'
+        : '';
+    }}).join('');
+    var lbls = pts.map(function(p, i) {{
+      return '<text x="' + toX(i).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#97aabf" font-size="9">' + p.label + '</text>';
+    }}).join('');
+    svg.innerHTML = '<defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1">'
+      + '<stop offset="0%" stop-color="' + col + '" stop-opacity="0.25"/>'
+      + '<stop offset="100%" stop-color="' + col + '" stop-opacity="0"/>'
+      + '</linearGradient></defs>'
+      + '<polygon points="' + fillPts + '" fill="url(#eg)"/>'
+      + '<polyline points="' + coords + '" fill="none" stroke="' + col + '" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>'
+      + dots + lbls;
+  }}
+  function renderDesks(desks) {{
+    if (!desks) return;
+    var el = document.getElementById('desk-rows');
+    var items = [['CRYPTO','crypto'],['KR','korea'],['US','us']];
+    var html = '';
+    for (var i = 0; i < items.length; i++) {{
+      var lbl = items[i][0], k = items[i][1];
+      var d = desks[k] || {{}};
+      html += '<div class="desk-row">'
+        + '<span class="desk-tag">' + lbl + '</span>'
+        + '<span class="action-pill ' + actionCls(d.action) + '">' + (d.action || 'n/a') + '</span>'
+        + '<span class="desk-focus" title="' + (d.focus || '') + '">' + (d.focus || '') + '</span>'
+        + '<span class="desk-size">' + (d.size || '0.00x') + '</span>'
+        + '</div>';
+    }}
+    el.innerHTML = html;
+  }}
+  function renderPositions(pos) {{
+    var el = document.getElementById('positions-body');
+    var cnt = document.getElementById('pos-count');
+    if (!pos || !pos.length) {{
+      cnt.textContent = '0';
+      el.innerHTML = '<div class="empty-msg">오픈 포지션 없음</div>';
+      return;
+    }}
+    cnt.textContent = pos.length;
+    var rows = '';
+    for (var i = 0; i < pos.length; i++) {{
+      var p = pos[i];
+      var pnl = parseFloat(p.unrealized_pnl_pct) || 0;
+      rows += '<tr>'
+        + '<td><span class="symbol-cell">' + (p.symbol || '--') + '</span></td>'
+        + '<td><span class="desk-chip">' + (p.desk || '--') + '</span></td>'
+        + '<td style="font-family:var(--mono)">' + parseFloat(p.entry_price || 0).toLocaleString() + '</td>'
+        + '<td class="' + pctCls(pnl) + '" style="font-family:var(--mono)">' + fmtPct(pnl) + '</td>'
+        + '<td style="font-size:.7rem;color:var(--muted)">' + (p.opened_at || '').slice(11, 16) + '</td>'
+        + '</tr>';
+    }}
+    el.innerHTML = '<table class="pos-table"><thead><tr>'
+      + '<th>심볼</th><th>데스크</th><th>진입가</th><th>미실현</th><th>시간</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table>';
+  }}
+  function renderTrades(closed) {{
+    var el = document.getElementById('trades-body');
+    if (!closed || !closed.length) {{
+      el.innerHTML = '<div class="empty-msg">청산 내역 없음</div>';
+      return;
+    }}
+    var rows = '';
+    var items = closed.slice(0, 6);
+    for (var i = 0; i < items.length; i++) {{
+      var t = items[i];
+      var pnl = parseFloat(t.pnl_pct) || 0;
+      rows += '<tr>'
+        + '<td><span class="symbol-cell">' + (t.symbol || '--') + '</span></td>'
+        + '<td><span class="desk-chip">' + (t.desk || '--') + '</span></td>'
+        + '<td class="' + pctCls(pnl) + '" style="font-family:var(--mono)">' + fmtPct(pnl) + '</td>'
+        + '<td style="font-size:.7rem;color:var(--muted)">' + (t.closed_reason || '--') + '</td>'
+        + '<td style="font-size:.7rem;color:var(--muted)">' + (t.closed_at || '').slice(11, 16) + '</td>'
+        + '</tr>';
+    }}
+    el.innerHTML = '<table class="pos-table"><thead><tr>'
+      + '<th>심볼</th><th>데스크</th><th>손익</th><th>사유</th><th>시간</th>'
+      + '</tr></thead><tbody>' + rows + '</tbody></table>';
+  }}
+  function renderInsights(runs) {{
+    var el = document.getElementById('insights-body');
+    if (!runs || !runs.length) {{
+      el.innerHTML = '<div class="empty-msg">에이전트 데이터 없음</div>';
+      return;
+    }}
+    var html = '';
+    for (var i = 0; i < runs.length; i++) {{
+      var a = runs[i];
+      var sc = Math.round((parseFloat(a.score) || 0) * 100);
+      var col = sc >= 75 ? 'var(--green)' : sc >= 55 ? 'var(--blue)' : 'var(--red)';
+      var cls = sc >= 75 ? 'tone-ok' : sc >= 55 ? 'tone-blue' : sc < 35 ? 'tone-danger' : 'tone-muted';
+      html += '<div class="insight-row">'
+        + '<span class="ins-name">' + (a.agent_name || a.name || '--') + '</span>'
+        + '<div class="ins-bar"><div class="ins-bar-fill" style="width:' + sc + '%;background:' + col + '"></div></div>'
+        + '<span class="ins-score ' + cls + '">' + sc + '</span>'
+        + '</div>';
+    }}
+    el.innerHTML = html;
+  }}
+  function renderJournal(notes) {{
+    var el = document.getElementById('journal-body');
+    if (!notes || !notes.length) {{
+      el.innerHTML = '<div class="empty-msg">저널 없음</div>';
+      return;
+    }}
+    var html = '';
+    var items = notes.slice(0, 8);
+    for (var i = 0; i < items.length; i++) {{
+      var note = items[i];
+      var txt = typeof note === 'string' ? note : JSON.stringify(note);
+      var m = txt.match(/^(\\d\\d:\\d\\d)/);
+      if (m) {{
+        html += '<div class="journal-row"><span class="journal-time">' + m[1] + '</span>' + txt.slice(m[1].length).trim() + '</div>';
+      }} else {{
+        html += '<div class="journal-row">' + txt + '</div>';
       }}
-      if (labelsTarget) {{
-        document.getElementById(labelsTarget).innerHTML = pts.map(pt =>
-          `<span>${{pt.label}}<br>${{Number(pt.value).toFixed(2)}}</span>`
-        ).join('');
-      }}
     }}
-
-    function renderTradeBars(items) {{
-      const safeItems = items && items.length ? items : [];
-      document.getElementById('trade-bars').innerHTML = safeItems.map(item => {{
-        const pnl = Number(item.pnl_pct || 0);
-        const widthPct = Math.min(Math.abs(pnl) * 20, 50);
-        const cls = pnl >= 0 ? 'pos' : 'neg';
-        return `
-          <div class="trade-bar-row">
-            <div class="trade-bar-head">
-              <strong>${{item.symbol}}</strong>
-              <span>${{pnl}}%</span>
-            </div>
-            <div class="trade-bar-track">
-              <div class="trade-bar-fill ${{cls}}" style="width:${{widthPct}}%;"></div>
-            </div>
-            <div class="row-foot">${{item.closed_reason}} / ${{item.closed_at || 'n/a'}}</div>
-          </div>
-        `;
-      }}).join('') || '<div class="row-foot">Not enough closed trades yet.</div>';
+    el.innerHTML = html;
+  }}
+  async function loadData() {{
+    try {{
+      var r1 = await fetch('/dashboard-data');
+      var r2 = await fetch('/health');
+      var data = await r1.json();
+      var st = data.state || {{}};
+      var dash = data.dashboard || {{}};
+      var perf = dash.performance || {{}};
+      var cap = dash.capital || {{}};
+      var exp = dash.exposure || {{}};
+      var ops = dash.ops_flags || {{}};
+      var pill = document.getElementById('status-pill');
+      pill.textContent = st.regime || 'LIVE';
+      pill.className = 'status-pill';
+      var t = (st.updated_at || '').slice(11, 16);
+      document.getElementById('update-time').textContent = t || '--:--';
+      var sv = document.getElementById('ov-stance-val');
+      sv.textContent = st.stance || '--';
+      sv.className = 'ov-value ' + stanceTone(st.stance);
+      document.getElementById('ov-stance').className = 'overview-card'
+        + (st.stance === 'OFFENSE' ? ' tone-ok' : st.stance === 'DEFENSE' ? ' tone-risk' : '');
+      var rv = document.getElementById('ov-regime-val');
+      rv.textContent = st.regime || '--';
+      rv.className = 'ov-value ' + regimeTone(st.regime);
+      document.getElementById('ov-regime').className = 'overview-card'
+        + (st.regime === 'TRENDING' ? ' tone-ok' : st.regime === 'STRESSED' ? ' tone-risk' : st.regime === 'RANGING' ? ' tone-warn' : '');
+      var gross = parseFloat(exp.gross_open_notional_pct || 0);
+      var evEl = document.getElementById('ov-exposure-val');
+      evEl.textContent = (gross * 100).toFixed(0) + '%';
+      evEl.className = 'ov-value ' + (gross >= 0.8 ? 'tone-warn' : 'tone-ok');
+      document.getElementById('ov-entries').textContent = exp.allow_new_entries ? '진입 허용' : '진입 차단';
+      document.getElementById('ov-exposure').className = 'overview-card' + (gross >= 0.8 ? ' tone-warn' : '');
+      var sev = ops.severity || 'stable';
+      var ovEl = document.getElementById('ov-ops-val');
+      ovEl.textContent = sev === 'stable' ? '정상' : sev === 'warning' ? '주의' : '경고';
+      ovEl.className = 'ov-value ' + (sev === 'stable' ? 'tone-ok' : sev === 'warning' ? 'tone-warn' : 'tone-danger');
+      document.getElementById('ov-ops').className = 'overview-card'
+        + (sev === 'warning' ? ' tone-warn' : sev !== 'stable' ? ' tone-risk' : '');
+      var rzEl = document.getElementById('sc-realized');
+      rzEl.textContent = fmtPct(perf.realized_pnl_pct);
+      rzEl.className = 'sc-value ' + pctCls(perf.realized_pnl_pct);
+      document.getElementById('sc-realized-krw').textContent = fmtKrw(perf.realized_pnl_krw);
+      var uzEl = document.getElementById('sc-unrealized');
+      uzEl.textContent = fmtPct(perf.unrealized_pnl_pct);
+      uzEl.className = 'sc-value ' + pctCls(perf.unrealized_pnl_pct);
+      document.getElementById('sc-unrealized-krw').textContent = fmtKrw(perf.unrealized_pnl_krw);
+      var wr = parseFloat(perf.win_rate || 0);
+      var wrEl = document.getElementById('sc-winrate');
+      wrEl.textContent = wr.toFixed(1) + '%';
+      wrEl.className = 'sc-value ' + (wr >= 55 ? 'pos' : wr < 40 ? 'neg' : 'neutral');
+      document.getElementById('sc-trades').textContent =
+        (perf.wins || 0) + '승 ' + (perf.losses || 0) + '패 · 기대 ' + fmtPct(perf.expectancy_pct);
+      document.getElementById('sc-capital').textContent =
+        (parseInt(cap.total_krw) || 0).toLocaleString('ko-KR') + '원';
+      document.getElementById('sc-capital-base').textContent =
+        '기준 ' + (parseInt(cap.base_krw) || 0).toLocaleString('ko-KR') + '원';
+      renderEquity(dash.equity_curve || []);
+      renderDesks(dash.desk_status || {{}});
+      renderPositions(dash.open_positions || []);
+      renderTrades(dash.closed_positions || []);
+      document.getElementById('insight-score').textContent = dash.insight_score || '--';
+      renderInsights(st.agent_runs || []);
+      renderJournal(st.notes || []);
+    }} catch (err) {{
+      var pill2 = document.getElementById('status-pill');
+      pill2.textContent = '오류: ' + err.message;
+      pill2.className = 'status-pill error';
     }}
-
-    function renderCandles(targetId, candles) {{
-      const target = document.getElementById(targetId);
-      const safeCandles = candles && candles.length ? candles : [];
-      if (!safeCandles.length) {{
-        target.innerHTML = '';
-        return;
-      }}
-      const width = 640;
-      const height = 200;
-      const topPad = 14;
-      const bottomPad = 18;
-      const highs = safeCandles.map(item => Number(item.high || item.close || 0));
-      const lows = safeCandles.map(item => Number(item.low || item.close || 0));
-      const max = Math.max(...highs);
-      const min = Math.min(...lows);
-      const range = Math.max(max - min, 1);
-      const step = (width - 24) / safeCandles.length;
-      const bodyWidth = Math.max(Math.min(step * 0.58, 16), 6);
-      const toY = (value) => {{
-        return topPad + ((max - Number(value)) / range) * (height - topPad - bottomPad);
-      }};
-
-      target.innerHTML = safeCandles.map((item, index) => {{
-        const x = 12 + (index * step) + (step / 2);
-        const open = Number(item.open || item.close || 0);
-        const close = Number(item.close || 0);
-        const high = Number(item.high || close || 0);
-        const low = Number(item.low || close || 0);
-        const openY = toY(open);
-        const closeY = toY(close);
-        const highY = toY(high);
-        const lowY = toY(low);
-        const bodyY = Math.min(openY, closeY);
-        const bodyH = Math.max(Math.abs(closeY - openY), 1.8);
-        const color = close >= open ? '#16a34a' : '#dc2626';
-        return `
-          <line x1="${{x.toFixed(2)}}" y1="${{highY.toFixed(2)}}" x2="${{x.toFixed(2)}}" y2="${{lowY.toFixed(2)}}" stroke="${{color}}" stroke-width="1.4" stroke-linecap="round"></line>
-          <rect x="${{(x - bodyWidth / 2).toFixed(2)}}" y="${{bodyY.toFixed(2)}}" width="${{bodyWidth.toFixed(2)}}" height="${{bodyH.toFixed(2)}}" rx="2" fill="${{color}}" fill-opacity="0.92"></rect>
-        `;
-      }}).join('');
-    }}
-
-    function renderDeskStatus(prefix, desk) {{
-      document.getElementById(`${{prefix}}-bias`).textContent = desk.bias || 'n/a';
-      document.getElementById(`${{prefix}}-focus`).textContent = desk.focus || 'No focus';
-      document.getElementById(`${{prefix}}-action`).textContent = desk.action || 'n/a';
-      document.getElementById(`${{prefix}}-size`).textContent = desk.size || '0.00x';
-      document.getElementById(`${{prefix}}-order`).textContent = desk.latest_order ? `${{desk.latest_order.action}} / ${{desk.latest_order.size}}` : 'No order';
-    }}
-
-    function setChartSummary(prefix, payload) {{
-      const summary = payload?.summary || {{}};
-      const unit = prefix === 'us' ? '$' : 'KRW ';
-      document.getElementById(`${{prefix}}-last`).textContent = summary.last_close
-        ? `${{unit}}${{Number(summary.last_close).toLocaleString()}}`
-        : '-';
-      document.getElementById(`${{prefix}}-change`).textContent = `${{Number(summary.change_pct || 0).toFixed(2)}}%`;
-      document.getElementById(`${{prefix}}-range`).textContent = summary.high
-        ? `H ${{Number(summary.high).toLocaleString()}} / L ${{Number(summary.low).toLocaleString()}}`
-        : '-';
-      document.getElementById(`${{prefix}}-volume`).textContent = summary.volume
-        ? Number(summary.volume).toLocaleString()
-        : '-';
-    }}
-
-    async function loadData() {{
-      const res = await fetch('/dashboard-data', {{ cache: 'no-store' }});
-      const data = await res.json();
-      const liveRes = await fetch('/diagnostics/live-decision', {{ cache: 'no-store' }});
-      const liveDecision = await liveRes.json();
-      const state = data.state;
-      const dashboard = data.dashboard || {{}};
-      const readiness = data.live_readiness_checklist || {{}};
-      const brokerHealth = data.broker_live_health || {{}};
-      const performance = dashboard.performance || {{}};
-      const capital = dashboard.capital || {{}};
-      const opsFlags = dashboard.ops_flags || {{ severity: 'stable', items: [] }};
-      const runtimeProfile = dashboard.runtime_profile || {{}};
-      const marketCharts = dashboard.market_charts || {{}};
-      const executionSummary = dashboard.execution_summary || {{}};
-      const prioritySignals = [
-        readiness.overall === 'blocked' ? `Execution blocked: ${{readiness.block_count || 0}} hard stop` : null,
-        (executionSummary.stale_count || 0) > 0 ? `Stale live orders: ${{executionSummary.stale_count || 0}}` : null,
-        (executionSummary.partial_count || 0) > 0 ? `Partial fills pending review: ${{executionSummary.partial_count || 0}}` : null,
-        (executionSummary.pending_count || 0) > 0 ? `Pending live orders: ${{executionSummary.pending_count || 0}}` : null,
-        brokerHealth.upbit?.configured === false && brokerHealth.kis?.configured === false ? 'No live broker credentials configured' : null
-      ].filter(Boolean);
-      const healthRes = await fetch('/health', {{ cache: 'no-store' }});
-      const health = await healthRes.json();
-
-      document.getElementById('focus-metric').textContent = state.strategy_book.company_focus || 'n/a';
-      document.getElementById('risk-metric').textContent = state.risk_budget ?? 'n/a';
-      document.getElementById('cycles-metric').textContent = state.daily_summary.cycles_run ?? 0;
-      document.getElementById('pnl-metric').textContent = `${{state.daily_summary.estimated_pnl_pct ?? 0}}%`;
-      document.getElementById('regime-metric').textContent = `${{state.stance}} / ${{state.regime}}`;
-      document.getElementById('winrate-metric').textContent = `${{state.daily_summary.win_rate ?? 0}}%`;
-      document.getElementById('open-positions-metric').textContent = state.daily_summary.open_positions ?? 0;
-      document.getElementById('closed-positions-metric').textContent = state.daily_summary.closed_positions ?? 0;
-      document.getElementById('capital-base-metric').textContent = `KRW ${{Number(capital.base_krw || 0).toLocaleString()}}`;
-      document.getElementById('capital-total-metric').textContent = `KRW ${{Number(capital.total_krw || 0).toLocaleString()}}`;
-      document.getElementById('capital-realized-metric').textContent = `KRW ${{Number(capital.realized_krw || 0).toLocaleString()}}`;
-      document.getElementById('capital-unrealized-metric').textContent = `KRW ${{Number(capital.unrealized_krw || 0).toLocaleString()}}`;
-      const perf = state.performance_stats || {{}};
-      const atPnl = perf.cumulative_realized_pnl_pct ?? 0;
-      const atPnlEl = document.getElementById('alltime-pnl-metric');
-      atPnlEl.textContent = `${{atPnl >= 0 ? '+' : ''}}${{atPnl.toFixed(2)}}%`;
-      atPnlEl.style.color = atPnl >= 0 ? '#22c55e' : '#ef4444';
-      const atWinEl = document.getElementById('alltime-winrate-metric');
-      atWinEl.textContent = perf.total_trades > 0
-        ? `${{perf.win_rate_pct}}% (${{perf.winning_trades}}/${{perf.total_trades}})`
-        : '거래 없음';
-      const atMddEl = document.getElementById('alltime-mdd-metric');
-      const mdd = perf.max_drawdown_pct ?? 0;
-      atMddEl.textContent = `${{mdd.toFixed(2)}}%`;
-      atMddEl.style.color = mdd < -5 ? '#ef4444' : mdd < -2 ? '#f59e0b' : '#22c55e';
-      document.getElementById('insight-score').textContent = dashboard.insight_score ?? '--';
-      document.getElementById('equity-summary').textContent = dashboard.equity_summary
-        ? `Current ${{dashboard.equity_summary.current}} / Net ${{dashboard.equity_summary.change_pct}}%`
-        : 'No equity data yet';
-      document.getElementById('state-line').textContent =
-        `${{state.stance}} stance / ${{state.regime}} regime / risk budget ${{state.risk_budget}} / new entries ${{state.allow_new_entries ? 'ON' : 'BLOCKED'}} / ops ${{opsFlags.severity || 'stable'}} / runtime ${{runtimeProfile.mode || 'n/a'}}`;
-      document.getElementById('updated-line').textContent = `Updated ${{state.updated_at}}`;
-      document.getElementById('runtime-live').textContent = `${{liveDecision.runtime_profile?.mode || runtimeProfile.mode || 'n/a'}} / ${{liveDecision.runtime_profile?.reason || runtimeProfile.reason || 'n/a'}}`;
-      document.getElementById('decision-live').textContent = `crypto ${{(liveDecision.strategy_book?.crypto_plan || {{}}).action || 'n/a'}} / korea ${{(liveDecision.strategy_book?.korea_plan || {{}}).action || 'n/a'}} / us ${{(liveDecision.strategy_book?.us_plan || {{}}).action || 'n/a'}}`;
-      document.getElementById('next-live').textContent = `${{liveDecision.runtime_profile?.interval_seconds || runtimeProfile.interval_seconds || '-'}}초 후 재평가`;
-      document.getElementById('ops-banner').innerHTML = (opsFlags.items || []).length
-        ? (opsFlags.items || []).slice(0, 5).map(item =>
-            `<div class="ops-flag ${{item.level || 'info'}}"><strong>${{item.code || 'flag'}}</strong><span>${{item.message || ''}}</span></div>`
-          ).join('')
-        : '<div class="ops-flag info"><strong>stable</strong><span>현재 핵심 경고 없음</span></div>';
-
-      renderCurve('equity-path', 'equity-area', dashboard.equity_curve || [], 'equity-labels', 'equity-dots');
-      renderCurve('trade-curve-path', 'trade-curve-area', performance.trade_curve || [], 'trade-curve-labels', 'trade-curve-dots');
-      renderCandles('crypto-chart-candles', marketCharts.crypto?.candles || []);
-      renderCandles('stock-chart-candles', marketCharts.korea?.candles || []);
-      renderCandles('us-chart-candles', marketCharts.us?.candles || []);
-      renderTradeBars(performance.recent_closed || []);
-
-      document.getElementById('crypto-chart-symbol').textContent = marketCharts.crypto?.symbol || 'KRW-BTC';
-      document.getElementById('stock-chart-symbol').textContent = marketCharts.korea?.symbol || '-';
-      document.getElementById('crypto-chart-meta').textContent = (marketCharts.crypto?.candles || []).length
-        ? `${{marketCharts.crypto.candles.length}} candles / last KRW ${{Number((marketCharts.crypto.candles || []).slice(-1)[0]?.close || 0).toLocaleString()}}`
-        : 'No chart data';
-      document.getElementById('stock-chart-meta').textContent = (marketCharts.korea?.candles || []).length
-        ? `${{marketCharts.korea.candles.length}} candles / last KRW ${{Number((marketCharts.korea.candles || []).slice(-1)[0]?.close || 0).toLocaleString()}}`
-        : 'No chart data';
-      document.getElementById('us-chart-symbol').textContent = marketCharts.us?.symbol || '-';
-      document.getElementById('us-chart-meta').textContent = (marketCharts.us?.candles || []).length
-        ? `${{marketCharts.us.candles.length}} candles / last $${{Number((marketCharts.us.candles || []).slice(-1)[0]?.close || 0).toLocaleString()}}`
-        : 'No chart data';
-      setChartSummary('crypto', marketCharts.crypto || {{}});
-      setChartSummary('stock', marketCharts.korea || {{}});
-      setChartSummary('us', marketCharts.us || {{}});
-      document.getElementById('realized-metric').textContent = `${{performance.realized_pnl_pct ?? 0}}%`;
-      document.getElementById('unrealized-metric').textContent = `${{performance.unrealized_pnl_pct ?? 0}}%`;
-      document.getElementById('wins-metric').textContent = performance.wins ?? 0;
-      document.getElementById('losses-metric').textContent = performance.losses ?? 0;
-
-      document.getElementById('trade-pulse').innerHTML = [
-        ...prioritySignals.map(item => `<li><strong>Priority</strong>: ${{item}}</li>`),
-        `<li><strong>Ops severity</strong>: ${{opsFlags.severity || 'stable'}}</li>`,
-        `<li><strong>Runtime</strong>: ${{runtimeProfile.mode || 'n/a'}} / ${{runtimeProfile.interval_seconds || '-'}}s</li>`,
-        `<li><strong>Live execution</strong>: ${{executionSummary.live_count || 0}} total / partial ${{executionSummary.partial_count || 0}} / pending ${{executionSummary.pending_count || 0}} / stale ${{executionSummary.stale_count || 0}}</li>`,
-        `<li><strong>Portfolio</strong>: KRW ${{Number(capital.total_krw || 0).toLocaleString()}}</li>`,
-        `<li><strong>Expectancy</strong>: ${{performance.expectancy_pct ?? 0}}% / KRW ${{Number(performance.expectancy_krw || 0).toLocaleString()}}</li>`,
-        `<li><strong>Win rate</strong>: ${{state.daily_summary.win_rate ?? 0}}% / wins ${{state.daily_summary.wins ?? 0}} / losses ${{state.daily_summary.losses ?? 0}}</li>`,
-        `<li><strong>Open positions</strong>: ${{state.daily_summary.open_positions ?? 0}} / gross ${{state.daily_summary.gross_open_notional_pct ?? 0}}x</li>`,
-        `<li><strong>Crypto desk</strong>: ${{dashboard.desk_status?.crypto?.action || 'n/a'}} / ${{dashboard.desk_status?.crypto?.size || 'n/a'}}</li>`,
-        `<li><strong>Korea desk</strong>: ${{dashboard.desk_status?.korea?.action || 'n/a'}} / ${{dashboard.desk_status?.korea?.size || 'n/a'}}</li>`,
-        `<li><strong>U.S. desk</strong>: ${{dashboard.desk_status?.us?.action || 'n/a'}} / ${{dashboard.desk_status?.us?.size || 'n/a'}}</li>`
-      ].join('');
-
-      renderDeskStatus('crypto', dashboard.desk_status?.crypto || {{}});
-      renderDeskStatus('korea', dashboard.desk_status?.korea || {{}});
-      renderDeskStatus('us', dashboard.desk_status?.us || {{}});
-
-      document.getElementById('signals').innerHTML = (state.latest_signals || []).map(item => `<li>${{item}}</li>`).join('') || '<li>No signals yet</li>';
-      document.getElementById('principles').innerHTML = (state.trader_principles || []).map(item => `<li>${{item}}</li>`).join('');
-      document.getElementById('desks').innerHTML = Object.entries(state.desk_views || {{}}).map(([name, payload]) => `<li><strong>${{name}}</strong>: ${{JSON.stringify(payload)}}</li>`).join('') || '<li>No desk output yet</li>';
-      document.getElementById('session-state').innerHTML = Object.entries(state.session_state || {{}}).map(([name, value]) => `<li><strong>${{name}}</strong>: ${{Array.isArray(value) ? value.join(', ') : value}}</li>`).join('') || '<li>No session state yet</li>';
-      document.getElementById('strategy-book').innerHTML = [
-        `<li><strong>company_focus</strong>: ${{state.strategy_book.company_focus || 'n/a'}}</li>`,
-        `<li><strong>desk_priorities</strong>: ${{(state.strategy_book.desk_priorities || []).join(' | ') || 'n/a'}}</li>`
-      ].join('');
-      document.getElementById('desk-plans').innerHTML = [
-        `<li><strong>crypto</strong>: ${{state.strategy_book.crypto_plan ? state.strategy_book.crypto_plan.action + ' / ' + state.strategy_book.crypto_plan.size + ' / ' + state.strategy_book.crypto_plan.focus : 'n/a'}}</li>`,
-        `<li><strong>korea</strong>: ${{state.strategy_book.korea_plan ? state.strategy_book.korea_plan.action + ' / ' + state.strategy_book.korea_plan.size + ' / ' + state.strategy_book.korea_plan.focus : 'n/a'}}</li>`,
-        `<li><strong>us</strong>: ${{state.strategy_book.us_plan ? state.strategy_book.us_plan.action + ' / ' + state.strategy_book.us_plan.size + ' / ' + state.strategy_book.us_plan.focus : 'n/a'}}</li>`
-      ].join('');
-      document.getElementById('daily-summary').innerHTML = [
-        `<li><strong>date</strong>: ${{state.daily_summary.date || 'n/a'}}</li>`,
-        `<li><strong>cycles</strong>: ${{state.daily_summary.cycles_run || 0}}</li>`,
-        `<li><strong>orders</strong>: ${{state.daily_summary.orders_logged || 0}}</li>`,
-        `<li><strong>planned_orders</strong>: ${{state.daily_summary.planned_orders || 0}}</li>`,
-        `<li><strong>expectancy</strong>: ${{state.daily_summary.expectancy_pct || 0}}% / KRW ${{Number(state.daily_summary.expectancy_krw || 0).toLocaleString()}}</li>`,
-        `<li><strong>realized_pnl_pct</strong>: ${{state.daily_summary.realized_pnl_pct || 0}}%</li>`,
-        `<li><strong>unrealized_pnl_pct</strong>: ${{state.daily_summary.unrealized_pnl_pct || 0}}%</li>`,
-        `<li><strong>gross_open_notional</strong>: ${{state.daily_summary.gross_open_notional_pct || 0}}x</li>`,
-        `<li><strong>active_desks</strong>: ${{(state.daily_summary.active_desks || []).join(', ') || 'n/a'}}</li>`
-      ].join('');
-      document.getElementById('problem-symbols').innerHTML = (performance.symbol_performance_stats || []).slice(0, 4).map(item =>
-        `<li><strong>${{item.desk}} / ${{item.symbol}}</strong>: pnl ${{item.pnl_pct}}% / stop-like ${{item.stop_like_count}} / wins ${{item.wins}} / losses ${{item.losses}}</li>`
-      ).join('') || '<li>문제 심볼 없음</li>';
-
-      document.getElementById('crypto-leaders').innerHTML = (state.market_snapshot.crypto_leaders || []).slice(0, 6).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.market}}</strong><span class="row-meta">${{item.change_rate}}%</span></div><div class="row-foot">KRW ${{Number(item.trade_price).toLocaleString()}} / 24h volume ${{Number(item.volume_24h_krw || 0).toLocaleString()}}</div></li>`
-      ).join('') || '<li class="list-row">No crypto snapshot yet</li>';
-      document.getElementById('stock-leaders').innerHTML = (state.market_snapshot.gap_candidates || state.market_snapshot.stock_leaders || []).slice(0, 6).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.name || item.ticker}}</strong><span class="row-meta">gap ${{item.gap_pct}}%</span></div><div class="row-foot">ticker ${{item.ticker || 'n/a'}} / volume ${{Number(item.volume || 0).toLocaleString()}} / price ${{Number(item.current_price || 0).toLocaleString()}}</div></li>`
-      ).join('') || '<li class="list-row">No KOSDAQ snapshot yet</li>';
-      document.getElementById('us-leaders').innerHTML = (state.market_snapshot.us_leaders || []).slice(0, 6).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.ticker}}</strong><span class="row-meta">${{item.change_pct}}%</span></div><div class="row-foot">$${{Number(item.current_price || 0).toLocaleString()}} / 20d momentum ${{item.momentum_20d_pct}}% / volume ${{Number(item.volume || 0).toLocaleString()}}</div></li>`
-      ).join('') || '<li class="list-row">No U.S. snapshot yet</li>';
-      document.getElementById('market-data-status').innerHTML = [
-        `<li><strong>U.S. data</strong>: ${{health.us_data_status?.provider || 'n/a'}} / ${{health.us_data_status?.message || 'n/a'}}</li>`,
-        `<li><strong>Telegram</strong>: ${{health.telegram_enabled ? 'enabled' : 'disabled'}}</li>`,
-        `<li><strong>Readiness</strong>: ${{readiness.overall || 'n/a'}} / blocks ${{readiness.block_count || 0}} / warns ${{readiness.warn_count || 0}}</li>`,
-        `<li><strong>Upbit</strong>: ${{brokerHealth.upbit?.configured ? 'configured' : 'missing creds'}} / balances ${{brokerHealth.upbit?.balances_ok ? 'ok' : 'check needed'}}</li>`,
-        `<li><strong>KIS</strong>: ${{brokerHealth.kis?.configured ? 'configured' : 'missing creds'}} / balances ${{brokerHealth.kis?.balances_ok ? 'ok' : 'check needed'}}</li>`
-      ].join('');
-      document.getElementById('paper-blotter').innerHTML = (state.execution_log || []).slice(0, 8).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.desk}} / ${{item.action}}</strong><span class="row-meta">${{item.source === 'live' ? `${{item.status || 'n/a'}} / ${{item.effect_status || 'n/a'}}` : (item.status || 'n/a')}}</span></div><div class="row-foot">${{item.size}} / ${{item.source || 'paper'}} / ${{item.applied_mode || 'paper'}} / ${{item.symbol || item.focus || 'n/a'}} / ${{item.created_at}}</div></li>`
-      ).join('') || '<li class="list-row">No paper orders yet</li>';
-      document.getElementById('open-positions').innerHTML = (dashboard.open_positions || []).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.symbol}}</strong><span class="row-meta">${{Number(item.unrealized_pnl_pct || 0).toFixed(2)}}%</span></div><div class="row-foot">${{item.desk}} / entry KRW ${{Number(item.entry_price || 0).toLocaleString()}} / current KRW ${{Number(item.current_price || 0).toLocaleString()}} / opened ${{item.opened_at || 'n/a'}}</div></li>`
-      ).join('') || '<li class="list-row">No open positions</li>';
-      document.getElementById('closed-positions').innerHTML = (dashboard.closed_positions || []).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.symbol}}</strong><span class="row-meta">${{item.pnl_pct}}%</span></div><div class="row-foot">${{item.desk}} / ${{item.closed_reason}} / ${{item.closed_at || 'n/a'}}</div></li>`
-      ).join('') || '<li class="list-row">No closed trades yet</li>';
-      document.getElementById('cycle-journal').innerHTML = (state.recent_journal || []).slice(0, 6).map(item =>
-        `<li class="list-row"><div class="row-top"><strong class="row-title">${{item.company_focus}}</strong><span class="row-meta">${{item.stance}} / ${{item.regime}}</span></div><div class="row-foot">${{item.run_at}}</div></li>`
-      ).join('') || '<li class="list-row">No journal yet</li>';
-      document.getElementById('agents').innerHTML = (state.agent_runs || []).map(item => `<li><strong>${{item.name}}</strong> (${{item.score}}): ${{item.reason}}</li>`).join('') || '<li>No agent records yet</li>';
-    }}
-
-    async function runCycle() {{
+  }}
+  async function runCycle() {{
+    var btn = document.getElementById('cycle-btn');
+    btn.disabled = true;
+    btn.textContent = '실행 중...';
+    try {{
       await fetch('/cycle', {{ method: 'POST' }});
       await loadData();
+    }} catch (e) {{
+      console.error(e);
+    }} finally {{
+      btn.disabled = false;
+      btn.textContent = '사이클 실행';
     }}
-
-    setInterval(() => loadData().catch(() => null), 20000);
-    loadData().catch(err => {{
-      document.getElementById('state-line').textContent = `Dashboard unavailable: ${{err.message}}`;
-      document.getElementById('state-line').className = 'danger';
-    }});
-  </script>
+  }}
+  setInterval(function() {{ loadData().catch(function() {{}}); }}, 20000);
+  loadData().catch(function() {{
+    document.getElementById('status-pill').textContent = '연결 실패';
+    document.getElementById('status-pill').className = 'status-pill error';
+  }});
+</script>
 </body>
 </html>"""
 
