@@ -1,6 +1,6 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-04-21
+Last updated: 2026-04-22
 Maintained for: Claude / Codex continuation
 
 ## 1. Workspace
@@ -144,21 +144,44 @@ Status:
 - Requests include non-local source entries, which supports that external access routing is already being exercised.
 - Duplicate starts fail because port `8080` is already bound, which suggests the dashboard server is already up.
 
+## 0.9 Oracle Cloud 24/7 배포 + Upbit 실전 전환 준비 (2026-04-22)
+
+### Oracle Cloud VM 설정
+- VM: `134.185.118.144` (VM.Standard.E2.1.Micro, Ubuntu 22.04)
+- SSH 키: `trading_company_v2/오라클 SSH키/ssh-key-2026-04-21.key`
+- systemd 서비스 2개 등록 (자동 재시작):
+  - `trading-dashboard.service` → uvicorn, port 8080
+  - `trading-loop.service` → `python -m app.runtime`
+- 2GB swap 설정 완료
+- OCI Security List에 TCP 8080 ingress 허용
+
+### Upbit 실전 전환 준비
+- Upbit API 키 발급 및 VM `.env`에 등록 완료
+- `UPBIT_ALLOW_LIVE=true`, `LIVE_CAPITAL_KRW=2000000` 설정
+- 파일럿 가드레일: `UPBIT_PILOT_MAX_KRW=150000`, `UPBIT_PILOT_SINGLE_ORDER_ONLY=true`
+- `/diagnostics/upbit-live-pilot` → 현재 `go_live_ready: false`
+  - blockers: 0개 (API 연결, 잔고조회 모두 통과)
+  - caution: daily drawdown entry gate 차단 중 (-3.03%)
+- 자정 KST 자동 전환 cron 등록: `/home/ubuntu/go_live.sh` (매일 15:00 UTC)
+  - entry gate 해소 확인 후 `EXECUTION_MODE=upbit_live` 변경 + 서비스 재시작
+
+### 환경 분리
+- **로컬 PC**: `EXECUTION_MODE=paper`, `UPBIT_ALLOW_LIVE=false` (개발/모니터링 전용)
+- **Oracle VM**: `UPBIT_ALLOW_LIVE=true`, `EXECUTION_MODE=paper→upbit_live(자정전환예정)`
+
+### 접근
+- 대시보드: `http://134.185.118.144:8080/` (기본 인증 필요)
+- Tailscale: `https://desktop-891gpaq.taile9aa15.ts.net` (PC 켜져 있을 때)
+
 ## 8. Suggested next work
 
 Priority order:
 
-1. Tighten mobile-first presentation for both React and embedded views, especially compact cards and touch spacing.
-2. Decide whether the long-term external route should stay on Tailscale or move to an Oracle-hosted public endpoint.
-3. If Oracle public hosting is still intended, document:
-   - reverse proxy or tunnel method
-   - canonical DNS / URL
-   - auth boundary
-   - whether it targets embedded UI or React UI
-4. After UI redesign is complete, move to the final live-readiness stage:
-   - real broker check loop
-   - final operational checklist
-   - last safety pass before sustained live use
+1. **자정 전환 결과 확인** — `go_live_ready: true` 및 첫 주문 로그 확인
+2. **tiny-size 1회 검증** — 실전 전환 후 ₩60,000 단일 주문 정상 체결 확인
+3. Oracle VM에서 GitHub auto-pull 설정 (cron `git pull` + 서비스 재시작)
+4. Tighten mobile-first presentation for both React and embedded views.
+5. After live validation, scale capital and remove single-order-only guard.
 
 ## 9. Useful commands
 
