@@ -194,6 +194,8 @@ def _build_order_payload(order: PaperOrder) -> dict[str, str] | None:
         if not order.symbol or order.reference_price <= 0 or order.notional_pct <= 0:
             return None
         live_budget_krw = round(settings.live_capital_krw * order.notional_pct, 2)
+        if settings.upbit_pilot_max_krw > 0:
+            live_budget_krw = min(live_budget_krw, float(settings.upbit_pilot_max_krw))
         if live_budget_krw <= 0:
             return None
         return {

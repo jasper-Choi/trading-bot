@@ -34,6 +34,8 @@ class Settings:
     app_env: str = os.environ.get("APP_ENV", "local")
     execution_mode: str = os.environ.get("EXECUTION_MODE", "paper")
     live_capital_krw: int = int(os.environ.get("LIVE_CAPITAL_KRW", "0"))
+    upbit_pilot_max_krw: int = int(os.environ.get("UPBIT_PILOT_MAX_KRW", "150000"))
+    upbit_pilot_single_order_only: bool = os.environ.get("UPBIT_PILOT_SINGLE_ORDER_ONLY", "true").lower() == "true"
     host: str = os.environ.get("APP_HOST", "127.0.0.1")
     port: int = int(os.environ.get("APP_PORT", "8080"))
     public_base_url: str = os.environ.get("PUBLIC_BASE_URL", "")

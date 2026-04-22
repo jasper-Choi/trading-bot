@@ -38,6 +38,11 @@ def route_orders(orders: list[PaperOrder], requested_mode: str) -> dict:
         if settings.live_capital_krw <= 0:
             warnings.append("Upbit live requested but LIVE_CAPITAL_KRW is not configured; paper fallback applied")
             return _paper_fallback(mode, active_orders, warnings)
+        if settings.upbit_pilot_single_order_only:
+            crypto_orders = [order for order in active_orders if order.desk == "crypto"]
+            if len(crypto_orders) > 1:
+                warnings.append("Upbit pilot guard allows only one live crypto order per cycle; extra orders were skipped")
+                active_orders = crypto_orders[:1] + [order for order in active_orders if order.desk != "crypto"]
         details: list[dict] = []
         routed_orders = 0
         skipped_orders = 0

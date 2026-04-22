@@ -1239,6 +1239,10 @@ def upbit_live_pilot() -> dict:
         "broker": "upbit",
         "execution_mode": state.execution_mode,
         "pilot_cap_krw": pilot_cap_krw,
+        "pilot_guardrails": {
+            "max_order_krw": settings.upbit_pilot_max_krw,
+            "single_order_only": settings.upbit_pilot_single_order_only,
+        },
         "suggested_sequence": [
             "Verify balances and credentials with Upbit health check.",
             "Set EXECUTION_MODE=upbit_live only after readiness blockers clear.",
