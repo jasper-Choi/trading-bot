@@ -1,6 +1,6 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-04-22
+Last updated: 2026-04-23
 Maintained for: Claude / Codex continuation
 
 ## 1. Workspace
@@ -173,15 +173,31 @@ Status:
 - 대시보드: `http://134.185.118.144:8080/` (기본 인증 필요)
 - Tailscale: `https://desktop-891gpaq.taile9aa15.ts.net` (PC 켜져 있을 때)
 
+## 0.10 실전 가동 + 인프라 안정화 (2026-04-23)
+
+### 완료
+- `EXECUTION_MODE=upbit_live` 전환 완료 (VM, go_live_ready: True)
+- SQLite WAL 모드 + busy_timeout 30초 설정 → dashboard/loop DB 충돌 해소
+- systemd trading-loop에 `PYTHONUNBUFFERED=1` 추가 → 실시간 로그 정상 출력
+- 전체 UI 한글화 (main.py 임베디드 + React 컴포넌트 5개 + recommendation_engine)
+- 구 트레이딩봇 자동 실행 제거 (TradingBot.lnk 스타트업 삭제, port 8000/5173 종료)
+- VM GitHub auto-pull cron 등록: `*/5 * * * * /home/ubuntu/auto_pull.sh`
+  - 변경 감지 시에만 서비스 재시작, 로그: `/home/ubuntu/auto_pull.log`
+
+### VM crontab 현재 상태
+```
+0 15 * * * /home/ubuntu/go_live.sh >> /home/ubuntu/go_live.log 2>&1
+*/5 * * * * /home/ubuntu/auto_pull.sh
+```
+
 ## 8. Suggested next work
 
 Priority order:
 
-1. **자정 전환 결과 확인** — `go_live_ready: true` 및 첫 주문 로그 확인
-2. **tiny-size 1회 검증** — 실전 전환 후 ₩60,000 단일 주문 정상 체결 확인
-3. Oracle VM에서 GitHub auto-pull 설정 (cron `git pull` + 서비스 재시작)
-4. Tighten mobile-first presentation for both React and embedded views.
-5. After live validation, scale capital and remove single-order-only guard.
+1. **tiny-size 첫 주문 체결 확인** — 신호 발생 시 ₩60,000 단일 주문 정상 체결 확인
+2. **모바일 UI 개선** — React + 임베디드 대시보드 모바일 최적화
+3. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
+4. KIS 실전 전환 준비 (한국주식 데스크)
 
 ## 9. Useful commands
 
