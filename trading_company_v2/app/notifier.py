@@ -79,13 +79,17 @@ class TelegramNotifier:
         stance_changed = previous_state.get("stance") != current_state.get("stance")
         regime_changed = previous_state.get("regime") != current_state.get("regime")
         risk_changed = previous_state.get("allow_new_entries") != current_state.get("allow_new_entries")
-        should_send = settings.telegram_notify_every_cycle or stance_changed or regime_changed or risk_changed
+        prev_capital_mode = str(((previous_state.get("strategy_book") or {}).get("capital_profile") or {}).get("mode") or "")
+        curr_capital_mode = str(((current_state.get("strategy_book") or {}).get("capital_profile") or {}).get("mode") or "")
+        capital_mode_changed = prev_capital_mode != curr_capital_mode
+        should_send = settings.telegram_notify_every_cycle or stance_changed or regime_changed or risk_changed or capital_mode_changed
         if not should_send:
             return False
 
         crypto_plan = current_state.get("strategy_book", {}).get("crypto_plan", {})
         korea_plan = current_state.get("strategy_book", {}).get("korea_plan", {})
         us_plan = current_state.get("strategy_book", {}).get("us_plan", {})
+        capital_profile = (current_state.get("strategy_book", {}) or {}).get("capital_profile", {}) or {}
         desk_priorities = current_state.get("strategy_book", {}).get("desk_priorities", [])
         lines = [
             f"[{settings.company_name}] company cycle update",
@@ -93,6 +97,7 @@ class TelegramNotifier:
             f"phase: {current_state.get('session_state', {}).get('market_phase', 'n/a')}",
             f"stance/regime: {current_state.get('stance')} / {current_state.get('regime')}",
             f"risk: budget {current_state.get('risk_budget')} / entries {'ON' if current_state.get('allow_new_entries') else 'BLOCKED'}",
+            f"capital mode: {capital_profile.get('mode', 'neutral')} / global x{capital_profile.get('global_multiplier', 1.0)}",
             f"focus: {current_state.get('strategy_book', {}).get('company_focus', 'n/a')}",
             f"priorities: {', '.join(desk_priorities[:3]) if desk_priorities else 'n/a'}",
             f"crypto plan: {crypto_plan.get('action', 'n/a')} / {crypto_plan.get('size', 'n/a')} / {crypto_plan.get('focus', 'n/a')}",
@@ -127,8 +132,8 @@ class TelegramNotifier:
         return self._send_keyed(
             "cycle_summary",
             "\n".join(lines),
-            cooldown_seconds=45 * 60,
-            suppress_duplicate_seconds=3 * 60 * 60,
+            cooldown_seconds=60 * 60,
+            suppress_duplicate_seconds=6 * 60 * 60,
         )
 
     def send_error(self, message: str) -> bool:
@@ -170,8 +175,8 @@ class TelegramNotifier:
             return False
         body = "\n".join([f"[{settings.company_name}] {title}", *lines])
         lowered = title.lower()
-        cooldown_seconds = 90 * 60 if "hold alert" in lowered else 45 * 60
-        duplicate_window = 6 * 60 * 60 if "hold alert" in lowered else 3 * 60 * 60
+        cooldown_seconds = 4 * 60 * 60 if "hold alert" in lowered else 75 * 60
+        duplicate_window = 12 * 60 * 60 if "hold alert" in lowered else 6 * 60 * 60
         return self._send_keyed(
             f"ops_alert:{lowered}",
             body,
@@ -231,8 +236,8 @@ class TelegramNotifier:
         return self._send_keyed(
             "realtime_decision",
             "\n".join(lines),
-            cooldown_seconds=2 * 60 * 60,
-            suppress_duplicate_seconds=6 * 60 * 60,
+            cooldown_seconds=3 * 60 * 60,
+            suppress_duplicate_seconds=8 * 60 * 60,
         )
 
 
