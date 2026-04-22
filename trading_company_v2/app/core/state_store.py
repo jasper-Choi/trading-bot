@@ -5,7 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytz
-from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, inspect, select, text
+from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, event, inspect, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
@@ -136,7 +136,21 @@ class LiveOrderRecord(Base):
 
 db_path = Path(settings.db_path)
 db_path.parent.mkdir(parents=True, exist_ok=True)
-engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+engine = create_engine(
+    f"sqlite:///{db_path}",
+    connect_args={"check_same_thread": False, "timeout": 30},
+)
+
+
+@event.listens_for(engine, "connect")
+def _set_sqlite_pragmas(dbapi_conn, _connection_record) -> None:
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.execute("PRAGMA busy_timeout=30000")
+    cursor.close()
+
+
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 ACTIONABLE_ENTRY_ACTIONS = {"probe_longs", "attack_opening_drive", "selective_probe"}
 ACTIONABLE_EXIT_ACTIONS = {"reduce_risk", "capital_preservation"}
