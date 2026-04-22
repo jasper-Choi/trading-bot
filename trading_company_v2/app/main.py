@@ -724,6 +724,7 @@ def dashboard_data() -> dict:
         "dashboard": _build_dashboard_payload(state),
         "broker_live_health": broker_live_health(),
         "live_readiness_checklist": live_readiness_checklist(),
+        "upbit_live_pilot": upbit_live_pilot(),
     }
 
 
@@ -805,6 +806,7 @@ def mobile_summary() -> dict:
         "desk_offense": _build_desk_offense_payload(state),
         "agent_performance": _build_agent_performance_payload(state),
         "live_readiness": live_readiness_checklist(),
+        "upbit_live_pilot": upbit_live_pilot(),
         "headline": {
             "win_rate": daily.get("win_rate", 0.0),
             "expectancy_pct": daily.get("expectancy_pct", 0.0),
@@ -1195,6 +1197,59 @@ def live_readiness_checklist() -> dict:
         "checklist": checklist,
         "next_actions": next_actions[:5],
         "notes": (state.notes or [])[-8:],
+    }
+
+
+@app.get("/diagnostics/upbit-live-pilot")
+def upbit_live_pilot() -> dict:
+    state = load_company_state()
+    broker_health = broker_live_health()
+    readiness = live_readiness_checklist()
+    upbit = broker_health.get("upbit", {}) or {}
+    execution_summary = broker_health.get("execution_summary", {}) or {}
+
+    blockers: list[str] = []
+    cautions: list[str] = []
+
+    if settings.live_capital_krw <= 0:
+        blockers.append("LIVE_CAPITAL_KRW is not configured.")
+    if not bool(upbit.get("configured")):
+        blockers.append("Upbit API credentials are missing.")
+    if not bool(settings.upbit_allow_live):
+        blockers.append("UPBIT_ALLOW_LIVE is false.")
+    if str(state.execution_mode or "paper") != "upbit_live":
+        cautions.append("EXECUTION_MODE is not set to upbit_live yet.")
+    if not bool(upbit.get("balances_ok")):
+        cautions.append("Upbit balance check has not passed yet.")
+    if not bool(state.allow_new_entries):
+        cautions.append("Entry gate is currently blocked by risk mode.")
+    if int(execution_summary.get("pending_count", 0) or 0) > 0:
+        cautions.append("There are pending live orders that should be clean before pilot.")
+    if int(execution_summary.get("stale_count", 0) or 0) > 0:
+        blockers.append("There are stale live orders that must be cleared first.")
+
+    pilot_cap_krw = 0
+    if settings.live_capital_krw > 0:
+        pilot_cap_krw = int(max(min(round(settings.live_capital_krw * 0.03), 300000), 50000))
+
+    go_live_ready = not blockers and bool(upbit.get("balances_ok")) and bool(state.allow_new_entries)
+    return {
+        "updated_at": state.updated_at,
+        "go_live_ready": go_live_ready,
+        "broker": "upbit",
+        "execution_mode": state.execution_mode,
+        "pilot_cap_krw": pilot_cap_krw,
+        "suggested_sequence": [
+            "Verify balances and credentials with Upbit health check.",
+            "Set EXECUTION_MODE=upbit_live only after readiness blockers clear.",
+            "Run one tiny-size crypto entry/exit cycle first.",
+            "Confirm order lookup, fill state, and position sync before scaling.",
+        ],
+        "blockers": blockers,
+        "cautions": cautions[:5],
+        "upbit_health": upbit,
+        "entry_block_summary": _entry_block_summary(state),
+        "readiness_overall": readiness.get("overall", "blocked"),
     }
 
 

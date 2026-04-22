@@ -373,6 +373,36 @@ html, body {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
 }
 
+.pilot-panel {
+  margin-top: 12px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(11, 21, 37, 0.88), rgba(9, 17, 31, 0.78));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.pilot-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pilot-col {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(7, 16, 29, 0.62);
+  font-size: 12px;
+}
+
+.pilot-col span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .symbol-edge-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -978,6 +1008,7 @@ tr:hover td { background: var(--surface2); }
   .edge-deck { grid-template-columns: 1fr; }
   .edge-grid { grid-template-columns: 1fr; }
   .symbol-edge-grid { grid-template-columns: 1fr; }
+  .pilot-grid { grid-template-columns: 1fr; }
 }
 
 /* ?? 紐⑤컮????768px ?댄븯 ?????????????????????????? */

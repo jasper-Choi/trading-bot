@@ -239,6 +239,7 @@ export default function App() {
   const opsFlags      = dashboard?.ops_flags ?? { severity: 'stable', items: [] }
   const readiness     = dashboardData?.live_readiness_checklist ?? null
   const brokerHealth  = dashboardData?.broker_live_health ?? null
+  const upbitPilot = dashboardData?.upbit_live_pilot ?? null
   const entryBlockSummary = dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
   const deskOffense = dashboard?.desk_offense ?? []
   const symbolEdge = dashboard?.symbol_edge ?? []
@@ -479,6 +480,36 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          {upbitPilot && (
+            <div className={`pilot-panel ${upbitPilot.go_live_ready ? 'tone-ok' : 'tone-warn'}`}>
+              <div className="edge-head">
+                <div>
+                  <div className="panel-title">Upbit Live Pilot</div>
+                  <div className="panel-subcopy">
+                    {upbitPilot.go_live_ready
+                      ? `pilot ready / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`
+                      : `pilot blocked / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`}
+                  </div>
+                </div>
+                <div className={`edge-pill ${upbitPilot.go_live_ready ? 'tone-ok' : 'tone-warn'}`}>
+                  {upbitPilot.go_live_ready ? 'READY' : 'HOLD'}
+                </div>
+              </div>
+              <div className="pilot-grid">
+                <div className="pilot-col">
+                  <strong>Blockers</strong>
+                  {(upbitPilot.blockers || []).length > 0
+                    ? upbitPilot.blockers.slice(0, 3).map((item, idx) => <span key={`blocker-${idx}`}>{item}</span>)
+                    : <span>No hard blocker</span>}
+                </div>
+                <div className="pilot-col">
+                  <strong>Next Steps</strong>
+                  {(upbitPilot.suggested_sequence || []).slice(0, 3).map((item, idx) => <span key={`step-${idx}`}>{item}</span>)}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="edge-deck">
             <div className="edge-panel">
