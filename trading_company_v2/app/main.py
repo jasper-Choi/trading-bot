@@ -1170,6 +1170,19 @@ def live_readiness_checklist() -> dict:
     block_count = sum(1 for item in checklist if item["status"] == "block")
     warn_count = sum(1 for item in checklist if item["status"] == "warn")
     overall = "blocked" if block_count > 0 else "caution" if warn_count > 0 else "ready"
+    next_actions: list[str] = []
+    if settings.live_capital_krw <= 0:
+        next_actions.append("Set LIVE_CAPITAL_KRW to the real capital you want the bot to control.")
+    if not any(bool((broker_health.get(name, {}) or {}).get("configured")) for name in ("upbit", "kis")):
+        next_actions.append("Configure one live broker first: Upbit for crypto or KIS for Korea.")
+    if not any(bool((broker_health.get(name, {}) or {}).get("enabled")) for name in ("upbit", "kis")):
+        next_actions.append("Enable exactly one live broker switch after credentials and balances verify cleanly.")
+    if mode == "paper":
+        next_actions.append("Move EXECUTION_MODE from paper to the intended live mode only after the checks above pass.")
+    if not allow_new_entries:
+        next_actions.append("Clear the current entry gate block before go-live; today's risk state is still defensive.")
+    if not next_actions:
+        next_actions.append("Run one tiny-size live validation cycle before scaling beyond minimum size.")
 
     return {
         "updated_at": state.updated_at,
@@ -1180,6 +1193,7 @@ def live_readiness_checklist() -> dict:
         "execution_summary": execution_summary,
         "entry_block_summary": _entry_block_summary(state),
         "checklist": checklist,
+        "next_actions": next_actions[:5],
         "notes": (state.notes or [])[-8:],
     }
 
