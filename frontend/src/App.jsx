@@ -241,6 +241,7 @@ export default function App() {
   const brokerHealth  = dashboardData?.broker_live_health ?? null
   const entryBlockSummary = dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
   const deskOffense = dashboard?.desk_offense ?? []
+  const symbolEdge = dashboard?.symbol_edge ?? []
   const agentPerformance = dashboard?.agent_performance ?? []
   const capitalProfile = dashboard?.capital?.capital_profile ?? dashboardData?.state?.strategy_book?.capital_profile ?? {}
   const latestLive    = executionSummary?.latest_live ?? null
@@ -540,6 +541,25 @@ export default function App() {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          <div className="symbol-edge-panel">
+            <div className="edge-head">
+              <div>
+                <div className="panel-title">Symbol Bias</div>
+                <div className="panel-subcopy">Recent symbol memory driving hot / neutral / cold re-entry bias</div>
+              </div>
+            </div>
+            <div className="symbol-edge-grid">
+              {symbolEdge.slice(0, 6).map((item) => (
+                <div className={`symbol-edge-card tone-${item.tone || 'neutral'}`} key={`${item.desk}-${item.symbol}`}>
+                  <strong>{item.symbol}</strong>
+                  <span>{item.desk} / {item.tone}</span>
+                  <span>score {Number(item.score || 0).toFixed(2)}</span>
+                  <span>{item.detail || 'fresh symbol'}</span>
+                </div>
+              ))}
             </div>
           </div>
 

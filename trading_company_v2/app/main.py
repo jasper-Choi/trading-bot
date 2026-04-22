@@ -273,6 +273,53 @@ def _build_execution_summary(state: CompanyState) -> dict:
     }
 
 
+def _symbol_edge_summary(state: CompanyState) -> list[dict]:
+    closed_positions = load_closed_positions(limit=20)
+    plan_symbols: list[tuple[str, str]] = []
+    for desk, plan_key in (("crypto", "crypto_plan"), ("korea", "korea_plan"), ("us", "us_plan")):
+        plan = state.strategy_book.get(plan_key, {}) or {}
+        primary = str(plan.get("symbol", "") or "").strip()
+        if primary:
+            plan_symbols.append((desk, primary))
+        for candidate in plan.get("candidate_symbols", []) or []:
+            symbol = str(candidate or "").strip()
+            if symbol and (desk, symbol) not in plan_symbols:
+                plan_symbols.append((desk, symbol))
+
+    rows: list[dict] = []
+    for desk, symbol in plan_symbols[:8]:
+        history = [item for item in closed_positions if item.get("desk") == desk and item.get("symbol") == symbol][:5]
+        if not history:
+            rows.append({"desk": desk, "symbol": symbol, "tone": "neutral", "score": 0.0, "detail": "fresh symbol"})
+            continue
+        weighted_pnl = 0.0
+        wins = 0
+        losses = 0
+        stop_like = 0
+        for idx, item in enumerate(history):
+            weight = max(1.0 - (idx * 0.16), 0.4)
+            pnl = float(item.get("pnl_pct", 0.0) or 0.0)
+            weighted_pnl += pnl * weight
+            if pnl > 0:
+                wins += 1
+            elif pnl < 0:
+                losses += 1
+            if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}:
+                stop_like += 1
+        score = round((wins * 0.55) - (losses * 0.7) + (weighted_pnl * 0.18) - (stop_like * 0.35), 2)
+        tone = "hot" if score >= 0.7 else "cold" if score <= -0.9 or stop_like >= 2 else "cool" if score <= -0.35 else "neutral"
+        rows.append(
+            {
+                "desk": desk,
+                "symbol": symbol,
+                "tone": tone,
+                "score": score,
+                "detail": f"wins {wins} / losses {losses} / weighted pnl {round(weighted_pnl, 2)}%",
+            }
+        )
+    return sorted(rows, key=lambda item: (0 if item["tone"] == "hot" else 1 if item["tone"] == "neutral" else 2, -item["score"]), reverse=False)
+
+
 def _build_desk_offense_payload(state: CompanyState) -> list[dict]:
     desk_stats = state.daily_summary.get("desk_stats", {}) or {}
     capital_profile = state.strategy_book.get("capital_profile", {}) or {}
@@ -601,6 +648,7 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
         "performance": _build_performance_payload(state, closed_positions),
         "capital": _build_capital_payload(state),
         "execution_summary": _build_execution_summary(state),
+        "symbol_edge": _symbol_edge_summary(state),
         "desk_offense": _build_desk_offense_payload(state),
         "agent_performance": _build_agent_performance_payload(state),
         "exposure": {
