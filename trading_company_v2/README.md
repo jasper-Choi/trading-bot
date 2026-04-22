@@ -72,6 +72,7 @@ For the always-on bot loop on your home PC:
 The batch files call `.venv\Scripts\python.exe` directly, so they do not depend on `activate.bat`.
 
 Detailed instructions are in [docs/personal_pc_setup.md](./docs/personal_pc_setup.md).
+Current remote-access routing notes are in [docs/access_strategy.md](./docs/access_strategy.md).
 
 ## Local Endpoints
 
@@ -79,6 +80,8 @@ Detailed instructions are in [docs/personal_pc_setup.md](./docs/personal_pc_setu
   - Mobile-friendly company dashboard
 - `GET /health`
   - Service health
+- `GET /diagnostics/access-map`
+  - Local / LAN / external access mapping
 - `GET /state`
   - Raw current state JSON
 - `GET /dashboard-data`

@@ -35,11 +35,11 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": payload.get("lead_market", ""),
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% indicates downside pressure"],
         }
-    offense_threshold = 0.76 if regime == "RANGING" else 0.72
+    offense_threshold = 0.74 if regime == "RANGING" else 0.7
     if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 2.0:
         return {
             "action": "probe_longs",
-            "size": "0.40x" if stance == "BALANCED" else "0.60x",
+            "size": "0.45x" if stance == "BALANCED" else "0.60x",
             "focus": f"Watch {payload.get('lead_market', 'KRW-BTC')} continuation",
             "symbol": payload.get("lead_market", ""),
             "notes": reasons + [f"offense threshold cleared at {signal_score:.2f} / ema gap {ema_gap:.2f}%"],
@@ -121,10 +121,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"quality score {quality_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
             ],
         }
-    if active_gap_count >= 2 and quality_score >= 0.6 and avg_signal >= 0.54 and avg_volume >= 10000:
+    if active_gap_count >= 2 and quality_score >= 0.58 and avg_signal >= 0.52 and avg_volume >= 8000:
         return {
             "action": "selective_probe",
-            "size": "0.30x",
+            "size": "0.35x",
             "focus": f"Wait for confirmation in {top_name}" if opening_window else f"Late confirmation only in {top_name}",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
@@ -174,6 +174,15 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
             "candidate_symbols": candidate_symbols,
             "notes": ["review U.S. core leaders during premarket or regular session"],
         }
+    if session.get("us_premarket") and not session.get("us_regular"):
+        return {
+            "action": "pre_market_watch",
+            "size": "0.00x",
+            "focus": f"Premarket watch only for {top_ticker or 'U.S. leaders'}",
+            "symbol": top_ticker,
+            "candidate_symbols": candidate_symbols,
+            "notes": ["wait for regular-session confirmation before any U.S. entry"],
+        }
     if regime == "STRESSED":
         return {
             "action": "capital_preservation",
@@ -195,11 +204,23 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
                 "wait for a cleaner U.S. follow-through setup",
             ],
         }
-        
-    if active_us_count >= 3 and quality_score >= 0.68 and avg_change >= 0.45 and avg_volume >= 1000000 and avg_signal >= 0.58 and stance != "DEFENSE":
+    if quality_score < 0.72 or avg_signal < 0.62 or active_us_count < 3 or avg_change < 0.35:
+        return {
+            "action": "stand_by",
+            "size": "0.00x",
+            "focus": "U.S. follow-through quality is not strong enough",
+            "symbol": top_ticker,
+            "candidate_symbols": candidate_symbols,
+            "notes": [
+                f"quality {quality_score:.2f} / active leaders {active_us_count} / avg change {avg_change:.2f}% / avg signal {avg_signal:.2f}",
+                "require stronger regular-session breadth before probing U.S. longs",
+            ],
+        }
+
+    if active_us_count >= 4 and quality_score >= 0.76 and avg_change >= 0.55 and avg_volume >= 2000000 and avg_signal >= 0.66 and stance != "DEFENSE":
         return {
             "action": "probe_longs",
-            "size": "0.35x" if stance == "BALANCED" else "0.50x",
+            "size": "0.25x" if stance == "BALANCED" else "0.40x",
             "focus": f"Follow U.S. leader {top_ticker}",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
@@ -208,10 +229,10 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
                 f"quality score {quality_score:.2f} / avg change {avg_change:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
             ],
         }
-    if active_us_count >= 2 and quality_score >= 0.58 and avg_signal >= 0.52:
+    if active_us_count >= 3 and quality_score >= 0.7 and avg_signal >= 0.6:
         return {
             "action": "selective_probe",
-            "size": "0.20x",
+            "size": "0.15x",
             "focus": f"Wait for follow-through in {top_ticker}",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,

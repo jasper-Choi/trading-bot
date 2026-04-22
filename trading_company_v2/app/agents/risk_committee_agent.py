@@ -23,6 +23,10 @@ class RiskCommitteeAgent(BaseAgent):
         gross_open_notional = float(state.daily_summary.get("gross_open_notional_pct", 0.0) or 0.0)
         wins = int(state.daily_summary.get("wins", 0) or 0)
         losses = int(state.daily_summary.get("losses", 0) or 0)
+        capital_profile = state.strategy_book.get("capital_profile", {}) or {}
+        compounding_mode = str(capital_profile.get("mode", "neutral") or "neutral")
+        profit_buffer_pct = float(capital_profile.get("profit_buffer_pct", 0.0) or 0.0)
+        global_multiplier = float(capital_profile.get("global_multiplier", 1.0) or 1.0)
         state.allow_new_entries = state.regime != "STRESSED" and combined_pnl > -1.5
         if state.stance == "OFFENSE":
             state.risk_budget = min(state.risk_budget, 0.65)
@@ -38,8 +42,22 @@ class RiskCommitteeAgent(BaseAgent):
             state.risk_budget = min(state.risk_budget, 0.18)
         if gross_open_notional >= 1.05:
             state.allow_new_entries = False
+        if compounding_mode in {"drift_up", "measured_press", "press_advantage"} and state.allow_new_entries:
+            compounding_cap = min(0.72, state.risk_budget + profit_buffer_pct)
+            boosted_budget = min(state.risk_budget * global_multiplier, compounding_cap)
+            state.risk_budget = round(max(state.risk_budget, boosted_budget), 2)
+        if compounding_mode == "capital_protect":
+            state.risk_budget = min(state.risk_budget, 0.18)
         if "risk committee enforcing conservative defaults" not in state.notes:
             state.notes.append("risk committee enforcing conservative defaults")
+        if compounding_mode in {"drift_up", "measured_press", "press_advantage"}:
+            note = f"capital compounding mode {compounding_mode} active with budget {state.risk_budget:.2f}"
+            if note not in state.notes:
+                state.notes.append(note)
+        elif compounding_mode == "capital_protect":
+            note = "capital compounding paused while edge is weak"
+            if note not in state.notes:
+                state.notes.append(note)
         if gross_open_notional >= 0.9 and "risk committee reduced sizing due to gross exposure" not in state.notes:
             state.notes.append("risk committee reduced sizing due to gross exposure")
         if not state.allow_new_entries and "new entries blocked under stressed regime" not in state.notes:

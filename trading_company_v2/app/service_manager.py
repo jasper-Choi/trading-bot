@@ -11,6 +11,7 @@ from app.config import settings
 
 
 DATA_DIR = Path(settings.db_path).resolve().parent
+APP_ROOT = str(Path(__file__).resolve().parent.parent)
 SERVER_PID_PATH = DATA_DIR / "dashboard_server.pid"
 LOOP_PID_PATH = DATA_DIR / "company_loop.pid"
 SERVER_LOG_PATH = DATA_DIR / "dashboard_server.log"
@@ -27,6 +28,19 @@ def _pythonw() -> str:
 def _process_running(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+        )
+        line = (result.stdout or "").strip()
+        if not line or line.startswith("INFO:"):
+            return False
+        return line.split(",")[1].strip('"') == str(pid)
     try:
         os.kill(pid, 0)
         return True
@@ -53,6 +67,52 @@ def _clear_pid(path: Path) -> None:
         path.unlink()
 
 
+def _matching_module_pids(module: str) -> list[int]:
+    if os.name != "nt":
+        return []
+    script = (
+        "$root = @'\n"
+        f"{APP_ROOT}\n"
+        "'@.Trim(); "
+        f"$module = '{module}'; "
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.Name -eq 'pythonw.exe' -and $_.CommandLine -like \"*$root*\" -and $_.CommandLine -like \"*-m $module*\" } | "
+        "Select-Object -ExpandProperty ProcessId"
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore",
+    )
+    pids: list[int] = []
+    for line in (result.stdout or "").splitlines():
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            pids.append(int(text))
+        except ValueError:
+            continue
+    return sorted(set(pids))
+
+
+def _resolve_pid(pid_path: Path, module: str) -> tuple[int | None, int]:
+    pid = _read_pid(pid_path)
+    if pid and _process_running(pid):
+        return pid, 1
+    matches = [item for item in _matching_module_pids(module) if _process_running(item)]
+    if len(matches) == 1:
+        _write_pid(pid_path, matches[0])
+        return matches[0], 1
+    if not matches:
+        return None, 0
+    _write_pid(pid_path, matches[0])
+    return matches[0], len(matches)
+
+
 def _spawn(module: str, log_path: Path, pid_path: Path) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_handle = open(log_path, "a", encoding="utf-8")
@@ -72,17 +132,23 @@ def _spawn(module: str, log_path: Path, pid_path: Path) -> int:
 
 
 def start_services() -> dict:
-    server_pid = _read_pid(SERVER_PID_PATH)
-    loop_pid = _read_pid(LOOP_PID_PATH)
+    server_pid, server_count = _resolve_pid(SERVER_PID_PATH, "app.main")
+    loop_pid, loop_count = _resolve_pid(LOOP_PID_PATH, "app.runtime")
 
     started: dict[str, int | str] = {}
-    if not server_pid or not _process_running(server_pid):
+    if server_count > 1:
+        started["server_pid"] = server_pid or 0
+        started["server_status"] = f"duplicate_running:{server_count}"
+    elif not server_pid or not _process_running(server_pid):
         started["server_pid"] = _spawn("app.main", SERVER_LOG_PATH, SERVER_PID_PATH)
     else:
         started["server_pid"] = server_pid
         started["server_status"] = "already_running"
 
-    if not loop_pid or not _process_running(loop_pid):
+    if loop_count > 1:
+        started["loop_pid"] = loop_pid or 0
+        started["loop_status"] = f"duplicate_running:{loop_count}"
+    elif not loop_pid or not _process_running(loop_pid):
         started["loop_pid"] = _spawn("app.runtime", LOOP_LOG_PATH, LOOP_PID_PATH)
     else:
         started["loop_pid"] = loop_pid
@@ -92,17 +158,24 @@ def start_services() -> dict:
 
 def stop_services() -> dict:
     result: dict[str, str | int | bool] = {}
-    for name, path in (("server", SERVER_PID_PATH), ("loop", LOOP_PID_PATH)):
-        pid = _read_pid(path)
-        if not pid:
+    for name, path, module in (
+        ("server", SERVER_PID_PATH, "app.main"),
+        ("loop", LOOP_PID_PATH, "app.runtime"),
+    ):
+        pid, count = _resolve_pid(path, module)
+        pids = [pid] if pid else []
+        if count > 1:
+            pids = _matching_module_pids(module)
+        if not pids:
             result[name] = "not_running"
             continue
         try:
-            if os.name == "nt":
-                subprocess.run(["taskkill", "/PID", str(pid), "/F"], check=False, capture_output=True)
-            else:
-                os.kill(pid, 15)
-            result[name] = pid
+            for target_pid in pids:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(target_pid), "/F"], check=False, capture_output=True)
+                else:
+                    os.kill(target_pid, 15)
+            result[name] = pids[0] if len(pids) == 1 else {"primary_pid": pids[0], "killed": pids}
         finally:
             _clear_pid(path)
     return result
@@ -119,18 +192,22 @@ def local_access_urls() -> dict[str, str]:
             lan_ip = "127.0.0.1"
     else:
         lan_ip = host
-    return {
+    urls = {
         "local_url": f"http://127.0.0.1:{settings.port}",
         "lan_url": f"http://{lan_ip}:{settings.port}",
     }
+    if settings.public_base_url:
+        urls["public_url"] = settings.public_base_url
+        urls["public_label"] = settings.public_base_label or "Public URL"
+    return urls
 
 
 def status() -> dict:
-    server_pid = _read_pid(SERVER_PID_PATH)
-    loop_pid = _read_pid(LOOP_PID_PATH)
+    server_pid, server_count = _resolve_pid(SERVER_PID_PATH, "app.main")
+    loop_pid, loop_count = _resolve_pid(LOOP_PID_PATH, "app.runtime")
     return {
-        "server": {"pid": server_pid, "running": _process_running(server_pid or 0)},
-        "loop": {"pid": loop_pid, "running": _process_running(loop_pid or 0)},
+        "server": {"pid": server_pid, "running": _process_running(server_pid or 0), "instances": server_count},
+        "loop": {"pid": loop_pid, "running": _process_running(loop_pid or 0), "instances": loop_count},
         **local_access_urls(),
     }
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 
-from app.agents.chief_market_officer import CIOAgent
+from app.agents.chief_market_officer import CIOAgent, build_compounding_profile
 from app.agents.crypto_desk_agent import CryptoDeskAgent
 from app.agents.execution_agent import ExecutionAgent
 from app.agents.korea_stock_desk_agent import KoreaStockDeskAgent
@@ -152,6 +152,54 @@ def _order_intent(action: str) -> str:
     if action in _SELL_ACTIONS:
         return "exit"
     return "other"
+
+
+def _parse_size_multiplier(size: str) -> float:
+    try:
+        return float(str(size or "0.00x").replace("x", ""))
+    except ValueError:
+        return 0.0
+
+
+def _format_size_multiplier(value: float) -> str:
+    return f"{max(value, 0.0):.2f}x"
+
+
+def _apply_compounding_overlays(strategy_book: dict, capital_profile: dict) -> tuple[dict, list[str]]:
+    if not strategy_book:
+        return strategy_book, []
+
+    updated_book = dict(strategy_book)
+    desk_map = {
+        "crypto": "crypto_plan",
+        "korea": "korea_plan",
+        "us": "us_plan",
+    }
+    desk_multipliers = capital_profile.get("desk_multipliers", {}) or {}
+    global_multiplier = float(capital_profile.get("global_multiplier", 1.0) or 1.0)
+    notes: list[str] = []
+
+    for desk_name, plan_key in desk_map.items():
+        plan = dict(updated_book.get(plan_key, {}) or {})
+        base_size = _parse_size_multiplier(str(plan.get("size", "0.00x")))
+        if base_size <= 0:
+            updated_book[plan_key] = plan
+            continue
+        desk_multiplier = float(desk_multipliers.get(desk_name, 1.0) or 1.0)
+        adjusted_size = round(base_size * global_multiplier * desk_multiplier, 2)
+        adjusted_size = min(adjusted_size, 0.95)
+        if abs(adjusted_size - base_size) >= 0.01:
+            plan["size"] = _format_size_multiplier(adjusted_size)
+            plan_notes = list(plan.get("notes", []) or [])
+            plan_notes.append(
+                f"capital overlay {capital_profile.get('mode', 'neutral')} adjusted size {base_size:.2f}x -> {adjusted_size:.2f}x"
+            )
+            plan["notes"] = plan_notes
+            notes.append(f"{desk_name} capital overlay {base_size:.2f}x -> {adjusted_size:.2f}x")
+        updated_book[plan_key] = plan
+
+    updated_book["capital_profile"] = capital_profile
+    return updated_book, notes
 
 
 def _filter_conflicting_live_orders(
@@ -527,6 +575,10 @@ class CompanyOrchestrator:
                 strategy_allocator_result.payload.get("session", {}),
             ),
         }
+        capital_profile = build_compounding_profile(state.stance, state.regime, state.daily_summary)
+        state.strategy_book, capital_overlay_notes = _apply_compounding_overlays(state.strategy_book, capital_profile)
+        for note in capital_overlay_notes[:3]:
+            state.notes.append(note)
         company_focus = str(state.strategy_book.get("company_focus") or "Capital preservation and watchlist maintenance")
         provisional_allow_new_entries = state.regime != "STRESSED" and (
             float(state.daily_summary.get("realized_pnl_pct", 0.0) or 0.0)
@@ -549,6 +601,7 @@ class CompanyOrchestrator:
             market_snapshot=state.market_snapshot,
             open_positions=state.open_positions,
             closed_positions=load_closed_positions(limit=12),
+            daily_summary=state.daily_summary,
             allow_new_entries=provisional_allow_new_entries,
             risk_budget=execution_risk_budget,
         )

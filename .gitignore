@@ -14,8 +14,13 @@ node_modules/
 # Logs & runtime data
 logs/*.log
 logs/*.jsonl
+trading_company_v2/logs/
+trading_company_v2/data/*.log
 data/positions.json
 data/trading.db
+.claude/worktrees/
+trading_company_v2/.claude/worktrees/
+trading_company_v2/*SSH*/
 
 # Environment
 .env

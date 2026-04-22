@@ -36,6 +36,8 @@ class Settings:
     live_capital_krw: int = int(os.environ.get("LIVE_CAPITAL_KRW", "0"))
     host: str = os.environ.get("APP_HOST", "127.0.0.1")
     port: int = int(os.environ.get("APP_PORT", "8080"))
+    public_base_url: str = os.environ.get("PUBLIC_BASE_URL", "")
+    public_base_label: str = os.environ.get("PUBLIC_BASE_LABEL", "Public URL")
     cycle_interval_minutes: int = int(os.environ.get("CYCLE_INTERVAL_MINUTES", "15"))
     realtime_active_interval_seconds: int = int(os.environ.get("REALTIME_ACTIVE_INTERVAL_SECONDS", "20"))
     realtime_watch_interval_seconds: int = int(os.environ.get("REALTIME_WATCH_INTERVAL_SECONDS", "45"))

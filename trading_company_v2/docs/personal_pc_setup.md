@@ -95,6 +95,27 @@ https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
 - Install Tailscale on home PC and phone
 - Open the dashboard using the Tailscale IP
 - Do not expose your home PC directly to the public internet in phase 1
+- Current confirmed pattern on this machine:
+  - `tailscale serve --bg 127.0.0.1:8080`
+  - tailnet URL forwards to the local dashboard
+
+## Public Access Mapping
+
+If you later publish this through Oracle, a reverse proxy, or a tunnel:
+
+- keep `APP_HOST=0.0.0.0`
+- set `PUBLIC_BASE_URL` to the real external URL
+- set `PUBLIC_BASE_LABEL` to something readable like `Oracle Public URL`
+- then check:
+
+```text
+/health
+/diagnostics/access-map
+```
+
+That makes the dashboard and diagnostics show the canonical public route together with the local and LAN routes.
+
+If you are using `tailscale serve`, use the tailnet HTTPS URL as `PUBLIC_BASE_URL`.
 
 ## Cost Model
 

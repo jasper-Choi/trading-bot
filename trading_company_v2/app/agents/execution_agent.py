@@ -12,6 +12,7 @@ class ExecutionAgent(BaseAgent):
         self.market_snapshot: dict = {}
         self.open_positions: list[dict] = []
         self.closed_positions: list[dict] = []
+        self.daily_summary: dict = {}
         self.allow_new_entries: bool = True
         self.risk_budget: float = 1.0
 
@@ -22,6 +23,7 @@ class ExecutionAgent(BaseAgent):
         market_snapshot: dict,
         open_positions: list[dict],
         closed_positions: list[dict],
+        daily_summary: dict,
         allow_new_entries: bool,
         risk_budget: float,
     ) -> None:
@@ -30,6 +32,7 @@ class ExecutionAgent(BaseAgent):
         self.market_snapshot = market_snapshot
         self.open_positions = open_positions
         self.closed_positions = closed_positions
+        self.daily_summary = daily_summary or {}
         self.allow_new_entries = allow_new_entries
         self.risk_budget = risk_budget
 
@@ -144,13 +147,71 @@ class ExecutionAgent(BaseAgent):
             return False
         if self._desk_recovery_ready(desk):
             return False
-        losses = sum(1 for item in recent if float(item.get("pnl_pct", 0.0) or 0.0) <= 0)
+        losses = sum(1 for item in recent if float(item.get("pnl_pct", 0.0) or 0.0) < 0)
         realized = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent)
+        if realized > 0:
+            return False
         if desk == "us":
             return losses >= 3 or realized <= -2.0
         if desk == "crypto":
             return losses >= 3 or realized <= -1.0
         return losses >= 3 or realized <= -1.2
+
+    def _desk_chronic_drawdown(self, desk: str) -> bool:
+        recent = self._desk_recent_trades(desk, limit=5)
+        if len(recent) < 4:
+            return False
+        realized = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent)
+        wins = sum(1 for item in recent if float(item.get("pnl_pct", 0.0) or 0.0) > 0)
+        losses = sum(1 for item in recent if float(item.get("pnl_pct", 0.0) or 0.0) < 0)
+        stop_like = sum(
+            1
+            for item in recent
+            if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}
+        )
+        if desk == "us":
+            return wins == 0 and losses >= 4 and realized <= -2.0
+        if desk == "crypto":
+            return wins <= 1 and losses >= 4 and realized <= -1.6
+        return wins <= 1 and losses >= 4 and (realized <= -2.4 or stop_like >= 3)
+
+    def _desk_performance_lock(self, desk: str) -> bool:
+        desk_stats = (self.daily_summary.get("desk_stats", {}) or {}).get(desk, {}) or {}
+        closed_positions = int(desk_stats.get("closed_positions", 0) or 0)
+        wins = int(desk_stats.get("wins", 0) or 0)
+        losses = int(desk_stats.get("losses", 0) or 0)
+        realized = float(desk_stats.get("realized_pnl_pct", 0.0) or 0.0)
+        win_rate = float(desk_stats.get("win_rate", 0.0) or 0.0)
+        if closed_positions < 4:
+            return False
+        if desk == "us":
+            return wins == 0 and losses >= 4 and realized <= -2.0
+        if desk == "crypto":
+            return win_rate < 25.0 and losses >= 4 and realized <= -1.5
+        return win_rate < 25.0 and losses >= 5 and realized <= -2.5
+
+    def _desk_offense_state(self, desk: str) -> dict:
+        desk_stats = (self.daily_summary.get("desk_stats", {}) or {}).get(desk, {}) or {}
+        capital_profile = (self.strategy_book.get("capital_profile", {}) or {}) if self.strategy_book else {}
+        desk_multiplier = float((capital_profile.get("desk_multipliers", {}) or {}).get(desk, 1.0) or 1.0)
+        realized = float(desk_stats.get("realized_pnl_pct", 0.0) or 0.0)
+        win_rate = float(desk_stats.get("win_rate", 0.0) or 0.0)
+        closed_positions = int(desk_stats.get("closed_positions", 0) or 0)
+        open_notional = float(desk_stats.get("open_notional_pct", 0.0) or 0.0)
+
+        score = 50.0
+        score += max(min(realized * 7.5, 18.0), -22.0)
+        score += max(min((win_rate - 50.0) * 0.35, 12.0), -14.0)
+        score += min(closed_positions * 1.8, 8.0)
+        score += (desk_multiplier - 1.0) * 50.0
+        score -= max(open_notional - 0.55, 0.0) * 18.0
+        score = round(max(min(score, 100.0), 0.0), 1)
+
+        if score >= 67:
+            return {"score": score, "tone": "press", "size_multiplier": 1.1, "entry_allowed": True}
+        if score >= 52:
+            return {"score": score, "tone": "balanced", "size_multiplier": 1.0, "entry_allowed": True}
+        return {"score": score, "tone": "cooldown", "size_multiplier": 0.75, "entry_allowed": desk == "crypto" and realized > 0}
 
     def _desk_stop_pressure(self, desk: str) -> str:
         recent = self._desk_recent_trades(desk, limit=6)
@@ -264,7 +325,10 @@ class ExecutionAgent(BaseAgent):
         action = original_action
         base_size = str(plan.get("size", "0.00x"))
         symbol, rotation_notes = self._pick_symbol(desk, plan)
-        risk_scaled_notional = round(self._size_to_notional(base_size) * max(min(self.risk_budget, 1.0), 0.0), 2)
+        desk_offense = self._desk_offense_state(desk)
+        base_notional = self._size_to_notional(base_size)
+        offense_scaled_base = round(base_notional * float(desk_offense.get("size_multiplier", 1.0) or 1.0), 2)
+        risk_scaled_notional = round(offense_scaled_base * max(min(self.risk_budget, 1.0), 0.0), 2)
         desk_stop_pressure = self._desk_stop_pressure(desk)
         symbol_stop_pressure = self._symbol_stop_pressure(desk, symbol)
         downgrade_notes: list[str] = []
@@ -300,9 +364,13 @@ class ExecutionAgent(BaseAgent):
         repeated_loss_block = self._repeated_loss_block(desk, symbol)
         extended_symbol_block = self._extended_symbol_block(desk, symbol)
         desk_loss_pressure = self._desk_loss_pressure(desk)
+        desk_chronic_drawdown = self._desk_chronic_drawdown(desk)
+        desk_performance_lock = self._desk_performance_lock(desk)
         desk_recovery_ready = self._desk_recovery_ready(desk)
+        desk_offense_block = not bool(desk_offense.get("entry_allowed", True)) and action in actionable_entries
         blocked_by_stop_pressure = desk_stop_pressure == "high" and action in actionable_entries
         blocked_by_risk = not self.allow_new_entries and action in actionable_entries
+        blocked_by_desk_drawdown = (desk_chronic_drawdown or desk_performance_lock) and action in actionable_entries
         desk_open_count = self._desk_open_count(desk)
         desk_open_notional = self._desk_open_notional(desk)
         gross_open_notional = self._gross_open_notional()
@@ -324,6 +392,9 @@ class ExecutionAgent(BaseAgent):
             and not repeated_loss_block
             and not extended_symbol_block
             and not desk_loss_pressure
+            and not desk_chronic_drawdown
+            and not desk_performance_lock
+            and not desk_offense_block
             and not blocked_by_stop_pressure
             and not blocked_by_risk
             and not desk_position_cap_hit
@@ -334,7 +405,11 @@ class ExecutionAgent(BaseAgent):
         }
         notes = list(plan.get("notes", [])) + rotation_notes + downgrade_notes
         if action in actionable_entries and base_size != size:
-            if stop_pressure_scale < 1.0:
+            if offense_scaled_base != base_notional:
+                notes.append(
+                    f"{desk} desk offense {desk_offense.get('tone', 'balanced')} adjusted size from {base_size} to {size}"
+                )
+            elif stop_pressure_scale < 1.0:
                 notes.append(f"risk and stop-pressure scaled size from {base_size} to {size}")
             else:
                 notes.append(f"risk budget scaled size from {base_size} to {size}")
@@ -352,6 +427,12 @@ class ExecutionAgent(BaseAgent):
             notes.append(f"{symbol} remains under extended Korea block after repeated failed attempts")
         if desk_loss_pressure:
             notes.append(f"{desk} desk loss pressure active, new entries paused")
+        if desk_chronic_drawdown:
+            notes.append(f"{desk} desk under chronic drawdown lock, new entries require manual recovery")
+        if desk_performance_lock:
+            notes.append(f"{desk} desk blocked by poor desk-level performance snapshot")
+        if desk_offense_block:
+            notes.append(f"{desk} desk offense cooldown active, skip new entries this cycle")
         if desk_recovery_ready:
             notes.append(f"{desk} desk recovery conditions met, selective entries can resume")
         if desk_stop_pressure == "medium":
@@ -364,6 +445,8 @@ class ExecutionAgent(BaseAgent):
             notes.append(f"{desk} desk stop pressure high, new entries paused")
         if blocked_by_risk:
             notes.append("risk gate blocks new entries this cycle")
+        if blocked_by_desk_drawdown:
+            notes.append(f"{desk} desk blocked after repeated failed attempts and negative expectancy")
         if desk_position_cap_hit and action in actionable_entries:
             notes.append(f"{desk} desk already has {desk_open_count} open position(s), cap {max_positions}")
         if desk_notional_cap_hit and action in actionable_entries:

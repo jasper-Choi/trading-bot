@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, lazy, startTransition, useState, useEffect, useCallback } from 'react'
 import { api } from './api'
 import StatCard           from './components/StatCard'
 import PositionTable      from './components/PositionTable'
-import PnlChart           from './components/PnlChart'
-import TradeHistory       from './components/TradeHistory'
-import LogViewer          from './components/LogViewer'
 import MarketRegimeBanner from './components/MarketRegimeBanner'
 import StockPositionTable from './components/StockPositionTable'
-import InsightPanel       from './components/InsightPanel'
+
+const PnlChart = lazy(() => import('./components/PnlChart'))
+const TradeHistory = lazy(() => import('./components/TradeHistory'))
+const LogViewer = lazy(() => import('./components/LogViewer'))
+const InsightPanel = lazy(() => import('./components/InsightPanel'))
 
 const T = {
   ko: {
@@ -117,6 +118,25 @@ function buildChartData(trades) {
 
 const REFRESH_SEC = 30
 
+function PanelFallback({ title, detail = 'Loading panel...' }) {
+  return (
+    <div className="panel panel-fallback">
+      <div className="panel-title">{title}</div>
+      <div className="panel-fallback-copy">{detail}</div>
+    </div>
+  )
+}
+
+async function settleAll(entries) {
+  const resolved = await Promise.all(
+    entries.map(async ([key, promise, fallback]) => {
+      const value = await settle(promise, fallback)
+      return [key, value]
+    })
+  )
+  return Object.fromEntries(resolved)
+}
+
 async function settle(promise, fallback) {
   try {
     return await promise
@@ -145,32 +165,40 @@ export default function App() {
   const t = T[lang]
 
   const fetchAll = useCallback(async () => {
-    const [s, p, tr, st, lg, reg, sp, ins, agents, dash] = await Promise.all([
-      settle(api.status(), null),
-      settle(api.positions(), []),
-      settle(api.trades(50), []),
-      settle(api.stats(), null),
-      settle(api.logs(40), { lines: [] }),
-      settle(api.marketRegime(), null),
-      settle(api.stockPositions(), []),
-      settle(api.insights(), null),
-      settle(api.agentsStatus(), null),
-      settle(api.dashboardData(), null),
+    const core = await settleAll([
+      ['status', api.status(), null],
+      ['marketRegime', api.marketRegime(), null],
+      ['dashboard', api.dashboardData(), null],
     ])
 
-    if (s) setStatus(s)
-    setPositions(p)
-    setTrades(tr)
-    if (st) setStats(st)
-    setLogs(lg?.lines ?? [])
-    if (reg) setRegime(reg)
-    setStockPositions(sp)
-    if (ins) setInsights(ins)
-    if (agents) setAgentStatus(agents)
-    if (dash) setDashboardData(dash)
+    startTransition(() => {
+      if (core.status) setStatus(core.status)
+      if (core.marketRegime) setRegime(core.marketRegime)
+      if (core.dashboard) setDashboardData(core.dashboard)
+      const hasCoreData = Boolean(core.status || core.marketRegime || core.dashboard)
+      setError(hasCoreData ? null : 'Dashboard data temporarily unavailable')
+    })
 
-    const hasCoreData = Boolean(s || st || ins || agents || dash)
-    setError(hasCoreData ? null : 'Dashboard data temporarily unavailable')
+    const secondary = await settleAll([
+      ['positions', api.positions(), []],
+      ['trades', api.trades(50), []],
+      ['stats', api.stats(), null],
+      ['logs', api.logs(40), { lines: [] }],
+      ['stockPositions', api.stockPositions(), []],
+      ['insights', api.insights(), null],
+      ['agents', api.agentsStatus(), null],
+    ])
+
+    startTransition(() => {
+      setPositions(secondary.positions)
+      setTrades(secondary.trades)
+      if (secondary.stats) setStats(secondary.stats)
+      setLogs(secondary.logs?.lines ?? [])
+      setStockPositions(secondary.stockPositions)
+      if (secondary.insights) setInsights(secondary.insights)
+      if (secondary.agents) setAgentStatus(secondary.agents)
+    })
+
     setLastUpdate(
       new Date().toLocaleTimeString('ko-KR', {
         hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -206,10 +234,15 @@ export default function App() {
   const winRateVal    = stats ? stats.win_rate * 100 : null
   const marketOpen    = isMarketOpen()
   const dashboard     = dashboardData?.dashboard ?? null
+  const access        = dashboardData?.access ?? null
   const executionSummary = dashboard?.execution_summary ?? {}
   const opsFlags      = dashboard?.ops_flags ?? { severity: 'stable', items: [] }
   const readiness     = dashboardData?.live_readiness_checklist ?? null
   const brokerHealth  = dashboardData?.broker_live_health ?? null
+  const entryBlockSummary = dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
+  const deskOffense = dashboard?.desk_offense ?? []
+  const agentPerformance = dashboard?.agent_performance ?? []
+  const capitalProfile = dashboard?.capital?.capital_profile ?? dashboardData?.state?.strategy_book?.capital_profile ?? {}
   const latestLive    = executionSummary?.latest_live ?? null
   const recentLive    = (dashboardData?.state?.execution_log ?? [])
     .filter((item) => item?.source === 'live')
@@ -220,7 +253,9 @@ export default function App() {
       : readiness?.overall === 'ready' ? 'tone-ok'
       : 'tone-muted'
   const prioritySignals = [
-    readiness?.overall === 'blocked'
+    entryBlockSummary?.blocked
+      ? `Entry gate: ${entryBlockSummary?.detail || 'risk gate closed'}`
+      : readiness?.overall === 'blocked'
       ? `Execution blocked: ${readiness?.block_count ?? 0} hard stop`
       : null,
     Number(executionSummary.stale_count || 0) > 0
@@ -247,11 +282,52 @@ export default function App() {
   const primaryNote = prioritySignals[0] || `Runtime ${status?.next_run ? `next ${status.next_run.slice(11, 16)}` : 'cycle active'}`
   const readinessItems = (readiness?.checklist || []).slice(0, 6)
   const statusCards = [
-    { label: 'Runtime', value: isRunning ? t.running : t.stopped, sub: status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : 'Awaiting schedule' },
-    { label: 'Readiness', value: String(modeLabel).toUpperCase(), sub: `${readiness?.block_count ?? 0} blocks / ${readiness?.warn_count ?? 0} warns` },
+    { label: 'Runtime', value: isRunning ? t.running : t.stopped, sub: status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : '스케줄 대기 중' },
+    { label: 'Readiness', value: String(modeLabel).toUpperCase(), sub: entryBlockSummary?.blocked ? (entryBlockSummary?.detail || 'risk gate closed') : `${readiness?.block_count ?? 0} blocks / ${readiness?.warn_count ?? 0} warns` },
     { label: 'Exposure', value: `${openPositions.length}`, sub: `${t.openPositions} / ${executionSummary.live_count || 0} live` },
     { label: 'Ops', value: String(opsFlags?.severity || 'stable').toUpperCase(), sub: primaryNote },
   ]
+  const missionRail = [
+    {
+      label: 'Entry Gate',
+      value: entryBlockSummary?.blocked ? 'BLOCKED' : 'OPEN',
+      detail: entryBlockSummary?.detail || 'risk gate open',
+      tone: entryBlockSummary?.blocked ? 'tone-risk' : 'tone-ok',
+    },
+    {
+      label: 'Next Cycle',
+      value: status?.next_run ? status.next_run.slice(11, 16) : '--:--',
+      detail: isRunning ? 'runtime online' : 'runtime offline',
+      tone: isRunning ? 'tone-ok' : 'tone-warn',
+    },
+    {
+      label: 'Latest Live',
+      value: latestLive?.symbol || latestLive?.focus || 'none',
+      detail: latestLive ? `${latestLive.status || 'n/a'} / ${latestLive.effect_status || 'n/a'}` : 'no live fill yet',
+      tone: latestLive ? liveToneClass : 'tone-muted',
+    },
+    {
+      label: 'Broker Track',
+      value: brokerHealth?.upbit?.configured || brokerHealth?.kis?.configured ? 'CONFIGURED' : 'OFF',
+      detail: brokerHealth?.upbit?.balances_ok || brokerHealth?.kis?.balances_ok ? 'balance checks passing' : 'credentials or balance check missing',
+      tone: brokerHealth?.upbit?.balances_ok || brokerHealth?.kis?.balances_ok ? 'tone-ok' : 'tone-warn',
+    },
+  ]
+  const accessCards = [
+    access?.public_url
+      ? { label: access?.public_label || 'Public URL', value: access.public_url }
+      : null,
+    access?.lan_url
+      ? { label: 'LAN URL', value: access.lan_url }
+      : null,
+    access?.local_url
+      ? { label: 'Local URL', value: access.local_url }
+      : null,
+  ].filter(Boolean)
+  const offenseLeader = deskOffense[0] ?? null
+  const weakAgentCount = agentPerformance.filter((item) => item?.tone === 'weak').length
+  const strongAgentCount = agentPerformance.filter((item) => item?.tone === 'strong').length
+  const capitalModeLabel = capitalProfile?.mode ? String(capitalProfile.mode).replaceAll('_', ' ') : 'neutral'
 
   return (
     <div className="app app-shell">
@@ -260,7 +336,7 @@ export default function App() {
 
       <header className="hero-shell">
         <div className="hero-copy">
-          <span className="hero-kicker">Operator cockpit</span>
+          <span className="hero-kicker">운영 관제석</span>
           <div className="hero-title-row">
             <h1 className="hero-title">{t.title}</h1>
             <span className={`hero-pill ${readinessToneClass}`}>{String(modeLabel).toUpperCase()}</span>
@@ -270,8 +346,18 @@ export default function App() {
             <span className={`status-dot ${isRunning ? 'on' : 'off'}`} />
             <span>{isRunning ? t.running : t.stopped}</span>
             <span>{t.lastUpdate}: {lastUpdate || '--:--:--'}</span>
-            <span>{status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : 'No next run yet'}</span>
+            <span>{status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : '다음 실행 없음'}</span>
           </div>
+          {accessCards.length > 0 && (
+            <div className="hero-access-grid">
+              {accessCards.map((item) => (
+                <div className="hero-access-card" key={item.label}>
+                  <span className="hero-access-label">{item.label}</span>
+                  <strong className="hero-access-value">{item.value}</strong>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="hero-actions">
@@ -304,6 +390,16 @@ export default function App() {
         ))}
       </section>
 
+      <section className="mission-rail">
+        {missionRail.map((item) => (
+          <div className={`mission-card ${item.tone}`} key={item.label}>
+            <span className="mission-label">{item.label}</span>
+            <strong className="mission-value">{item.value}</strong>
+            <span className="mission-detail">{item.detail}</span>
+          </div>
+        ))}
+      </section>
+
       <MarketRegimeBanner
         regime={regime?.regime ?? 'NEUTRAL'}
         lastChanged={regime?.last_changed ?? null}
@@ -318,6 +414,135 @@ export default function App() {
 
       <main className="dashboard">
         <div className="area-cards">
+          <div className="signal-deck">
+            <div className={`execution-strip ${liveToneClass}`}>
+              <div className="execution-strip-main">
+                <strong>실행 모니터</strong>
+                <span>Total {executionSummary.live_count || 0}</span>
+                <span>Partial {executionSummary.partial_count || 0}</span>
+                <span>Pending {executionSummary.pending_count || 0}</span>
+                <span>Stale {executionSummary.stale_count || 0}</span>
+                <span>Severity {opsFlags.severity || 'stable'}</span>
+              </div>
+              {prioritySignals.length > 0 && (
+                <div className="priority-strip">
+                  {prioritySignals.map((item, idx) => (
+                    <span className="priority-chip" key={`${item}-${idx}`}>{item}</span>
+                  ))}
+                </div>
+              )}
+              <div className="execution-strip-sub">
+                {latestLive
+                  ? `Latest ${latestLive.desk || 'n/a'} / ${latestLive.action || 'n/a'} / ${latestLive.symbol || latestLive.focus || 'n/a'} / ${latestLive.status || 'n/a'} / ${latestLive.effect_status || 'n/a'}`
+                  : '아직 live 실행 없음'}
+              </div>
+              {recentLive.length > 0 && (
+                <div className="execution-strip-list">
+                  {recentLive.map((item, idx) => (
+                    <div className="execution-strip-item" key={`${item.broker_order_id || item.created_at || idx}-${idx}`}>
+                      <strong>{item.desk || 'n/a'} / {item.action || 'n/a'}</strong>
+                      <span>{item.symbol || item.focus || 'n/a'}</span>
+                      <span>{item.status || 'n/a'} / {item.effect_status || 'n/a'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className={`readiness-strip ${readinessToneClass}`}>
+              <div className="readiness-head">
+                <strong>실전 준비도</strong>
+                <span>{readiness?.overall || 'n/a'}</span>
+                <span>Blocks {readiness?.block_count ?? 0}</span>
+                <span>Warns {readiness?.warn_count ?? 0}</span>
+              </div>
+              <div className="readiness-grid">
+                {readinessItems.map((item, idx) => (
+                  <div className={`readiness-item readiness-${item.status || 'warn'}`} key={`${item.label || idx}-${idx}`}>
+                    <strong>{item.label || 'n/a'}</strong>
+                    <span>{item.detail || 'n/a'}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="broker-strip">
+                <div className="broker-item">
+                  <strong>Upbit</strong>
+                  <span>{brokerHealth?.upbit?.configured ? '인증 설정됨' : '인증 없음'}</span>
+                  <span>{brokerHealth?.upbit?.balances_ok ? `잔고 ${brokerHealth?.upbit?.balances_count || 0}` : '잔고 점검 안 됨'}</span>
+                </div>
+                <div className="broker-item">
+                  <strong>KIS</strong>
+                  <span>{brokerHealth?.kis?.configured ? '인증 설정됨' : '인증 없음'}</span>
+                  <span>{brokerHealth?.kis?.balances_ok ? `잔고 ${brokerHealth?.kis?.balances_count || 0}` : '잔고 점검 안 됨'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="edge-deck">
+            <div className="edge-panel">
+              <div className="edge-head">
+                <div>
+                  <div className="panel-title">Desk Offense Map</div>
+                  <div className="panel-subcopy">
+                    {offenseLeader
+                      ? `Top desk ${offenseLeader.title} / score ${offenseLeader.score} / ${capitalModeLabel}`
+                      : 'Desk pressure map loading'}
+                  </div>
+                </div>
+                <div className={`edge-pill tone-${offenseLeader?.tone || 'muted'}`}>
+                  {capitalModeLabel.toUpperCase()}
+                </div>
+              </div>
+              <div className="edge-grid">
+                {deskOffense.map((item) => (
+                  <div className={`edge-card tone-${item.tone || 'muted'}`} key={item.desk}>
+                    <div className="edge-card-top">
+                      <strong>{item.title}</strong>
+                      <span>{item.score}</span>
+                    </div>
+                    <div className="edge-card-main">{item.action || 'stand_by'} / {item.size || '0.00x'}</div>
+                    <div className="edge-card-sub">{item.focus || 'No focus'}</div>
+                    <div className="edge-card-meta">
+                      <span>Realized {Number(item.realized_pnl_pct || 0).toFixed(2)}%</span>
+                      <span>Win {Number(item.win_rate || 0).toFixed(1)}%</span>
+                      <span>Mul {Number(item.multiplier || 1).toFixed(2)}x</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="edge-panel">
+              <div className="edge-head">
+                <div>
+                  <div className="panel-title">Agent Effectiveness</div>
+                  <div className="panel-subcopy">
+                    {`${strongAgentCount} strong / ${weakAgentCount} weak agents in current cycle`}
+                  </div>
+                </div>
+                <div className="edge-pill tone-info">
+                  {agentPerformance.length} agents
+                </div>
+              </div>
+              <div className="agent-board">
+                {agentPerformance.slice(0, 8).map((item) => (
+                  <div className={`agent-row tone-${item.tone || 'mixed'}`} key={item.name}>
+                    <div className="agent-copy">
+                      <strong>{item.title}</strong>
+                      <span>{item.reason || 'No summary'}</span>
+                    </div>
+                    <div className="agent-metrics">
+                      <span>Signal {Number(item.score || 0).toFixed(0)}</span>
+                      <span>Edge {Number(item.effectiveness || 0).toFixed(0)}</span>
+                      <span>{item.linked_desk ? `${item.linked_desk} desk` : 'cross-desk'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="stat-row">
             <StatCard
               label={t.totalInvested}
@@ -353,83 +578,20 @@ export default function App() {
               }
             />
           </div>
-
-          <div className="signal-deck">
-            <div className={`execution-strip ${liveToneClass}`}>
-              <div className="execution-strip-main">
-                <strong>Live execution</strong>
-                <span>Total {executionSummary.live_count || 0}</span>
-                <span>Partial {executionSummary.partial_count || 0}</span>
-                <span>Pending {executionSummary.pending_count || 0}</span>
-                <span>Stale {executionSummary.stale_count || 0}</span>
-                <span>Severity {opsFlags.severity || 'stable'}</span>
-              </div>
-              {prioritySignals.length > 0 && (
-                <div className="priority-strip">
-                  {prioritySignals.map((item, idx) => (
-                    <span className="priority-chip" key={`${item}-${idx}`}>{item}</span>
-                  ))}
-                </div>
-              )}
-              <div className="execution-strip-sub">
-                {latestLive
-                  ? `Latest ${latestLive.desk || 'n/a'} / ${latestLive.action || 'n/a'} / ${latestLive.symbol || latestLive.focus || 'n/a'} / ${latestLive.status || 'n/a'} / ${latestLive.effect_status || 'n/a'}`
-                  : 'No live execution yet'}
-              </div>
-              {recentLive.length > 0 && (
-                <div className="execution-strip-list">
-                  {recentLive.map((item, idx) => (
-                    <div className="execution-strip-item" key={`${item.broker_order_id || item.created_at || idx}-${idx}`}>
-                      <strong>{item.desk || 'n/a'} / {item.action || 'n/a'}</strong>
-                      <span>{item.symbol || item.focus || 'n/a'}</span>
-                      <span>{item.status || 'n/a'} / {item.effect_status || 'n/a'}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className={`readiness-strip ${readinessToneClass}`}>
-              <div className="readiness-head">
-                <strong>Live readiness</strong>
-                <span>{readiness?.overall || 'n/a'}</span>
-                <span>Blocks {readiness?.block_count ?? 0}</span>
-                <span>Warns {readiness?.warn_count ?? 0}</span>
-              </div>
-              <div className="readiness-grid">
-                {readinessItems.map((item, idx) => (
-                  <div className={`readiness-item readiness-${item.status || 'warn'}`} key={`${item.label || idx}-${idx}`}>
-                    <strong>{item.label || 'n/a'}</strong>
-                    <span>{item.detail || 'n/a'}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="broker-strip">
-                <div className="broker-item">
-                  <strong>Upbit</strong>
-                  <span>{brokerHealth?.upbit?.configured ? 'configured' : 'missing creds'}</span>
-                  <span>{brokerHealth?.upbit?.balances_ok ? `balances ${brokerHealth?.upbit?.balances_count || 0}` : 'balance check off'}</span>
-                </div>
-                <div className="broker-item">
-                  <strong>KIS</strong>
-                  <span>{brokerHealth?.kis?.configured ? 'configured' : 'missing creds'}</span>
-                  <span>{brokerHealth?.kis?.balances_ok ? `balances ${brokerHealth?.kis?.balances_count || 0}` : 'balance check off'}</span>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         <div className="area-insights feature-panel">
-          <InsightPanel data={insights} agentStatus={agentStatus} />
+          <Suspense fallback={<PanelFallback title="인사이트 패널" detail="운영 인사이트 불러오는 중..." />}>
+            <InsightPanel data={insights} agentStatus={agentStatus} />
+          </Suspense>
         </div>
 
         <div className="area-position">
           <div className="panel dock-panel" style={{ height: '100%' }}>
             <div className="section-intro">
               <div>
-                <div className="panel-title">Position Dock</div>
-                <div className="panel-subcopy">Switch desks and inspect exposure like a mobile dealing app.</div>
+                <div className="panel-title">??? ??</div>
+                <div className="panel-subcopy">???? ?? ???? ??? ??? ??? ??? ?????.</div>
               </div>
               <div className="tab-bar">
                 <button
@@ -456,15 +618,21 @@ export default function App() {
         </div>
 
         <div className="area-chart feature-panel">
-          <PnlChart chartData={chartData} t={t} />
+          <Suspense fallback={<PanelFallback title={t.pnlChart} detail="누적 곡선 불러오는 중..." />}>
+            <PnlChart chartData={chartData} t={t} />
+          </Suspense>
         </div>
 
         <div className="area-trades feature-panel">
-          <TradeHistory trades={trades.slice(0, 15)} t={t} />
+          <Suspense fallback={<PanelFallback title={t.recentTrades} detail="체결 내역 불러오는 중..." />}>
+            <TradeHistory trades={trades.slice(0, 15)} t={t} />
+          </Suspense>
         </div>
 
         <div className="area-logs feature-panel">
-          <LogViewer lines={logs} t={t} />
+          <Suspense fallback={<PanelFallback title={t.liveLog} detail="런타임 로그 불러오는 중..." />}>
+            <LogViewer lines={logs} t={t} />
+          </Suspense>
         </div>
       </main>
     </div>

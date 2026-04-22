@@ -198,6 +198,7 @@ def _build_capital_payload(state: CompanyState) -> dict:
         "realized_krw": realized_krw,
         "unrealized_krw": unrealized_krw,
         "total_krw": total_krw,
+        "capital_profile": state.strategy_book.get("capital_profile", {}) or {},
     }
 
 
@@ -269,6 +270,194 @@ def _build_execution_summary(state: CompanyState) -> dict:
         "stale_count": len(stale_rows),
         "latest_live": live_rows[0] if live_rows else None,
         "stale_live": stale_rows[:3],
+    }
+
+
+def _build_desk_offense_payload(state: CompanyState) -> list[dict]:
+    desk_stats = state.daily_summary.get("desk_stats", {}) or {}
+    capital_profile = state.strategy_book.get("capital_profile", {}) or {}
+    desk_multipliers = capital_profile.get("desk_multipliers", {}) or {}
+    plan_map = {
+        "crypto": state.strategy_book.get("crypto_plan", {}) or {},
+        "korea": state.strategy_book.get("korea_plan", {}) or {},
+        "us": state.strategy_book.get("us_plan", {}) or {},
+    }
+    action_bonus = {
+        "attack_opening_drive": 12,
+        "probe_longs": 9,
+        "selective_probe": 5,
+        "watchlist_only": -4,
+        "stand_by": -7,
+        "capital_preservation": -14,
+        "pre_market_watch": -9,
+    }
+    offense_rows: list[dict] = []
+    for desk in ("crypto", "korea", "us"):
+        stats = desk_stats.get(desk, {}) or {}
+        plan = plan_map.get(desk, {}) or {}
+        realized = float(stats.get("realized_pnl_pct", 0.0) or 0.0)
+        win_rate = float(stats.get("win_rate", 0.0) or 0.0)
+        closed_positions = int(stats.get("closed_positions", 0) or 0)
+        open_notional = float(stats.get("open_notional_pct", 0.0) or 0.0)
+        desk_multiplier = float(desk_multipliers.get(desk, 1.0) or 1.0)
+        action = str(plan.get("action", "stand_by") or "stand_by")
+
+        score = 50.0
+        score += max(min(realized * 7.5, 18.0), -22.0)
+        score += max(min((win_rate - 50.0) * 0.35, 12.0), -14.0)
+        score += min(closed_positions * 1.8, 8.0)
+        score += action_bonus.get(action, 0)
+        score += (desk_multiplier - 1.0) * 50.0
+        score -= max(open_notional - 0.55, 0.0) * 18.0
+        score = round(max(min(score, 100.0), 0.0), 1)
+
+        if score >= 67:
+            tone = "press"
+        elif score >= 52:
+            tone = "balanced"
+        else:
+            tone = "cooldown"
+
+        offense_rows.append(
+            {
+                "desk": desk,
+                "title": {"crypto": "Crypto Desk", "korea": "Korea Desk", "us": "U.S. Desk"}.get(desk, desk),
+                "score": score,
+                "tone": tone,
+                "action": action,
+                "size": str(plan.get("size", "0.00x") or "0.00x"),
+                "focus": str(plan.get("focus", "") or ""),
+                "multiplier": round(desk_multiplier, 2),
+                "realized_pnl_pct": realized,
+                "win_rate": win_rate,
+                "closed_positions": closed_positions,
+            }
+        )
+
+    return sorted(offense_rows, key=lambda item: item["score"], reverse=True)
+
+
+def _build_agent_performance_payload(state: CompanyState) -> list[dict]:
+    desk_stats = state.daily_summary.get("desk_stats", {}) or {}
+    desk_agent_map = {
+        "crypto_desk_agent": "crypto",
+        "korea_stock_desk_agent": "korea",
+        "us_stock_desk_agent": "us",
+    }
+    title_map = {
+        "market_data_agent": "Market Data",
+        "macro_sentiment_agent": "Macro Sentiment",
+        "trend_structure_agent": "Trend Structure",
+        "strategy_allocator_agent": "Strategy Allocator",
+        "crypto_desk_agent": "Crypto Desk Agent",
+        "korea_stock_desk_agent": "Korea Desk Agent",
+        "us_stock_desk_agent": "U.S. Desk Agent",
+        "cio_agent": "Chief Investment Officer",
+        "risk_committee_agent": "Risk Committee",
+        "execution_agent": "Execution Agent",
+        "ops_agent": "Ops Agent",
+    }
+    infra_agents = {"risk_committee_agent", "execution_agent", "ops_agent", "cio_agent"}
+    context_agents = {"market_data_agent", "macro_sentiment_agent", "trend_structure_agent", "strategy_allocator_agent"}
+    rows: list[dict] = []
+    for item in state.agent_runs or []:
+        name = str(item.name or "")
+        score = float(item.score or 0.0)
+        linked_desk = desk_agent_map.get(name)
+        desk_realized = float((desk_stats.get(linked_desk, {}) or {}).get("realized_pnl_pct", 0.0) or 0.0) if linked_desk else None
+        desk_win_rate = float((desk_stats.get(linked_desk, {}) or {}).get("win_rate", 0.0) or 0.0) if linked_desk else None
+        effectiveness = round(score * 100.0, 1)
+        if desk_realized is not None:
+            effectiveness = round(max(min(effectiveness + (desk_realized * 6.0), 100.0), 0.0), 1)
+        if desk_win_rate is not None and (desk_stats.get(linked_desk, {}) or {}).get("closed_positions", 0):
+            effectiveness = round(max(min(effectiveness + ((desk_win_rate - 50.0) * 0.18), 100.0), 0.0), 1)
+        if name in infra_agents:
+            effectiveness = round(effectiveness * 0.82, 1)
+        elif name in context_agents:
+            effectiveness = round(effectiveness * 0.9, 1)
+
+        if effectiveness >= 68:
+            tone = "strong"
+        elif effectiveness >= 48:
+            tone = "mixed"
+        else:
+            tone = "weak"
+
+        rows.append(
+            {
+                "name": name,
+                "title": title_map.get(name, name.replace("_", " ").title()),
+                "score": round(score * 100.0, 1),
+                "effectiveness": effectiveness,
+                "tone": tone,
+                "category": "desk" if linked_desk else "system",
+                "linked_desk": linked_desk,
+                "desk_realized_pnl_pct": desk_realized,
+                "desk_win_rate": desk_win_rate,
+                "reason": str(item.reason or ""),
+            }
+        )
+
+    return sorted(
+        rows,
+        key=lambda item: (0 if item["linked_desk"] else 1, -item["effectiveness"]),
+    )
+
+
+def _entry_block_summary(state: CompanyState) -> dict:
+    daily = state.daily_summary or {}
+    realized = float(daily.get("realized_pnl_pct", 0.0) or 0.0)
+    gross = float(daily.get("gross_open_notional_pct", 0.0) or 0.0)
+    summary = {
+        "blocked": not bool(state.allow_new_entries),
+        "headline": "new entries allowed",
+        "detail": "risk gate open",
+        "reason_code": "allowed",
+    }
+    if state.allow_new_entries:
+        return summary
+
+    notes = [str(item) for item in (state.notes or [])]
+    if any("live conservative mode" in item.lower() for item in notes):
+        return {
+            "blocked": True,
+            "headline": "new entries blocked",
+            "detail": "live execution unresolved, conservative mode active",
+            "reason_code": "live_conservative_mode",
+        }
+    if realized <= -1.5:
+        return {
+            "blocked": True,
+            "headline": "new entries blocked",
+            "detail": f"daily drawdown guard active ({realized:.2f}%)",
+            "reason_code": "daily_drawdown",
+        }
+    if gross >= 1.05:
+        return {
+            "blocked": True,
+            "headline": "new entries blocked",
+            "detail": f"gross exposure cap breached ({gross:.2f}x)",
+            "reason_code": "gross_exposure",
+        }
+    if state.regime == "STRESSED":
+        return {
+            "blocked": True,
+            "headline": "new entries blocked",
+            "detail": "market regime is stressed",
+            "reason_code": "stressed_regime",
+        }
+    if any("drawdown or exposure breach" in item.lower() for item in notes):
+        return {
+            "blocked": True,
+            "headline": "new entries blocked",
+            "detail": "risk committee pause after drawdown or exposure breach",
+            "reason_code": "risk_committee",
+        }
+    return {
+        "blocked": True,
+        "headline": "new entries blocked",
+        "detail": "risk gate closed for this cycle",
+        "reason_code": "risk_gate",
     }
 
 
@@ -412,10 +601,13 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
         "performance": _build_performance_payload(state, closed_positions),
         "capital": _build_capital_payload(state),
         "execution_summary": _build_execution_summary(state),
+        "desk_offense": _build_desk_offense_payload(state),
+        "agent_performance": _build_agent_performance_payload(state),
         "exposure": {
             "gross_open_notional_pct": float(state.daily_summary.get("gross_open_notional_pct", 0.0) or 0.0),
             "allow_new_entries": bool(state.allow_new_entries),
             "risk_budget": float(state.risk_budget),
+            "entry_block_summary": _entry_block_summary(state),
         },
         "runtime_profile": _runtime_profile(state),
         "ops_flags": _build_ops_flags(state),
@@ -448,6 +640,26 @@ def health() -> dict:
     }
 
 
+@app.get("/diagnostics/access-map")
+def access_map() -> dict:
+    auth_enabled = _auth_enabled()
+    access = local_access_urls()
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "host": settings.host,
+        "port": settings.port,
+        "auth_enabled": auth_enabled,
+        "execution_mode": settings.execution_mode,
+        "app_env": settings.app_env,
+        "access": access,
+        "notes": [
+            "local_url is always the machine-local browser route",
+            "lan_url is the private network route detected from the current host",
+            "public_url appears only when PUBLIC_BASE_URL is configured",
+        ],
+    }
+
+
 @app.get("/state")
 def state() -> dict:
     return load_company_state().model_dump()
@@ -459,6 +671,7 @@ def dashboard_data() -> dict:
     return {
         "company_name": settings.company_name,
         "operator_name": settings.operator_name,
+        "access": local_access_urls(),
         "state": state.model_dump(),
         "dashboard": _build_dashboard_payload(state),
         "broker_live_health": broker_live_health(),
@@ -480,6 +693,7 @@ def ops_summary() -> dict:
             "risk_budget": state.risk_budget,
             "allow_new_entries": state.allow_new_entries,
             "gross_open_notional_pct": state.daily_summary.get("gross_open_notional_pct", 0.0),
+            "capital_profile": state.strategy_book.get("capital_profile", {}) or {},
         },
         "runtime_profile": dashboard.get("runtime_profile", {}),
         "ops_flags": dashboard.get("ops_flags", {}),
@@ -500,6 +714,9 @@ def ops_summary() -> dict:
             "symbol_performance_stats": state.daily_summary.get("symbol_performance_stats", []),
             "desk_stats": state.daily_summary.get("desk_stats", {}),
         },
+        "capital_profile": state.strategy_book.get("capital_profile", {}) or {},
+        "desk_offense": dashboard.get("desk_offense", []),
+        "agent_performance": dashboard.get("agent_performance", []),
         "desk_plans": {
             "crypto": state.strategy_book.get("crypto_plan", {}),
             "korea": state.strategy_book.get("korea_plan", {}),
@@ -524,6 +741,7 @@ def mobile_summary() -> dict:
     daily = state.daily_summary
     return {
         "updated_at": state.updated_at,
+        "access": local_access_urls(),
         "phase": state.session_state.get("market_phase", "n/a"),
         "risk": {
             "stance": state.stance,
@@ -531,10 +749,13 @@ def mobile_summary() -> dict:
             "risk_budget": state.risk_budget,
             "allow_new_entries": state.allow_new_entries,
             "gross_open_notional_pct": daily.get("gross_open_notional_pct", 0.0),
+            "capital_profile": state.strategy_book.get("capital_profile", {}) or {},
         },
         "runtime_profile": _runtime_profile(state),
         "ops_flags": _build_ops_flags(state),
         "execution_summary": _build_execution_summary(state),
+        "desk_offense": _build_desk_offense_payload(state),
+        "agent_performance": _build_agent_performance_payload(state),
         "live_readiness": live_readiness_checklist(),
         "headline": {
             "win_rate": daily.get("win_rate", 0.0),
@@ -638,6 +859,7 @@ def us_session_check() -> dict:
         market_snapshot={"us_leaders": us_payload.get("leaders", [])},
         open_positions=[item for item in state.open_positions if item.get("desk") == "us"],
         closed_positions=load_closed_positions(limit=12),
+        daily_summary=state.daily_summary,
         allow_new_entries=state.allow_new_entries,
         risk_budget=state.risk_budget,
     )
@@ -908,6 +1130,7 @@ def live_readiness_checklist() -> dict:
         "warn_count": warn_count,
         "execution_mode": mode,
         "execution_summary": execution_summary,
+        "entry_block_summary": _entry_block_summary(state),
         "checklist": checklist,
         "notes": (state.notes or [])[-8:],
     }
@@ -933,451 +1156,198 @@ def performance() -> dict:
     }
 
 
-@app.get("/", response_class=HTMLResponse)
-def root() -> str:
-    return f"""<!doctype html>
-<html lang="ko">
+def _embedded_dashboard_html() -> str:
+    return """<!doctype html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#09111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="{settings.company_name}">
+  <meta name="apple-mobile-web-app-title" content="Trading Company V2">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/app-icon.svg" type="image/svg+xml">
-  <title>{settings.company_name}</title>
+  <title>Trading Company V2</title>
   <style>
-    :root {{
-      --bg:#09111f;--surface:rgba(10,19,35,.84);--surface2:rgba(19,34,57,.9);
-      --border:rgba(141,177,199,.18);--text:#eef6ff;--muted:#97aabf;
-      --green:#67e8a5;--red:#ff7c7c;--blue:#6bc7ff;--yellow:#ffd36e;--orange:#ff9a62;
-      --font:'Aptos','Bahnschrift','Malgun Gothic',sans-serif;
-      --mono:'IBM Plex Mono','D2Coding','Consolas',monospace;
-      --radius:18px;--shadow:0 30px 80px rgba(0,0,0,.28);
-    }}
-    *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-    body{{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;line-height:1.5;-webkit-font-smoothing:antialiased}}
-    .app{{position:relative;max-width:1480px;margin:0 auto;padding:20px 18px 60px}}
-    .app-glow{{position:fixed;top:0;left:50%;transform:translateX(-50%);width:900px;height:400px;background:radial-gradient(ellipse at top,rgba(107,199,255,.08) 0%,transparent 70%);pointer-events:none;z-index:0}}
-    .hero-shell{{position:relative;z-index:1;display:flex;justify-content:space-between;align-items:center;padding:18px 24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(20px);margin-bottom:16px;flex-wrap:wrap;gap:12px}}
-    .hero-brand{{display:flex;align-items:center;gap:14px}}
-    .brand-icon{{width:44px;height:44px;border-radius:12px;background:linear-gradient(145deg,rgba(107,199,255,.25),rgba(107,199,255,.08));border:1px solid rgba(107,199,255,.3);display:grid;place-items:center;font-size:.78rem;font-weight:700;color:var(--blue);letter-spacing:.04em;flex-shrink:0}}
-    .brand-eyebrow{{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}}
-    .brand-name{{font-size:1.1rem;font-weight:700;color:var(--text)}}
-    .status-pill{{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:.75rem;font-weight:600;background:rgba(103,232,165,.12);border:1px solid rgba(103,232,165,.3);color:var(--green)}}
-    .status-pill.loading{{background:rgba(151,170,191,.12);border-color:rgba(151,170,191,.3);color:var(--muted)}}
-    .status-pill.error{{background:rgba(255,124,124,.12);border-color:rgba(255,124,124,.3);color:var(--red)}}
-    .status-pill::before{{content:'●';font-size:.6rem}}
-    .hero-actions{{display:flex;align-items:center;gap:12px}}
-    .update-time{{font-size:.75rem;color:var(--muted);font-family:var(--mono)}}
-    .btn-cycle{{padding:8px 18px;border-radius:10px;border:1px solid rgba(107,199,255,.3);background:rgba(107,199,255,.1);color:var(--blue);font-size:.82rem;font-weight:600;cursor:pointer;transition:all .15s}}
-    .btn-cycle:hover{{background:rgba(107,199,255,.2)}}
-    .btn-cycle:disabled{{opacity:.5;cursor:not-allowed}}
-    .hero-overview{{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}}
-    .overview-card{{padding:16px 18px;background:var(--surface);border:1px solid var(--border);border-radius:14px;backdrop-filter:blur(16px)}}
-    .ov-label{{font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:6px}}
-    .ov-value{{font-size:1.1rem;font-weight:700}}
-    .ov-sub{{font-size:.7rem;color:var(--muted);margin-top:3px}}
-    .overview-card.tone-ok{{border-color:rgba(103,232,165,.3)}}
-    .overview-card.tone-warn{{border-color:rgba(255,211,110,.3)}}
-    .overview-card.tone-risk{{border-color:rgba(255,154,98,.3)}}
-    .dashboard{{position:relative;z-index:1;display:grid;grid-template-columns:1.15fr .85fr;gap:14px}}
-    .col-left,.col-right{{display:flex;flex-direction:column;gap:14px}}
-    .panel{{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);backdrop-filter:blur(16px);overflow:hidden}}
-    .panel-title{{padding:14px 18px 10px;font-size:.78rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}}
-    .badge,.insight-badge{{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 6px;border-radius:6px;background:rgba(107,199,255,.12);color:var(--blue);font-size:.72rem;font-weight:700}}
-    .area-cards{{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}}
-    .stat-card{{padding:16px;background:var(--surface2);border:1px solid var(--border);border-radius:14px}}
-    .sc-label{{font-size:.7rem;color:var(--muted);margin-bottom:4px}}
-    .sc-value{{font-size:1.3rem;font-weight:700}}
-    .sc-sub{{font-size:.72rem;color:var(--muted);margin-top:2px}}
-    .execution-strip{{padding:4px 0 8px}}
-    .desk-row{{display:flex;align-items:center;gap:8px;padding:10px 18px;border-bottom:1px solid var(--border)}}
-    .desk-row:last-child{{border-bottom:none}}
-    .desk-tag{{width:52px;font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);flex-shrink:0}}
-    .desk-size{{font-size:.72rem;color:var(--blue);font-family:var(--mono);flex-shrink:0}}
-    .desk-focus{{font-size:.72rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}}
-    .action-pill{{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.7rem;font-weight:600;white-space:nowrap;flex-shrink:0}}
-    .action-pill.buy{{background:rgba(103,232,165,.15);color:var(--green)}}
-    .action-pill.sell{{background:rgba(255,124,124,.15);color:var(--red)}}
-    .action-pill.watch{{background:rgba(151,170,191,.12);color:var(--muted)}}
-    .action-pill.probe{{background:rgba(107,199,255,.12);color:var(--blue)}}
-    .action-pill.attack{{background:rgba(255,211,110,.12);color:var(--yellow)}}
-    .pos-table{{width:100%;border-collapse:collapse;font-size:.78rem}}
-    .pos-table th{{padding:8px 14px;text-align:left;font-size:.67rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);background:rgba(19,34,57,.5)}}
-    .pos-table td{{padding:10px 14px;border-top:1px solid var(--border)}}
-    .pos-table tr:hover td{{background:rgba(107,199,255,.04)}}
-    .symbol-cell{{font-family:var(--mono);font-weight:600}}
-    .desk-chip{{display:inline-block;padding:2px 6px;border-radius:4px;font-size:.66rem;font-weight:600;background:rgba(107,199,255,.1);color:var(--blue)}}
-    .empty-msg{{padding:20px 18px;color:var(--muted);font-size:.8rem;text-align:center}}
-    #equity-svg{{width:100%;height:140px;display:block}}
-    .insights-list,.journal-list{{padding:4px 0}}
-    .insight-row{{display:flex;align-items:center;gap:10px;padding:8px 18px;border-bottom:1px solid rgba(141,177,199,.08)}}
-    .insight-row:last-child{{border-bottom:none}}
-    .ins-name{{flex:1;font-size:.8rem}}
-    .ins-score{{font-family:var(--mono);font-size:.8rem;font-weight:700;min-width:36px;text-align:right}}
-    .ins-bar{{width:80px;height:4px;background:rgba(141,177,199,.15);border-radius:2px;overflow:hidden;flex-shrink:0}}
-    .ins-bar-fill{{height:100%;border-radius:2px;transition:width .4s}}
-    .journal-row{{padding:8px 18px;border-bottom:1px solid rgba(141,177,199,.08);font-size:.76rem;color:var(--muted)}}
-    .journal-row:last-child{{border-bottom:none}}
-    .journal-time{{font-family:var(--mono);color:var(--blue);margin-right:8px}}
-    .pos{{color:var(--green)!important}}.neg{{color:var(--red)!important}}.neutral{{color:var(--text)!important}}
-    .tone-ok{{color:var(--green)!important}}.tone-warn{{color:var(--yellow)!important}}.tone-risk{{color:var(--orange)!important}}.tone-danger{{color:var(--red)!important}}.tone-muted{{color:var(--muted)!important}}.tone-blue{{color:var(--blue)!important}}
-    @media(max-width:960px){{.dashboard{{grid-template-columns:1fr}}.hero-overview{{grid-template-columns:repeat(2,1fr)}}}}
-    @media(max-width:600px){{.area-cards{{grid-template-columns:repeat(2,1fr)}}.hero-shell{{flex-direction:column;align-items:flex-start}}}}
+    :root {
+      --bg:#09111f; --surface:rgba(10,19,35,.84); --surface2:rgba(19,34,57,.92); --border:rgba(141,177,199,.18);
+      --text:#eef6ff; --muted:#97aabf; --green:#67e8a5; --red:#ff7c7c; --blue:#6bc7ff; --yellow:#ffd36e; --orange:#ff9a62;
+      --font:'Aptos','Bahnschrift','Malgun Gothic',sans-serif; --mono:'IBM Plex Mono','D2Coding','Consolas',monospace;
+    }
+    *{box-sizing:border-box} html,body{margin:0;padding:0}
+    body{min-height:100vh;color:var(--text);font-family:var(--font);background:
+      radial-gradient(circle at 10% 0%, rgba(107,199,255,.16), transparent 34%),
+      radial-gradient(circle at 92% 18%, rgba(103,232,165,.08), transparent 30%),
+      linear-gradient(180deg, #07101d 0%, #09111f 38%, #09111f 100%); line-height:1.45}
+    .app{position:relative;max-width:1480px;margin:0 auto;padding:20px 18px 72px}
+    .app-glow{position:fixed;left:50%;transform:translateX(-50%);width:900px;height:420px;pointer-events:none;z-index:0;background:radial-gradient(ellipse at top, rgba(107,199,255,.10) 0%, transparent 70%)}
+    .hero-shell,.overview-card,.signal-panel,.panel,.access-card,.priority-chip,.check-item,.broker-card,.desk-row,.metric-card{backdrop-filter:blur(20px)}
+    .hero-shell{position:relative;z-index:1;display:flex;justify-content:space-between;gap:18px;align-items:flex-start;padding:24px;border:1px solid var(--border);border-radius:28px;background:linear-gradient(180deg, rgba(19,34,57,.94), rgba(10,19,35,.82));margin-bottom:16px;overflow:hidden}
+    .hero-shell::after{content:'';position:absolute;inset:auto -60px -80px auto;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle, rgba(107,199,255,.18), transparent 68%)}
+    .hero-copy{max-width:760px;position:relative;z-index:1}.hero-kicker{font-size:.72rem;text-transform:uppercase;letter-spacing:.16em;color:var(--blue);margin-bottom:10px}
+    .hero-title-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.hero-title{font-size:clamp(1.8rem,3vw,3rem);font-weight:800;line-height:1.05;letter-spacing:-.03em;margin:0}
+    .hero-pill{display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;border:1px solid rgba(107,199,255,.24);background:rgba(107,199,255,.10);font-size:.78rem;color:var(--blue);font-weight:700}
+    .hero-pill::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 18px currentColor}
+    .hero-summary{margin-top:10px;font-size:.95rem;color:#d7e7f7;max-width:700px}.hero-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-top:16px}
+    .access-card{min-width:0;padding:14px 16px;border-radius:16px;border:1px solid rgba(141,177,199,.16);background:rgba(7,16,29,.64)}
+    .access-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:8px}
+    .access-url{font-family:var(--mono);font-size:.82rem;color:var(--text);word-break:break-all}
+    .hero-actions{position:relative;z-index:1;display:flex;flex-direction:column;align-items:flex-end;gap:12px;min-width:250px}
+    .hero-action-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+    .btn-cycle,.btn-ghost{appearance:none;border:none;cursor:pointer;border-radius:12px;padding:10px 16px;font-weight:700}
+    .btn-cycle{background:linear-gradient(135deg, rgba(107,199,255,.22), rgba(107,199,255,.08));color:var(--blue);border:1px solid rgba(107,199,255,.30)}
+    .btn-ghost{background:rgba(151,170,191,.10);color:var(--text);border:1px solid rgba(151,170,191,.24)} .btn-cycle:disabled{opacity:.55;cursor:not-allowed}
+    .meta-stamp{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
+    .hero-overview{position:relative;z-index:1;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+    .overview-card{padding:18px;border-radius:18px;border:1px solid var(--border);background:rgba(10,19,35,.76)}
+    .ov-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:8px}.ov-value{font-size:1.28rem;font-weight:800}.ov-sub{margin-top:6px;font-size:.78rem;color:var(--muted)}
+    .tone-ok{color:var(--green)!important}.tone-warn{color:var(--yellow)!important}.tone-risk{color:var(--orange)!important}.tone-danger{color:var(--red)!important}.tone-muted{color:var(--muted)!important}.tone-blue{color:var(--blue)!important}
+    .overview-card.tone-ok,.signal-panel.tone-ok,.broker-card.tone-ok{border-color:rgba(103,232,165,.28)} .overview-card.tone-warn,.signal-panel.tone-warn,.broker-card.tone-warn{border-color:rgba(255,211,110,.28)}
+    .overview-card.tone-risk,.signal-panel.tone-risk,.broker-card.tone-risk{border-color:rgba(255,154,98,.30)} .overview-card.tone-danger,.signal-panel.tone-danger,.broker-card.tone-danger{border-color:rgba(255,124,124,.28)}
+    .signal-grid{position:relative;z-index:1;display:grid;grid-template-columns:1.1fr .9fr;gap:14px;margin-bottom:16px}
+    .signal-panel,.panel{border-radius:24px;border:1px solid var(--border);background:linear-gradient(180deg, rgba(10,19,35,.90), rgba(10,19,35,.72));overflow:hidden}
+    .panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 18px 12px;border-bottom:1px solid var(--border)}
+    .panel-title{font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700}.panel-value{font-family:var(--mono);font-size:.82rem;color:var(--blue)}
+    .priority-wrap{display:flex;flex-wrap:wrap;gap:10px;padding:16px 18px 6px}.priority-chip{display:inline-flex;align-items:center;gap:8px;padding:9px 12px;border-radius:999px;background:rgba(151,170,191,.10);border:1px solid rgba(151,170,191,.18);font-size:.76rem;color:var(--text)}
+    .priority-chip::before{content:'';width:8px;height:8px;border-radius:50%;background:currentColor}
+    .metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:10px 18px 18px}.metric-card{padding:14px;border-radius:16px;background:rgba(19,34,57,.78);border:1px solid rgba(141,177,199,.12)}
+    .metric-label{font-size:.68rem;text-transform:uppercase;letter-spacing:.10em;color:var(--muted)} .metric-value{margin-top:6px;font-size:1.12rem;font-weight:800} .metric-sub{margin-top:4px;font-size:.76rem;color:var(--muted)}
+    .readiness-list,.broker-list,.desk-list,.insights-list,.journal-list{padding:8px 18px 18px}
+    .check-item,.broker-card,.desk-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;margin-top:10px;border-radius:16px;background:rgba(19,34,57,.72);border:1px solid rgba(141,177,199,.12)}
+    .check-main,.broker-main,.desk-main{min-width:0;flex:1}.check-title,.broker-title,.desk-title{font-size:.82rem;font-weight:700;color:var(--text)} .check-detail,.broker-detail,.desk-detail{margin-top:4px;font-size:.76rem;color:var(--muted)}
+    .state-badge{display:inline-flex;align-items:center;gap:8px;padding:7px 11px;border-radius:999px;font-size:.73rem;font-weight:700;border:1px solid rgba(151,170,191,.22);background:rgba(151,170,191,.10);white-space:nowrap}
+    .state-badge.pass{color:var(--green);border-color:rgba(103,232,165,.26);background:rgba(103,232,165,.10)} .state-badge.warn{color:var(--yellow);border-color:rgba(255,211,110,.26);background:rgba(255,211,110,.10)} .state-badge.block{color:var(--red);border-color:rgba(255,124,124,.26);background:rgba(255,124,124,.10)}
+    .desk-row{align-items:center}.desk-tag{width:56px;flex-shrink:0;font-size:.70rem;color:var(--muted);text-transform:uppercase;letter-spacing:.12em;font-weight:700}
+    .action-pill{display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:999px;font-size:.72rem;font-weight:700;flex-shrink:0}
+    .action-pill.buy{background:rgba(103,232,165,.15);color:var(--green)} .action-pill.sell{background:rgba(255,124,124,.15);color:var(--red)} .action-pill.watch{background:rgba(151,170,191,.12);color:var(--muted)} .action-pill.probe{background:rgba(107,199,255,.12);color:var(--blue)}
+    .desk-size{font-family:var(--mono);font-size:.76rem;color:var(--blue)} .content-grid{position:relative;z-index:1;display:grid;grid-template-columns:1.06fr .94fr;gap:14px}
+    .col{display:flex;flex-direction:column;gap:14px}.panel-body{padding:0 18px 18px}.table-wrap{overflow:auto}.pos-table{width:100%;border-collapse:collapse;font-size:.80rem}
+    .pos-table th{padding:10px 12px;text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.10em;color:var(--muted);border-bottom:1px solid var(--border)} .pos-table td{padding:12px;border-bottom:1px solid rgba(141,177,199,.10)}
+    .pos-table tr:last-child td{border-bottom:none}.symbol-cell{font-family:var(--mono);font-weight:700}.desk-chip{display:inline-flex;padding:4px 8px;border-radius:999px;background:rgba(107,199,255,.12);color:var(--blue);font-size:.68rem;font-weight:700}
+    .empty-msg{padding:18px 0;color:var(--muted);font-size:.82rem;text-align:center}.badge{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 8px;border-radius:999px;background:rgba(107,199,255,.12);color:var(--blue);font-size:.72rem;font-weight:700}
+    #equity-svg{display:block;width:100%;height:170px} .insight-row{display:grid;grid-template-columns:minmax(0,1fr) 100px 42px;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid rgba(141,177,199,.08)}
+    .insight-row:last-child,.journal-row:last-child{border-bottom:none}.ins-name{font-size:.82rem;color:var(--text)} .ins-bar{width:100%;height:6px;border-radius:999px;background:rgba(141,177,199,.12);overflow:hidden} .ins-bar-fill{height:100%;border-radius:999px}
+    .ins-score{font-family:var(--mono);text-align:right;font-size:.80rem;font-weight:700}.journal-row{padding:10px 0;border-bottom:1px solid rgba(141,177,199,.08);font-size:.78rem;color:var(--muted)} .journal-time{font-family:var(--mono);color:var(--blue);margin-right:8px}
+    .pos{color:var(--green)!important}.neg{color:var(--red)!important}.neutral{color:var(--text)!important}
+    @media (max-width:1180px){.signal-grid,.content-grid{grid-template-columns:1fr}.hero-shell{flex-direction:column}.hero-actions{align-items:flex-start}}
+    @media (max-width:820px){.hero-overview{grid-template-columns:repeat(2,1fr)}.metric-grid{grid-template-columns:repeat(2,1fr)}}
+    @media (max-width:560px){.app{padding:14px 12px 48px}.hero-shell{padding:18px}.hero-title{font-size:1.7rem}.hero-overview,.metric-grid,.hero-meta{grid-template-columns:1fr}.hero-action-row{width:100%}.btn-cycle,.btn-ghost{width:100%}.check-item,.broker-card,.desk-row{flex-direction:column;align-items:flex-start}.insight-row{grid-template-columns:1fr}.panel-head{align-items:flex-start;flex-direction:column}.panel-value,.meta-stamp{font-size:.74rem}.access-url{font-size:.76rem}}
   </style>
 </head>
 <body>
 <div class="app">
   <div class="app-glow"></div>
-  <header class="hero-shell">
-    <div class="hero-brand">
-      <div class="brand-icon">TC</div>
-      <div>
-        <div class="brand-eyebrow">Trading Company</div>
-        <div class="brand-name">{settings.company_name}</div>
+  <section class="hero-shell">
+    <div class="hero-copy">
+      <div class="hero-kicker">Trading Company Control Layer</div>
+      <div class="hero-title-row">
+        <h1 class="hero-title">Trading Company V2</h1>
+        <span class="hero-pill" id="status-pill">Syncing</span>
       </div>
-      <span class="status-pill loading" id="status-pill">연결 중...</span>
+      <div class="hero-summary" id="hero-summary">Live readiness, broker health, and operator signals in one mobile-friendly dashboard.</div>
+      <div class="hero-meta" id="access-grid"><div class="access-card"><div class="access-label">Access</div><div class="access-url">loading...</div></div></div>
     </div>
     <div class="hero-actions">
-      <span class="update-time" id="update-time">--:--</span>
-      <button class="btn-cycle" id="cycle-btn" onclick="runCycle()">사이클 실행</button>
+      <div class="hero-action-row">
+        <button class="btn-cycle" id="cycle-btn" onclick="runCycle()">Run Cycle</button>
+        <button class="btn-ghost" onclick="loadData()">Refresh</button>
+      </div>
+      <div class="meta-stamp">Updated <span id="update-time">--:--</span></div>
+      <div class="meta-stamp">Next run <span id="next-run">--</span></div>
     </div>
-  </header>
-  <div class="hero-overview">
-    <div class="overview-card" id="ov-stance">
-      <div class="ov-label">Stance</div>
-      <div class="ov-value" id="ov-stance-val">--</div>
+  </section>
+  <section class="hero-overview">
+    <div class="overview-card" id="ov-stance"><div class="ov-label">Stance</div><div class="ov-value" id="ov-stance-val">--</div><div class="ov-sub">risk posture</div></div>
+    <div class="overview-card" id="ov-regime"><div class="ov-label">Regime</div><div class="ov-value" id="ov-regime-val">--</div><div class="ov-sub">market texture</div></div>
+    <div class="overview-card" id="ov-exposure"><div class="ov-label">Exposure</div><div class="ov-value" id="ov-exposure-val">--</div><div class="ov-sub" id="ov-entries">--</div></div>
+    <div class="overview-card" id="ov-ops"><div class="ov-label">Ops</div><div class="ov-value" id="ov-ops-val">--</div><div class="ov-sub" id="ov-ops-sub">runtime health</div></div>
+  </section>
+  <section class="signal-grid">
+    <div class="signal-panel" id="signal-panel">
+      <div class="panel-head"><div class="panel-title">Execution Signal Deck</div><div class="panel-value" id="exec-mode">paper</div></div>
+      <div class="priority-wrap" id="priority-wrap"><div class="priority-chip tone-muted">No signal yet</div></div>
+      <div class="metric-grid">
+        <div class="metric-card"><div class="metric-label">Live orders</div><div class="metric-value" id="metric-live">0</div><div class="metric-sub">active log entries</div></div>
+        <div class="metric-card"><div class="metric-label">Pending</div><div class="metric-value" id="metric-pending">0</div><div class="metric-sub">waiting on broker</div></div>
+        <div class="metric-card"><div class="metric-label">Partial</div><div class="metric-value" id="metric-partial">0</div><div class="metric-sub">needs review</div></div>
+        <div class="metric-card"><div class="metric-label">Stale</div><div class="metric-value" id="metric-stale">0</div><div class="metric-sub">older than threshold</div></div>
+      </div>
+      <div class="panel-head"><div class="panel-title">Desk Plans</div><div class="panel-value" id="desk-caption">3 desks</div></div>
+      <div class="desk-list" id="desk-rows"></div>
     </div>
-    <div class="overview-card" id="ov-regime">
-      <div class="ov-label">Regime</div>
-      <div class="ov-value" id="ov-regime-val">--</div>
+    <div class="signal-panel" id="readiness-panel">
+      <div class="panel-head"><div class="panel-title">Live Readiness</div><div class="panel-value" id="readiness-overall">blocked</div></div>
+      <div class="readiness-list" id="readiness-list"></div>
+      <div class="panel-head"><div class="panel-title">Broker Health</div><div class="panel-value" id="broker-caption">status</div></div>
+      <div class="broker-list" id="broker-list"></div>
     </div>
-    <div class="overview-card" id="ov-exposure">
-      <div class="ov-label">Exposure</div>
-      <div class="ov-value" id="ov-exposure-val">--</div>
-      <div class="ov-sub" id="ov-entries">--</div>
-    </div>
-    <div class="overview-card" id="ov-ops">
-      <div class="ov-label">Ops</div>
-      <div class="ov-value" id="ov-ops-val">--</div>
-    </div>
-  </div>
-  <div class="dashboard">
-    <div class="col-left">
-      <div class="area-cards">
-        <div class="stat-card">
-          <div class="sc-label">실현 손익</div>
-          <div class="sc-value" id="sc-realized">--</div>
-          <div class="sc-sub" id="sc-realized-krw">--</div>
-        </div>
-        <div class="stat-card">
-          <div class="sc-label">미실현 손익</div>
-          <div class="sc-value" id="sc-unrealized">--</div>
-          <div class="sc-sub" id="sc-unrealized-krw">--</div>
-        </div>
-        <div class="stat-card">
-          <div class="sc-label">승률 / 기대값</div>
-          <div class="sc-value" id="sc-winrate">--</div>
-          <div class="sc-sub" id="sc-trades">--</div>
-        </div>
-        <div class="stat-card">
-          <div class="sc-label">포트폴리오</div>
-          <div class="sc-value" id="sc-capital">--</div>
-          <div class="sc-sub" id="sc-capital-base">--</div>
+  </section>
+  <section class="content-grid">
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title">Performance</div><div class="panel-value" id="performance-caption">daily pulse</div></div>
+        <div class="metric-grid">
+          <div class="metric-card"><div class="metric-label">Realized</div><div class="metric-value" id="sc-realized">--</div><div class="metric-sub" id="sc-realized-krw">--</div></div>
+          <div class="metric-card"><div class="metric-label">Unrealized</div><div class="metric-value" id="sc-unrealized">--</div><div class="metric-sub" id="sc-unrealized-krw">--</div></div>
+          <div class="metric-card"><div class="metric-label">Win rate</div><div class="metric-value" id="sc-winrate">--</div><div class="metric-sub" id="sc-trades">--</div></div>
+          <div class="metric-card"><div class="metric-label">Capital</div><div class="metric-value" id="sc-capital">--</div><div class="metric-sub" id="sc-capital-base">--</div></div>
         </div>
       </div>
-      <div class="panel execution-strip">
-        <div class="panel-title">데스크 현황</div>
-        <div id="desk-rows"></div>
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title">Open Positions</div><div class="badge" id="pos-count">0</div></div>
+        <div class="panel-body table-wrap" id="positions-body"><div class="empty-msg">No open positions</div></div>
       </div>
       <div class="panel">
-        <div class="panel-title">오픈 포지션 <span class="badge" id="pos-count">0</span></div>
-        <div id="positions-body"><div class="empty-msg">포지션 없음</div></div>
-      </div>
-      <div class="panel">
-        <div class="panel-title">최근 청산</div>
-        <div id="trades-body"><div class="empty-msg">청산 내역 없음</div></div>
+        <div class="panel-head"><div class="panel-title">Recent Closures</div><div class="panel-value">latest six</div></div>
+        <div class="panel-body table-wrap" id="trades-body"><div class="empty-msg">No closed trades yet</div></div>
       </div>
     </div>
-    <div class="col-right">
+    <div class="col">
       <div class="panel">
-        <div class="panel-title">에쿼티 커브</div>
-        <svg id="equity-svg" viewBox="0 0 400 140" preserveAspectRatio="none"></svg>
+        <div class="panel-head"><div class="panel-title">Equity Curve</div><div class="panel-value">start vs now</div></div>
+        <div class="panel-body"><svg id="equity-svg" viewBox="0 0 400 170" preserveAspectRatio="none"></svg></div>
       </div>
       <div class="panel">
-        <div class="panel-title">에이전트 시그널 <span class="insight-badge" id="insight-score">--</span></div>
-        <div id="insights-body" class="insights-list"></div>
+        <div class="panel-head"><div class="panel-title">Insight Scoreboard</div><div class="badge" id="insight-score">--</div></div>
+        <div class="panel-body insights-list" id="insights-body"><div class="empty-msg">No agent insight yet</div></div>
       </div>
       <div class="panel">
-        <div class="panel-title">사이클 저널</div>
-        <div id="journal-body" class="journal-list"><div class="empty-msg">저널 없음</div></div>
+        <div class="panel-head"><div class="panel-title">Operator Journal</div><div class="panel-value">latest notes</div></div>
+        <div class="panel-body journal-list" id="journal-body"><div class="empty-msg">No notes yet</div></div>
       </div>
     </div>
-  </div>
+  </section>
 </div>
 <script>
-  function fmtPct(v) {{
-    var n = parseFloat(v) || 0;
-    return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
-  }}
-  function fmtKrw(v) {{
-    var n = parseInt(v) || 0;
-    return (n >= 0 ? '+' : '') + n.toLocaleString('ko-KR') + '원';
-  }}
-  function pctCls(v) {{
-    var n = parseFloat(v) || 0;
-    return n > 0 ? 'pos' : n < 0 ? 'neg' : 'neutral';
-  }}
-  function actionCls(a) {{
-    if (!a) return 'watch';
-    var s = a.toLowerCase();
-    if (s.indexOf('attack') >= 0 || s.indexOf('probe_long') >= 0) return 'buy';
-    if (s.indexOf('reduce') >= 0 || s.indexOf('preservation') >= 0) return 'sell';
-    if (s.indexOf('probe') >= 0 || s.indexOf('selective') >= 0) return 'probe';
-    return 'watch';
-  }}
-  function stanceTone(s) {{
-    if (!s) return 'tone-muted';
-    var v = s.toUpperCase();
-    return v === 'OFFENSE' ? 'tone-ok' : v === 'DEFENSE' ? 'tone-risk' : 'tone-blue';
-  }}
-  function regimeTone(r) {{
-    if (!r) return 'tone-muted';
-    var v = r.toUpperCase();
-    if (v === 'TRENDING') return 'tone-ok';
-    if (v === 'STRESSED') return 'tone-danger';
-    if (v === 'RANGING') return 'tone-warn';
-    return 'tone-muted';
-  }}
-  function renderEquity(pts) {{
-    var svg = document.getElementById('equity-svg');
-    if (!pts || pts.length < 2) {{
-      svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#97aabf" font-size="12">데이터 없음</text>';
-      return;
-    }}
-    var W = 400, H = 140, PAD = 24;
-    var vals = pts.map(function(p) {{ return p.equity; }});
-    var mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), rng = mx - mn || 1;
-    var toX = function(i) {{ return PAD + (i / (pts.length - 1)) * (W - PAD * 2); }};
-    var toY = function(val) {{ return PAD + ((mx - val) / rng) * (H - PAD * 2); }};
-    var coords = pts.map(function(p, i) {{ return toX(i).toFixed(1) + ',' + toY(p.equity).toFixed(1); }}).join(' ');
-    var last = pts[pts.length - 1];
-    var col = last.equity >= 100 ? '#67e8a5' : '#ff7c7c';
-    var fillPts = toX(0).toFixed(1) + ',' + H + ' ' + coords + ' ' + toX(pts.length - 1).toFixed(1) + ',' + H;
-    var dots = pts.map(function(p, i) {{
-      return i === pts.length - 1
-        ? '<circle cx="' + toX(i).toFixed(1) + '" cy="' + toY(p.equity).toFixed(1) + '" r="4" fill="' + col + '"/>'
-        : '';
-    }}).join('');
-    var lbls = pts.map(function(p, i) {{
-      return '<text x="' + toX(i).toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle" fill="#97aabf" font-size="9">' + p.label + '</text>';
-    }}).join('');
-    svg.innerHTML = '<defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1">'
-      + '<stop offset="0%" stop-color="' + col + '" stop-opacity="0.25"/>'
-      + '<stop offset="100%" stop-color="' + col + '" stop-opacity="0"/>'
-      + '</linearGradient></defs>'
-      + '<polygon points="' + fillPts + '" fill="url(#eg)"/>'
-      + '<polyline points="' + coords + '" fill="none" stroke="' + col + '" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>'
-      + dots + lbls;
-  }}
-  function renderDesks(desks) {{
-    if (!desks) return;
-    var el = document.getElementById('desk-rows');
-    var items = [['CRYPTO','crypto'],['KR','korea'],['US','us']];
-    var html = '';
-    for (var i = 0; i < items.length; i++) {{
-      var lbl = items[i][0], k = items[i][1];
-      var d = desks[k] || {{}};
-      html += '<div class="desk-row">'
-        + '<span class="desk-tag">' + lbl + '</span>'
-        + '<span class="action-pill ' + actionCls(d.action) + '">' + (d.action || 'n/a') + '</span>'
-        + '<span class="desk-focus" title="' + (d.focus || '') + '">' + (d.focus || '') + '</span>'
-        + '<span class="desk-size">' + (d.size || '0.00x') + '</span>'
-        + '</div>';
-    }}
-    el.innerHTML = html;
-  }}
-  function renderPositions(pos) {{
-    var el = document.getElementById('positions-body');
-    var cnt = document.getElementById('pos-count');
-    if (!pos || !pos.length) {{
-      cnt.textContent = '0';
-      el.innerHTML = '<div class="empty-msg">오픈 포지션 없음</div>';
-      return;
-    }}
-    cnt.textContent = pos.length;
-    var rows = '';
-    for (var i = 0; i < pos.length; i++) {{
-      var p = pos[i];
-      var pnl = parseFloat(p.unrealized_pnl_pct) || 0;
-      rows += '<tr>'
-        + '<td><span class="symbol-cell">' + (p.symbol || '--') + '</span></td>'
-        + '<td><span class="desk-chip">' + (p.desk || '--') + '</span></td>'
-        + '<td style="font-family:var(--mono)">' + parseFloat(p.entry_price || 0).toLocaleString() + '</td>'
-        + '<td class="' + pctCls(pnl) + '" style="font-family:var(--mono)">' + fmtPct(pnl) + '</td>'
-        + '<td style="font-size:.7rem;color:var(--muted)">' + (p.opened_at || '').slice(11, 16) + '</td>'
-        + '</tr>';
-    }}
-    el.innerHTML = '<table class="pos-table"><thead><tr>'
-      + '<th>심볼</th><th>데스크</th><th>진입가</th><th>미실현</th><th>시간</th>'
-      + '</tr></thead><tbody>' + rows + '</tbody></table>';
-  }}
-  function renderTrades(closed) {{
-    var el = document.getElementById('trades-body');
-    if (!closed || !closed.length) {{
-      el.innerHTML = '<div class="empty-msg">청산 내역 없음</div>';
-      return;
-    }}
-    var rows = '';
-    var items = closed.slice(0, 6);
-    for (var i = 0; i < items.length; i++) {{
-      var t = items[i];
-      var pnl = parseFloat(t.pnl_pct) || 0;
-      rows += '<tr>'
-        + '<td><span class="symbol-cell">' + (t.symbol || '--') + '</span></td>'
-        + '<td><span class="desk-chip">' + (t.desk || '--') + '</span></td>'
-        + '<td class="' + pctCls(pnl) + '" style="font-family:var(--mono)">' + fmtPct(pnl) + '</td>'
-        + '<td style="font-size:.7rem;color:var(--muted)">' + (t.closed_reason || '--') + '</td>'
-        + '<td style="font-size:.7rem;color:var(--muted)">' + (t.closed_at || '').slice(11, 16) + '</td>'
-        + '</tr>';
-    }}
-    el.innerHTML = '<table class="pos-table"><thead><tr>'
-      + '<th>심볼</th><th>데스크</th><th>손익</th><th>사유</th><th>시간</th>'
-      + '</tr></thead><tbody>' + rows + '</tbody></table>';
-  }}
-  function renderInsights(runs) {{
-    var el = document.getElementById('insights-body');
-    if (!runs || !runs.length) {{
-      el.innerHTML = '<div class="empty-msg">에이전트 데이터 없음</div>';
-      return;
-    }}
-    var html = '';
-    for (var i = 0; i < runs.length; i++) {{
-      var a = runs[i];
-      var sc = Math.round((parseFloat(a.score) || 0) * 100);
-      var col = sc >= 75 ? 'var(--green)' : sc >= 55 ? 'var(--blue)' : 'var(--red)';
-      var cls = sc >= 75 ? 'tone-ok' : sc >= 55 ? 'tone-blue' : sc < 35 ? 'tone-danger' : 'tone-muted';
-      html += '<div class="insight-row">'
-        + '<span class="ins-name">' + (a.agent_name || a.name || '--') + '</span>'
-        + '<div class="ins-bar"><div class="ins-bar-fill" style="width:' + sc + '%;background:' + col + '"></div></div>'
-        + '<span class="ins-score ' + cls + '">' + sc + '</span>'
-        + '</div>';
-    }}
-    el.innerHTML = html;
-  }}
-  function renderJournal(notes) {{
-    var el = document.getElementById('journal-body');
-    if (!notes || !notes.length) {{
-      el.innerHTML = '<div class="empty-msg">저널 없음</div>';
-      return;
-    }}
-    var html = '';
-    var items = notes.slice(0, 8);
-    for (var i = 0; i < items.length; i++) {{
-      var note = items[i];
-      var txt = typeof note === 'string' ? note : JSON.stringify(note);
-      var m = txt.match(/^(\\d\\d:\\d\\d)/);
-      if (m) {{
-        html += '<div class="journal-row"><span class="journal-time">' + m[1] + '</span>' + txt.slice(m[1].length).trim() + '</div>';
-      }} else {{
-        html += '<div class="journal-row">' + txt + '</div>';
-      }}
-    }}
-    el.innerHTML = html;
-  }}
-  async function loadData() {{
-    try {{
-      var r1 = await fetch('/dashboard-data');
-      var r2 = await fetch('/health');
-      var data = await r1.json();
-      var st = data.state || {{}};
-      var dash = data.dashboard || {{}};
-      var perf = dash.performance || {{}};
-      var cap = dash.capital || {{}};
-      var exp = dash.exposure || {{}};
-      var ops = dash.ops_flags || {{}};
-      var pill = document.getElementById('status-pill');
-      pill.textContent = st.regime || 'LIVE';
-      pill.className = 'status-pill';
-      var t = (st.updated_at || '').slice(11, 16);
-      document.getElementById('update-time').textContent = t || '--:--';
-      var sv = document.getElementById('ov-stance-val');
-      sv.textContent = st.stance || '--';
-      sv.className = 'ov-value ' + stanceTone(st.stance);
-      document.getElementById('ov-stance').className = 'overview-card'
-        + (st.stance === 'OFFENSE' ? ' tone-ok' : st.stance === 'DEFENSE' ? ' tone-risk' : '');
-      var rv = document.getElementById('ov-regime-val');
-      rv.textContent = st.regime || '--';
-      rv.className = 'ov-value ' + regimeTone(st.regime);
-      document.getElementById('ov-regime').className = 'overview-card'
-        + (st.regime === 'TRENDING' ? ' tone-ok' : st.regime === 'STRESSED' ? ' tone-risk' : st.regime === 'RANGING' ? ' tone-warn' : '');
-      var gross = parseFloat(exp.gross_open_notional_pct || 0);
-      var evEl = document.getElementById('ov-exposure-val');
-      evEl.textContent = (gross * 100).toFixed(0) + '%';
-      evEl.className = 'ov-value ' + (gross >= 0.8 ? 'tone-warn' : 'tone-ok');
-      document.getElementById('ov-entries').textContent = exp.allow_new_entries ? '진입 허용' : '진입 차단';
-      document.getElementById('ov-exposure').className = 'overview-card' + (gross >= 0.8 ? ' tone-warn' : '');
-      var sev = ops.severity || 'stable';
-      var ovEl = document.getElementById('ov-ops-val');
-      ovEl.textContent = sev === 'stable' ? '정상' : sev === 'warning' ? '주의' : '경고';
-      ovEl.className = 'ov-value ' + (sev === 'stable' ? 'tone-ok' : sev === 'warning' ? 'tone-warn' : 'tone-danger');
-      document.getElementById('ov-ops').className = 'overview-card'
-        + (sev === 'warning' ? ' tone-warn' : sev !== 'stable' ? ' tone-risk' : '');
-      var rzEl = document.getElementById('sc-realized');
-      rzEl.textContent = fmtPct(perf.realized_pnl_pct);
-      rzEl.className = 'sc-value ' + pctCls(perf.realized_pnl_pct);
-      document.getElementById('sc-realized-krw').textContent = fmtKrw(perf.realized_pnl_krw);
-      var uzEl = document.getElementById('sc-unrealized');
-      uzEl.textContent = fmtPct(perf.unrealized_pnl_pct);
-      uzEl.className = 'sc-value ' + pctCls(perf.unrealized_pnl_pct);
-      document.getElementById('sc-unrealized-krw').textContent = fmtKrw(perf.unrealized_pnl_krw);
-      var wr = parseFloat(perf.win_rate || 0);
-      var wrEl = document.getElementById('sc-winrate');
-      wrEl.textContent = wr.toFixed(1) + '%';
-      wrEl.className = 'sc-value ' + (wr >= 55 ? 'pos' : wr < 40 ? 'neg' : 'neutral');
-      document.getElementById('sc-trades').textContent =
-        (perf.wins || 0) + '승 ' + (perf.losses || 0) + '패 · 기대 ' + fmtPct(perf.expectancy_pct);
-      document.getElementById('sc-capital').textContent =
-        (parseInt(cap.total_krw) || 0).toLocaleString('ko-KR') + '원';
-      document.getElementById('sc-capital-base').textContent =
-        '기준 ' + (parseInt(cap.base_krw) || 0).toLocaleString('ko-KR') + '원';
-      renderEquity(dash.equity_curve || []);
-      renderDesks(dash.desk_status || {{}});
-      renderPositions(dash.open_positions || []);
-      renderTrades(dash.closed_positions || []);
-      document.getElementById('insight-score').textContent = dash.insight_score || '--';
-      renderInsights(st.agent_runs || []);
-      renderJournal(st.notes || []);
-    }} catch (err) {{
-      var pill2 = document.getElementById('status-pill');
-      pill2.textContent = '오류: ' + err.message;
-      pill2.className = 'status-pill error';
-    }}
-  }}
-  async function runCycle() {{
-    var btn = document.getElementById('cycle-btn');
-    btn.disabled = true;
-    btn.textContent = '실행 중...';
-    try {{
-      await fetch('/cycle', {{ method: 'POST' }});
-      await loadData();
-    }} catch (e) {{
-      console.error(e);
-    }} finally {{
-      btn.disabled = false;
-      btn.textContent = '사이클 실행';
-    }}
-  }}
-  setInterval(function() {{ loadData().catch(function() {{}}); }}, 20000);
-  loadData().catch(function() {{
-    document.getElementById('status-pill').textContent = '연결 실패';
-    document.getElementById('status-pill').className = 'status-pill error';
-  }});
+  function fmtPct(v){var n=parseFloat(v)||0;return (n>=0?'+':'')+n.toFixed(2)+'%';}
+  function fmtKrw(v,sign){var n=parseInt(v)||0;var prefix=sign?(n>=0?'+':''):'';return prefix+'KRW '+Math.abs(n).toLocaleString('ko-KR');}
+  function pctCls(v){var n=parseFloat(v)||0;return n>0?'pos':n<0?'neg':'neutral';}
+  function toneClass(label){var txt=String(label||'').toLowerCase(); if(txt.indexOf('blocked')>=0||txt.indexOf('block')>=0||txt.indexOf('stale')>=0) return 'tone-risk'; if(txt.indexOf('warning')>=0||txt.indexOf('warn')>=0||txt.indexOf('partial')>=0) return 'tone-warn'; if(txt.indexOf('ready')>=0||txt.indexOf('pass')>=0||txt.indexOf('stable')>=0||txt.indexOf('trend')>=0||txt.indexOf('offense')>=0) return 'tone-ok'; if(txt.indexOf('stress')>=0) return 'tone-danger'; if(txt.indexOf('range')>=0||txt.indexOf('defense')>=0) return 'tone-warn'; return 'tone-blue';}
+  function actionCls(a){var s=String(a||'').toLowerCase(); if(!s) return 'watch'; if(s.indexOf('attack')>=0||s.indexOf('buy')>=0||s.indexOf('probe_long')>=0) return 'buy'; if(s.indexOf('reduce')>=0||s.indexOf('sell')>=0||s.indexOf('preservation')>=0) return 'sell'; if(s.indexOf('probe')>=0||s.indexOf('selective')>=0) return 'probe'; return 'watch';}
+  function renderAccess(access){var grid=document.getElementById('access-grid'); var cards=[]; if(access&&access.local_url){cards.push('<div class=\"access-card\"><div class=\"access-label\">Local URL</div><div class=\"access-url\">'+access.local_url+'</div></div>');} if(access&&access.lan_url){cards.push('<div class=\"access-card\"><div class=\"access-label\">LAN URL</div><div class=\"access-url\">'+access.lan_url+'</div></div>');} if(access&&access.public_url){cards.push('<div class=\"access-card\"><div class=\"access-label\">'+(access.public_label||'Public URL')+'</div><div class=\"access-url\">'+access.public_url+'</div></div>');} if(!cards.length){cards.push('<div class=\"access-card\"><div class=\"access-label\">Access</div><div class=\"access-url\">No access URL reported</div></div>');} grid.innerHTML=cards.join('');}
+  function renderPrioritySignals(readiness,summary,brokerHealth,blockSummary){var signals=[]; var overall=String((readiness||{}).overall||''); if(blockSummary&&blockSummary.blocked){signals.push({text:String(blockSummary.detail||blockSummary.headline||'Execution blocked'),tone:'tone-risk'});} else if(overall==='blocked') signals.push({text:'Execution blocked by readiness checks',tone:'tone-risk'}); if(Number((summary||{}).stale_count||0)>0) signals.push({text:'Stale live orders: '+summary.stale_count,tone:'tone-risk'}); if(Number((summary||{}).partial_count||0)>0) signals.push({text:'Partial fills pending review: '+summary.partial_count,tone:'tone-warn'}); if(Number((summary||{}).pending_count||0)>0) signals.push({text:'Pending live orders: '+summary.pending_count,tone:'tone-warn'}); if((brokerHealth||{}).upbit&&brokerHealth.upbit.configured===false&&(brokerHealth||{}).kis&&brokerHealth.kis.configured===false) signals.push({text:'No live broker credentials configured',tone:'tone-muted'}); if(!signals.length) signals.push({text:'Execution path looks stable',tone:'tone-ok'}); document.getElementById('priority-wrap').innerHTML=signals.map(function(item){return '<div class=\"priority-chip '+item.tone+'\">'+item.text+'</div>';}).join(''); document.getElementById('signal-panel').className='signal-panel '+(signals[0].tone||'tone-blue');}
+  function renderOverview(state,dash,readiness){var exposure=((dash||{}).exposure||{}); var ops=((dash||{}).ops_flags||{}); var stance=String((state||{}).stance||'--'); var regime=String((state||{}).regime||'--'); var gross=Number(exposure.gross_open_notional_pct||0); var overall=String((readiness||{}).overall||'caution'); document.getElementById('ov-stance-val').textContent=stance; document.getElementById('ov-regime-val').textContent=regime; document.getElementById('ov-exposure-val').textContent=Math.round(gross*100)+'%'; document.getElementById('ov-entries').textContent=exposure.allow_new_entries?'new entries allowed':'new entries blocked'; document.getElementById('ov-ops-val').textContent=String(ops.severity||overall).toUpperCase(); document.getElementById('ov-stance').className='overview-card '+toneClass(stance); document.getElementById('ov-regime').className='overview-card '+toneClass(regime); document.getElementById('ov-exposure').className='overview-card '+(gross>=0.8?'tone-warn':'tone-ok'); document.getElementById('ov-ops').className='overview-card '+toneClass(ops.severity||overall); document.getElementById('ov-stance-val').className='ov-value '+toneClass(stance); document.getElementById('ov-regime-val').className='ov-value '+toneClass(regime); document.getElementById('ov-exposure-val').className='ov-value '+(gross>=0.8?'tone-warn':'tone-ok'); document.getElementById('ov-ops-val').className='ov-value '+toneClass(ops.severity||overall);}
+  function renderMetrics(dash,readiness){var perf=(dash||{}).performance||{}; var cap=(dash||{}).capital||{}; var exec=(dash||{}).execution_summary||{}; document.getElementById('metric-live').textContent=String(exec.live_count||0); document.getElementById('metric-pending').textContent=String(exec.pending_count||0); document.getElementById('metric-partial').textContent=String(exec.partial_count||0); document.getElementById('metric-stale').textContent=String(exec.stale_count||0); document.getElementById('metric-pending').className='metric-value '+((exec.pending_count||0)>0?'tone-warn':'tone-ok'); document.getElementById('metric-partial').className='metric-value '+((exec.partial_count||0)>0?'tone-warn':'tone-ok'); document.getElementById('metric-stale').className='metric-value '+((exec.stale_count||0)>0?'tone-risk':'tone-ok'); document.getElementById('exec-mode').textContent=(readiness&&readiness.execution_mode)||'paper'; document.getElementById('readiness-overall').textContent=String((readiness||{}).overall||'caution').toUpperCase(); document.getElementById('readiness-overall').className='panel-value '+toneClass((readiness||{}).overall); document.getElementById('sc-realized').textContent=fmtPct(perf.realized_pnl_pct); document.getElementById('sc-realized').className='metric-value '+pctCls(perf.realized_pnl_pct); document.getElementById('sc-realized-krw').textContent=fmtKrw(perf.realized_pnl_krw,true); document.getElementById('sc-unrealized').textContent=fmtPct(perf.unrealized_pnl_pct); document.getElementById('sc-unrealized').className='metric-value '+pctCls(perf.unrealized_pnl_pct); document.getElementById('sc-unrealized-krw').textContent=fmtKrw(perf.unrealized_pnl_krw,true); var winRate=Number(perf.win_rate||0); document.getElementById('sc-winrate').textContent=winRate.toFixed(1)+'%'; document.getElementById('sc-winrate').className='metric-value '+(winRate>=55?'pos':winRate<40?'neg':'neutral'); document.getElementById('sc-trades').textContent=String(perf.wins||0)+' wins / '+String(perf.losses||0)+' losses / expectancy '+fmtPct(perf.expectancy_pct); document.getElementById('sc-capital').textContent=fmtKrw(cap.total_krw||0,false); document.getElementById('sc-capital-base').textContent='base '+fmtKrw(cap.base_krw||0,false); document.getElementById('performance-caption').textContent='realized '+fmtPct(perf.realized_pnl_pct)+' / unrealized '+fmtPct(perf.unrealized_pnl_pct);}
+  function renderReadiness(readiness){var list=((readiness||{}).checklist||[]).slice(0,8); if(!list.length){document.getElementById('readiness-list').innerHTML='<div class=\"empty-msg\">No readiness data</div>'; return;} document.getElementById('readiness-list').innerHTML=list.map(function(item){return '<div class=\"check-item\"><div class=\"check-main\"><div class=\"check-title\">'+(item.label||'--')+'</div><div class=\"check-detail\">'+(item.detail||'')+'</div></div><div class=\"state-badge '+(item.status||'warn')+'\">'+String(item.status||'warn').toUpperCase()+'</div></div>';}).join(''); document.getElementById('readiness-panel').className='signal-panel '+toneClass((readiness||{}).overall);}
+  function renderBrokerHealth(health){var items=['upbit','kis']; var html=''; for(var i=0;i<items.length;i++){var key=items[i]; var item=(health||{})[key]||{}; var tone=item.configured===false?'tone-muted':item.balances_ok?'tone-ok':'tone-warn'; var stateText=item.configured===false?'not configured':item.balances_ok?'balances ok':'needs check'; var detail='enabled='+String(!!item.enabled)+' / count='+String(item.balances_count||0)+(item.latest_order_state?' / latest='+String(item.latest_order_state.request_status||'n/a'):'')+(item.latest_order_error?' / '+item.latest_order_error:''); html+='<div class=\"broker-card '+tone+'\"><div class=\"broker-main\"><div class=\"broker-title\">'+key.toUpperCase()+'</div><div class=\"broker-detail\">'+detail+'</div></div><div class=\"state-badge '+(item.configured===false?'warn':item.balances_ok?'pass':'warn')+'\">'+stateText+'</div></div>';} document.getElementById('broker-list').innerHTML=html||'<div class=\"empty-msg\">No broker data</div>'; document.getElementById('broker-caption').textContent='upbit / kis';}
+  function renderDesks(desks){var items=[['CRYPTO','crypto'],['KR','korea'],['US','us']]; var html=''; for(var i=0;i<items.length;i++){var label=items[i][0], key=items[i][1], item=(desks||{})[key]||{}; html+='<div class=\"desk-row\"><div class=\"desk-tag\">'+label+'</div><div class=\"desk-main\"><div class=\"desk-title\">'+(item.title||key.toUpperCase())+'</div><div class=\"desk-detail\">'+(item.focus||'No active plan')+'</div></div><div class=\"action-pill '+actionCls(item.action)+'\">'+(item.action||'watch')+'</div><div class=\"desk-size\">'+(item.size||'0.00x')+'</div></div>';} document.getElementById('desk-rows').innerHTML=html; document.getElementById('desk-caption').textContent=String(items.length)+' desks monitored';}
+  function renderPositions(pos){if(!pos||!pos.length){document.getElementById('pos-count').textContent='0'; document.getElementById('positions-body').innerHTML='<div class=\"empty-msg\">No open positions</div>'; return;} document.getElementById('pos-count').textContent=String(pos.length); var rows=''; for(var i=0;i<pos.length;i++){var p=pos[i], pnl=Number(p.unrealized_pnl_pct||0); rows+='<tr><td><span class=\"symbol-cell\">'+(p.symbol||'--')+'</span></td><td><span class=\"desk-chip\">'+(p.desk||'--')+'</span></td><td>'+Number(p.entry_price||0).toLocaleString('ko-KR')+'</td><td class=\"'+pctCls(pnl)+'\">'+fmtPct(pnl)+'</td><td>'+String(p.opened_at||'').slice(11,16)+'</td></tr>';} document.getElementById('positions-body').innerHTML='<table class=\"pos-table\"><thead><tr><th>Symbol</th><th>Desk</th><th>Entry</th><th>Unrealized</th><th>Opened</th></tr></thead><tbody>'+rows+'</tbody></table>';}
+  function renderTrades(closed){var items=(closed||[]).slice(0,6); if(!items.length){document.getElementById('trades-body').innerHTML='<div class=\"empty-msg\">No closed trades yet</div>'; return;} var rows=''; for(var i=0;i<items.length;i++){var t=items[i], pnl=Number(t.pnl_pct||0); rows+='<tr><td><span class=\"symbol-cell\">'+(t.symbol||'--')+'</span></td><td><span class=\"desk-chip\">'+(t.desk||'--')+'</span></td><td class=\"'+pctCls(pnl)+'\">'+fmtPct(pnl)+'</td><td>'+(t.closed_reason||'--')+'</td><td>'+String(t.closed_at||'').slice(11,16)+'</td></tr>';} document.getElementById('trades-body').innerHTML='<table class=\"pos-table\"><thead><tr><th>Symbol</th><th>Desk</th><th>PnL</th><th>Reason</th><th>Closed</th></tr></thead><tbody>'+rows+'</tbody></table>';}
+  function renderInsights(runs){if(!runs||!runs.length){document.getElementById('insights-body').innerHTML='<div class=\"empty-msg\">No agent insight yet</div>'; return;} document.getElementById('insights-body').innerHTML=runs.map(function(item){var score=Math.round((Number(item.score)||0)*100); var color=score>=75?'var(--green)':score>=55?'var(--blue)':'var(--red)'; return '<div class=\"insight-row\"><div class=\"ins-name\">'+(item.agent_name||item.name||'--')+'</div><div class=\"ins-bar\"><div class=\"ins-bar-fill\" style=\"width:'+score+'%;background:'+color+'\"></div></div><div class=\"ins-score '+(score>=75?'tone-ok':score>=55?'tone-blue':'tone-danger')+'\">'+score+'</div></div>';}).join('');}
+  function renderJournal(notes){var items=(notes||[]).slice(0,8); if(!items.length){document.getElementById('journal-body').innerHTML='<div class=\"empty-msg\">No notes yet</div>'; return;} document.getElementById('journal-body').innerHTML=items.map(function(note){var txt=typeof note==='string'?note:JSON.stringify(note); var match=txt.match(/^(\\d\\d:\\d\\d)/); return match?'<div class=\"journal-row\"><span class=\"journal-time\">'+match[1]+'</span>'+txt.slice(match[1].length).trim()+'</div>':'<div class=\"journal-row\">'+txt+'</div>';}).join('');}
+  function renderEquity(points){var svg=document.getElementById('equity-svg'); if(!points||points.length<2){svg.innerHTML='<text x=\"50%\" y=\"50%\" text-anchor=\"middle\" fill=\"#97aabf\" font-size=\"12\">No equity data</text>'; return;} var width=400,height=170,pad=24,values=points.map(function(point){return Number(point.equity||0);}),min=Math.min.apply(null,values),max=Math.max.apply(null,values),range=max-min||1; var x=function(i){return pad+(i/(points.length-1))*(width-pad*2);}; var y=function(val){return pad+((max-val)/range)*(height-pad*2);}; var coords=points.map(function(point,i){return x(i).toFixed(1)+','+y(Number(point.equity||0)).toFixed(1);}).join(' '); var last=Number(points[points.length-1].equity||0), color=last>=100?'#67e8a5':'#ff7c7c', fill=x(0).toFixed(1)+','+height+' '+coords+' '+x(points.length-1).toFixed(1)+','+height; svg.innerHTML='<defs><linearGradient id=\"equity-grad\" x1=\"0\" y1=\"0\" x2=\"0\" y2=\"1\"><stop offset=\"0%\" stop-color=\"'+color+'\" stop-opacity=\".30\"/><stop offset=\"100%\" stop-color=\"'+color+'\" stop-opacity=\"0\"/></linearGradient></defs><polygon points=\"'+fill+'\" fill=\"url(#equity-grad)\"/><polyline points=\"'+coords+'\" fill=\"none\" stroke=\"'+color+'\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/><circle cx=\"'+x(points.length-1).toFixed(1)+'\" cy=\"'+y(last).toFixed(1)+'\" r=\"4.5\" fill=\"'+color+'\"/>';}
+  async function loadData(){try{var dashboardRes=await fetch('/dashboard-data'); var healthRes=await fetch('/health'); var data=await dashboardRes.json(); var health=await healthRes.json(); var state=data.state||{}, dash=data.dashboard||{}, readiness=data.live_readiness_checklist||{}, brokerHealth=data.broker_live_health||{}, exec=dash.execution_summary||{}, ops=dash.ops_flags||{}, blockSummary=((dash.exposure||{}).entry_block_summary)||((readiness||{}).entry_block_summary)||{}; var statusText=readiness.overall||state.regime||'live'; document.getElementById('status-pill').textContent=String(statusText).toUpperCase(); document.getElementById('status-pill').className='hero-pill '+toneClass(statusText); document.getElementById('hero-summary').textContent=blockSummary.blocked?String(blockSummary.detail||blockSummary.headline||'Entries blocked'):'Mode '+String(readiness.execution_mode||'paper')+' / live orders '+String(exec.live_count||0)+' / open positions '+String((dash.open_positions||[]).length); document.getElementById('update-time').textContent=String(state.updated_at||'--').slice(11,16)||'--:--'; document.getElementById('next-run').textContent=String(((dash.runtime_profile||{}).next_run||'--')).slice(11,16)||'--'; renderAccess((health||{}).access||{}); renderOverview(state,dash,readiness); renderPrioritySignals(readiness,exec,brokerHealth,blockSummary); renderMetrics(dash,readiness); renderReadiness(readiness); renderBrokerHealth(brokerHealth); renderDesks(dash.desk_status||{}); renderPositions(dash.open_positions||[]); renderTrades(dash.closed_positions||[]); document.getElementById('insight-score').textContent=String(dash.insight_score||'--'); renderInsights(state.agent_runs||[]); renderJournal(state.notes||[]); renderEquity(dash.equity_curve||[]); document.getElementById('ov-ops-sub').textContent=blockSummary.blocked?String(blockSummary.detail||'risk gate closed'):String(ops.severity||'stable')+' / '+String((ops.items||[]).slice(0,2).join(' | ')||'no active ops note');}catch(err){document.getElementById('status-pill').textContent='ERROR'; document.getElementById('status-pill').className='hero-pill tone-danger'; document.getElementById('hero-summary').textContent='Dashboard refresh failed: '+err.message;}}
+  async function runCycle(){var btn=document.getElementById('cycle-btn'); btn.disabled=true; btn.textContent='Running...'; try{await fetch('/cycle',{method:'POST'}); await loadData();}catch(err){console.error(err);}finally{btn.disabled=false; btn.textContent='Run Cycle';}}
+  setInterval(function(){loadData().catch(function(){});},20000); loadData().catch(function(){});
 </script>
 </body>
 </html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def root() -> str:
+    return _embedded_dashboard_html()
 
 
 if __name__ == "__main__":
