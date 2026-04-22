@@ -289,6 +289,42 @@ class ExecutionAgent(BaseAgent):
             f"history wins={wins} losses={losses} weighted_pnl={round(weighted_pnl, 2)}% penalty={round(penalty, 2)}",
         )
 
+    def _symbol_edge_state(self, desk: str, symbol: str) -> dict:
+        if not symbol:
+            return {"score": 0.0, "tone": "neutral", "size_multiplier": 1.0, "entry_allowed": True}
+        symbol_history = [
+            item
+            for item in self.closed_positions[:14]
+            if item.get("desk") == desk and item.get("symbol") == symbol
+        ]
+        if not symbol_history:
+            return {"score": 0.0, "tone": "neutral", "size_multiplier": 1.0, "entry_allowed": True}
+
+        recent_slice = symbol_history[:5]
+        weighted_pnl = 0.0
+        wins = 0
+        losses = 0
+        stop_like = 0
+        for idx, item in enumerate(recent_slice):
+            weight = max(1.0 - (idx * 0.16), 0.4)
+            pnl = float(item.get("pnl_pct", 0.0) or 0.0)
+            weighted_pnl += pnl * weight
+            if pnl > 0:
+                wins += 1
+            elif pnl < 0:
+                losses += 1
+            if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}:
+                stop_like += 1
+
+        score = round((wins * 0.55) - (losses * 0.7) + (weighted_pnl * 0.18) - (stop_like * 0.35), 2)
+        if score >= 0.7:
+            return {"score": score, "tone": "hot", "size_multiplier": 1.08, "entry_allowed": True}
+        if score <= -0.9 or stop_like >= 2:
+            return {"score": score, "tone": "cold", "size_multiplier": 0.7, "entry_allowed": False}
+        if score <= -0.35:
+            return {"score": score, "tone": "cool", "size_multiplier": 0.82, "entry_allowed": True}
+        return {"score": score, "tone": "neutral", "size_multiplier": 1.0, "entry_allowed": True}
+
     def _pick_symbol(self, desk: str, plan: dict) -> tuple[str, list[str]]:
         notes: list[str] = []
         candidates = []
@@ -326,8 +362,14 @@ class ExecutionAgent(BaseAgent):
         base_size = str(plan.get("size", "0.00x"))
         symbol, rotation_notes = self._pick_symbol(desk, plan)
         desk_offense = self._desk_offense_state(desk)
+        symbol_edge = self._symbol_edge_state(desk, symbol)
         base_notional = self._size_to_notional(base_size)
-        offense_scaled_base = round(base_notional * float(desk_offense.get("size_multiplier", 1.0) or 1.0), 2)
+        offense_scaled_base = round(
+            base_notional
+            * float(desk_offense.get("size_multiplier", 1.0) or 1.0)
+            * float(symbol_edge.get("size_multiplier", 1.0) or 1.0),
+            2,
+        )
         risk_scaled_notional = round(offense_scaled_base * max(min(self.risk_budget, 1.0), 0.0), 2)
         desk_stop_pressure = self._desk_stop_pressure(desk)
         symbol_stop_pressure = self._symbol_stop_pressure(desk, symbol)
@@ -368,6 +410,7 @@ class ExecutionAgent(BaseAgent):
         desk_performance_lock = self._desk_performance_lock(desk)
         desk_recovery_ready = self._desk_recovery_ready(desk)
         desk_offense_block = not bool(desk_offense.get("entry_allowed", True)) and action in actionable_entries
+        symbol_edge_block = not bool(symbol_edge.get("entry_allowed", True)) and action in actionable_entries
         blocked_by_stop_pressure = desk_stop_pressure == "high" and action in actionable_entries
         blocked_by_risk = not self.allow_new_entries and action in actionable_entries
         blocked_by_desk_drawdown = (desk_chronic_drawdown or desk_performance_lock) and action in actionable_entries
@@ -395,6 +438,7 @@ class ExecutionAgent(BaseAgent):
             and not desk_chronic_drawdown
             and not desk_performance_lock
             and not desk_offense_block
+            and not symbol_edge_block
             and not blocked_by_stop_pressure
             and not blocked_by_risk
             and not desk_position_cap_hit
@@ -433,6 +477,10 @@ class ExecutionAgent(BaseAgent):
             notes.append(f"{desk} desk blocked by poor desk-level performance snapshot")
         if desk_offense_block:
             notes.append(f"{desk} desk offense cooldown active, skip new entries this cycle")
+        if symbol and symbol_edge.get("tone") in {"hot", "cool", "cold"}:
+            notes.append(f"{symbol} symbol edge {symbol_edge.get('tone')} / score {symbol_edge.get('score')}")
+        if symbol_edge_block:
+            notes.append(f"{symbol} symbol edge is cold, skip re-entry this cycle")
         if desk_recovery_ready:
             notes.append(f"{desk} desk recovery conditions met, selective entries can resume")
         if desk_stop_pressure == "medium":
