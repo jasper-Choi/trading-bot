@@ -19,57 +19,57 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         return {
             "action": "capital_preservation",
             "size": "0.00x",
-            "focus": "Protect capital until stress fades",
+            "focus": "위기 해소까지 자본 보존",
             "symbol": lead_market,
-            "notes": reasons + ["stress regime blocks offensive crypto entries"],
+            "notes": reasons + ["위기 국면으로 크립토 공격적 진입 차단"],
         }
     if recent_change >= 2.6 or burst_change >= 3.0 or ema_gap >= 2.4 or (rsi_value is not None and float(rsi_value) >= 69.0):
         return {
             "action": "watchlist_only",
             "size": "0.00x",
-            "focus": f"Skip overheated crypto burst in {lead_market or 'KRW-BTC'}",
+            "focus": f"{lead_market or 'KRW-BTC'} 과열 급등 스킵",
             "symbol": lead_market,
-            "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% / ema gap {ema_gap:.2f}% / rsi {rsi_value}"],
+            "notes": reasons + [f"최근 {recent_change:.2f}% / 급등 {burst_change:.2f}% / EMA갭 {ema_gap:.2f}% / RSI {rsi_value}"],
         }
     if recent_change <= -2.2 or burst_change <= -2.8:
         return {
             "action": "capital_preservation",
             "size": "0.00x",
-            "focus": "Crypto structure is weakening too quickly",
+            "focus": "크립토 구조 급약화 — 자본 보존",
             "symbol": lead_market,
-            "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% indicates downside pressure"],
+            "notes": reasons + [f"최근 {recent_change:.2f}% / 급락 {burst_change:.2f}% — 하방 압력"],
         }
     offense_threshold = 0.74 if regime == "RANGING" else 0.7
     if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 2.0 and weight_support:
         return {
             "action": "probe_longs",
             "size": "0.50x" if stance == "BALANCED" else "0.65x",
-            "focus": f"Watch {lead_market or 'KRW-BTC'} continuation",
+            "focus": f"{lead_market or 'KRW-BTC'} 추세 지속 감시",
             "symbol": lead_market,
-            "notes": reasons + [f"offense threshold cleared at {signal_score:.2f} / ema gap {ema_gap:.2f}% / backtest weight {lead_weight:.2f}"],
+            "notes": reasons + [f"공격 임계값 달성 {signal_score:.2f} / EMA갭 {ema_gap:.2f}% / 백테스트 가중치 {lead_weight:.2f}"],
         }
     if bias == "offense" and signal_score >= max(offense_threshold - 0.03, 0.68) and stance != "DEFENSE" and lead_weight >= 0.18:
         return {
             "action": "selective_probe",
             "size": "0.30x",
-            "focus": f"Wait for cleaner crypto follow-through in {lead_market or 'KRW-BTC'}",
+            "focus": f"{lead_market or 'KRW-BTC'} 명확한 크립토 추종 대기",
             "symbol": lead_market,
-            "notes": reasons + [f"signal supportive but backtest weight still selective at {lead_weight:.2f}"],
+            "notes": reasons + [f"시그널 지지적이나 백테스트 가중치 선별적 수준 {lead_weight:.2f}"],
         }
     if bias == "defense":
         return {
             "action": "capital_preservation",
             "size": "0.00x",
-            "focus": "No fresh crypto exposure while structure is weak",
+            "focus": "구조 약화 중 신규 크립토 노출 없음",
             "symbol": lead_market,
-            "notes": reasons + ["stand aside until momentum recovers"],
+            "notes": reasons + ["모멘텀 회복까지 대기"],
         }
     return {
         "action": "watchlist_only",
         "size": "0.00x",
-        "focus": "Selective crypto tracking",
+        "focus": "선별적 크립토 감시",
         "symbol": lead_market,
-        "notes": reasons + [f"wait for stronger confirmation before probing (weight {lead_weight:.2f})"],
+        "notes": reasons + [f"더 강한 확인 신호 대기 (가중치 {lead_weight:.2f})"],
     }
 
 
@@ -97,73 +97,73 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         return {
             "action": "pre_market_watch",
             "size": "0.00x",
-            "focus": "Korea desk idle outside local market hours",
+            "focus": "국내 시장 외 시간 — 한국주식 데스크 대기",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
-            "notes": ["review leader rotation after next KOSDAQ open"],
+            "notes": ["다음 코스닥 개장 후 리더 종목 로테이션 검토"],
         }
     if regime == "STRESSED":
         return {
             "action": "capital_preservation",
             "size": "0.00x",
-            "focus": "No fresh KOSDAQ exposure under stressed regime",
+            "focus": "위기 국면 — 신규 코스닥 노출 없음",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
-            "notes": ["risk committee blocks new Korea entries"],
+            "notes": ["위험위원회가 신규 한국주식 진입 차단"],
         }
     if gap_candidates and (top_signal < 0.55 or top_gap >= 24.0 or top_rsi >= 74.0 or top_burst >= 10.0 or avg_volume < 3000):
         return {
             "action": "stand_by",
             "size": "0.00x",
-            "focus": f"Skip overheated or weakly confirmed leader {top_name}",
+            "focus": f"과열 또는 확인 미흡 리더 {top_name} 스킵",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": [
-                f"top candidate signal {top_signal:.2f} / gap {top_gap:.2f}% / rsi {top_rsi:.1f} / burst {top_burst:.2f}% / penalty {top_penalty:.2f}",
-                "skip overstretched opening move until structure stabilizes",
+                f"상위 후보 시그널 {top_signal:.2f} / 갭 {top_gap:.2f}% / RSI {top_rsi:.1f} / 급등 {top_burst:.2f}% / 페널티 {top_penalty:.2f}",
+                "구조 안정까지 과도한 시가 급등 스킵",
             ],
         }
     if opening_window and active_gap_count >= 3 and quality_score >= 0.72 and avg_gap >= 3.2 and avg_volume >= 20000 and avg_signal >= 0.64 and top_candidate_score >= 0.74 and top_signal_bias != "neutral" and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",
             "size": "0.50x" if stance == "BALANCED" else "0.70x",
-            "focus": f"Track leader {top_name}",
+            "focus": f"리더 {top_name} 추적",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": [
-                f"{active_gap_count} gap candidates with liquidity support",
-                f"quality score {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                f"유동성 지지 갭 후보 {active_gap_count}종목",
+                f"품질점수 {quality_score:.2f} / 상위후보 {top_candidate_score:.2f} / 평균갭 {avg_gap:.2f}% / 평균거래량 {int(avg_volume):,} / 평균시그널 {avg_signal:.2f}",
             ],
         }
     if active_gap_count >= 2 and quality_score >= 0.58 and avg_signal >= 0.52 and avg_volume >= 8000 and top_candidate_score >= 0.62:
         return {
             "action": "selective_probe",
             "size": "0.35x",
-            "focus": f"Wait for confirmation in {top_name}" if opening_window else f"Late confirmation only in {top_name}",
+            "focus": f"{top_name} 확인 대기" if opening_window else f"{top_name} 장중 후행 확인만",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": [
-                f"{active_gap_count} candidate(s) worth monitoring",
-                f"quality score {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
-                "opening window selective probe" if opening_window else "mid-session selective only",
+                f"모니터링 가치 후보 {active_gap_count}종목",
+                f"품질점수 {quality_score:.2f} / 상위후보 {top_candidate_score:.2f} / 평균갭 {avg_gap:.2f}% / 평균거래량 {int(avg_volume):,} / 평균시그널 {avg_signal:.2f}",
+                "시가 윈도우 선별 탐색" if opening_window else "장중 선별 탐색만",
             ],
         }
     if mid_session:
         return {
             "action": "stand_by",
             "size": "0.00x",
-            "focus": "No late-session Korea breakout setup worth chasing",
+            "focus": "추격할 만한 장후반 한국주식 돌파 없음",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
-            "notes": ["skip mediocre midday continuation and preserve risk budget"],
+            "notes": ["평범한 장중 추종 스킵 — 위험예산 보존"],
         }
     return {
         "action": "stand_by",
         "size": "0.00x",
-        "focus": "No quality opening-drive candidate right now",
+        "focus": "현재 시가 공략 품질 후보 없음",
         "symbol": top_ticker,
         "candidate_symbols": candidate_symbols,
-        "notes": [f"skip weak gaps and preserve attention (quality {quality_score:.2f} / signal {avg_signal:.2f})"],
+        "notes": [f"약한 갭 스킵 — 집중력 보존 (품질 {quality_score:.2f} / 시그널 {avg_signal:.2f})"],
     }
 
 
@@ -183,51 +183,51 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
         return {
             "action": "pre_market_watch",
             "size": "0.00x",
-            "focus": "U.S. desk idle outside market window",
+            "focus": "시장 윈도우 외 — 미국주식 데스크 대기",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
-            "notes": ["review U.S. core leaders during premarket or regular session"],
+            "notes": ["프리마켓 또는 정규 세션 중 미국 핵심 리더 검토"],
         }
     if session.get("us_premarket") and not session.get("us_regular"):
         return {
             "action": "pre_market_watch",
             "size": "0.00x",
-            "focus": f"Premarket watch only for {top_ticker or 'U.S. leaders'}",
+            "focus": f"{top_ticker or '미국 리더'} 장전 감시만",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
-            "notes": ["wait for regular-session confirmation before any U.S. entry"],
+            "notes": ["미국 진입 전 정규 세션 확인 대기"],
         }
     if regime == "STRESSED":
         return {
             "action": "capital_preservation",
             "size": "0.00x",
-            "focus": "No fresh U.S. exposure under stressed regime",
+            "focus": "위기 국면 — 신규 미국주식 노출 없음",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
-            "notes": ["risk committee blocks new U.S. entries"],
+            "notes": ["위험위원회가 신규 미국주식 진입 차단"],
         }
     if leaders and (top_signal < 0.56 or top_change >= 8.5):
         return {
             "action": "stand_by",
             "size": "0.00x",
-            "focus": f"Skip overheated or weakly confirmed U.S. leader {top_ticker}",
+            "focus": f"과열 또는 확인 미흡 미국 리더 {top_ticker} 스킵",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": [
-                f"top candidate signal {top_signal:.2f} / day change {top_change:.2f}%",
-                "wait for a cleaner U.S. follow-through setup",
+                f"상위 후보 시그널 {top_signal:.2f} / 일간변동 {top_change:.2f}%",
+                "더 깔끔한 미국 추종 셋업 대기",
             ],
         }
     if quality_score < 0.72 or avg_signal < 0.62 or active_us_count < 3 or avg_change < 0.35:
         return {
             "action": "stand_by",
             "size": "0.00x",
-            "focus": "U.S. follow-through quality is not strong enough",
+            "focus": "미국주식 추종 품질 부족",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": [
-                f"quality {quality_score:.2f} / active leaders {active_us_count} / avg change {avg_change:.2f}% / avg signal {avg_signal:.2f}",
-                "require stronger regular-session breadth before probing U.S. longs",
+                f"품질 {quality_score:.2f} / 활성 리더 {active_us_count} / 평균변동 {avg_change:.2f}% / 평균시그널 {avg_signal:.2f}",
+                "미국 롱 탐색 전 강한 정규 세션 폭 필요",
             ],
         }
 
@@ -235,31 +235,31 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
         return {
             "action": "probe_longs",
             "size": "0.25x" if stance == "BALANCED" else "0.40x",
-            "focus": f"Follow U.S. leader {top_ticker}",
+            "focus": f"미국 리더 {top_ticker} 추종",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": [
-                f"{active_us_count} U.S. leaders trading firm",
-                f"quality score {quality_score:.2f} / avg change {avg_change:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                f"미국 리더 {active_us_count}종목 강세",
+                f"품질점수 {quality_score:.2f} / 평균변동 {avg_change:.2f}% / 평균거래량 {int(avg_volume):,} / 평균시그널 {avg_signal:.2f}",
             ],
         }
     if active_us_count >= 3 and quality_score >= 0.7 and avg_signal >= 0.6:
         return {
             "action": "selective_probe",
             "size": "0.15x",
-            "focus": f"Wait for follow-through in {top_ticker}",
+            "focus": f"{top_ticker} 추종 대기",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": [
-                f"{active_us_count} U.S. candidates worth monitoring",
-                f"quality score {quality_score:.2f} / avg change {avg_change:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                f"모니터링 가치 미국 후보 {active_us_count}종목",
+                f"품질점수 {quality_score:.2f} / 평균변동 {avg_change:.2f}% / 평균거래량 {int(avg_volume):,} / 평균시그널 {avg_signal:.2f}",
             ],
         }
     return {
         "action": "stand_by",
         "size": "0.00x",
-        "focus": "No quality U.S. leader setup right now",
+        "focus": "현재 품질 미국 리더 셋업 없음",
         "symbol": top_ticker,
         "candidate_symbols": candidate_symbols,
-        "notes": [f"skip weak U.S. follow-through (quality {quality_score:.2f} / signal {avg_signal:.2f})"],
+        "notes": [f"약한 미국 추종 스킵 (품질 {quality_score:.2f} / 시그널 {avg_signal:.2f})"],
     }
