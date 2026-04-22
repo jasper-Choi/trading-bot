@@ -11,20 +11,24 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     ema_gap = float(payload.get("ema_gap_pct", 0.0) or 0.0)
     rsi_value = payload.get("rsi")
     reasons = payload.get("reasons", [])
+    backtest_weights = payload.get("backtest_weights", {}) or {}
+    lead_market = payload.get("lead_market", "")
+    lead_weight = float(backtest_weights.get(lead_market, 0.0) or 0.0)
+    weight_support = lead_weight >= 0.28
     if regime == "STRESSED":
         return {
             "action": "capital_preservation",
             "size": "0.00x",
             "focus": "Protect capital until stress fades",
-            "symbol": payload.get("lead_market", ""),
+            "symbol": lead_market,
             "notes": reasons + ["stress regime blocks offensive crypto entries"],
         }
     if recent_change >= 2.6 or burst_change >= 3.0 or ema_gap >= 2.4 or (rsi_value is not None and float(rsi_value) >= 69.0):
         return {
             "action": "watchlist_only",
             "size": "0.00x",
-            "focus": f"Skip overheated crypto burst in {payload.get('lead_market', 'KRW-BTC')}",
-            "symbol": payload.get("lead_market", ""),
+            "focus": f"Skip overheated crypto burst in {lead_market or 'KRW-BTC'}",
+            "symbol": lead_market,
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% / ema gap {ema_gap:.2f}% / rsi {rsi_value}"],
         }
     if recent_change <= -2.2 or burst_change <= -2.8:
@@ -32,32 +36,40 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "action": "capital_preservation",
             "size": "0.00x",
             "focus": "Crypto structure is weakening too quickly",
-            "symbol": payload.get("lead_market", ""),
+            "symbol": lead_market,
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% indicates downside pressure"],
         }
     offense_threshold = 0.74 if regime == "RANGING" else 0.7
-    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 2.0:
+    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 2.0 and weight_support:
         return {
             "action": "probe_longs",
-            "size": "0.45x" if stance == "BALANCED" else "0.60x",
-            "focus": f"Watch {payload.get('lead_market', 'KRW-BTC')} continuation",
-            "symbol": payload.get("lead_market", ""),
-            "notes": reasons + [f"offense threshold cleared at {signal_score:.2f} / ema gap {ema_gap:.2f}%"],
+            "size": "0.50x" if stance == "BALANCED" else "0.65x",
+            "focus": f"Watch {lead_market or 'KRW-BTC'} continuation",
+            "symbol": lead_market,
+            "notes": reasons + [f"offense threshold cleared at {signal_score:.2f} / ema gap {ema_gap:.2f}% / backtest weight {lead_weight:.2f}"],
+        }
+    if bias == "offense" and signal_score >= max(offense_threshold - 0.03, 0.68) and stance != "DEFENSE" and lead_weight >= 0.18:
+        return {
+            "action": "selective_probe",
+            "size": "0.30x",
+            "focus": f"Wait for cleaner crypto follow-through in {lead_market or 'KRW-BTC'}",
+            "symbol": lead_market,
+            "notes": reasons + [f"signal supportive but backtest weight still selective at {lead_weight:.2f}"],
         }
     if bias == "defense":
         return {
             "action": "capital_preservation",
             "size": "0.00x",
             "focus": "No fresh crypto exposure while structure is weak",
-            "symbol": payload.get("lead_market", ""),
+            "symbol": lead_market,
             "notes": reasons + ["stand aside until momentum recovers"],
         }
     return {
         "action": "watchlist_only",
         "size": "0.00x",
         "focus": "Selective crypto tracking",
-        "symbol": payload.get("lead_market", ""),
-        "notes": reasons + ["wait for stronger confirmation before probing"],
+        "symbol": lead_market,
+        "notes": reasons + [f"wait for stronger confirmation before probing (weight {lead_weight:.2f})"],
     }
 
 
@@ -76,6 +88,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     top_rsi = float(gap_candidates[0].get("rsi", 0.0) or 0.0) if gap_candidates else 0.0
     top_burst = float(gap_candidates[0].get("burst_change_pct", 0.0) or 0.0) if gap_candidates else 0.0
     top_penalty = float(gap_candidates[0].get("overheat_penalty", 0.0) or 0.0) if gap_candidates else 0.0
+    top_candidate_score = float(gap_candidates[0].get("candidate_score", 0.0) or 0.0) if gap_candidates else 0.0
+    top_signal_bias = str(gap_candidates[0].get("signal_bias", "neutral") or "neutral") if gap_candidates else "neutral"
     opening_window = bool(session.get("korea_opening_window"))
     mid_session = bool(session.get("korea_mid_session"))
 
@@ -109,7 +123,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 "skip overstretched opening move until structure stabilizes",
             ],
         }
-    if opening_window and active_gap_count >= 3 and quality_score >= 0.72 and avg_gap >= 3.2 and avg_volume >= 20000 and avg_signal >= 0.64 and stance != "DEFENSE":
+    if opening_window and active_gap_count >= 3 and quality_score >= 0.72 and avg_gap >= 3.2 and avg_volume >= 20000 and avg_signal >= 0.64 and top_candidate_score >= 0.74 and top_signal_bias != "neutral" and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",
             "size": "0.50x" if stance == "BALANCED" else "0.70x",
@@ -118,10 +132,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "candidate_symbols": candidate_symbols,
             "notes": [
                 f"{active_gap_count} gap candidates with liquidity support",
-                f"quality score {quality_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                f"quality score {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
             ],
         }
-    if active_gap_count >= 2 and quality_score >= 0.58 and avg_signal >= 0.52 and avg_volume >= 8000:
+    if active_gap_count >= 2 and quality_score >= 0.58 and avg_signal >= 0.52 and avg_volume >= 8000 and top_candidate_score >= 0.62:
         return {
             "action": "selective_probe",
             "size": "0.35x",
@@ -130,7 +144,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "candidate_symbols": candidate_symbols,
             "notes": [
                 f"{active_gap_count} candidate(s) worth monitoring",
-                f"quality score {quality_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                f"quality score {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
                 "opening window selective probe" if opening_window else "mid-session selective only",
             ],
         }

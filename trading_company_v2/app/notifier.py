@@ -73,7 +73,7 @@ class TelegramNotifier:
         return sent
 
     def send_cycle_summary(self, previous_state: dict[str, Any], current_state: dict[str, Any]) -> bool:
-        if not self.enabled:
+        if not self.enabled or not settings.telegram_summary_enabled:
             return False
 
         stance_changed = previous_state.get("stance") != current_state.get("stance")
@@ -137,12 +137,12 @@ class TelegramNotifier:
         )
 
     def send_error(self, message: str) -> bool:
-        if not self.enabled:
+        if not self.enabled or not settings.telegram_error_enabled:
             return False
         return self.send(f"[{settings.company_name}] runtime error\n{message}")
 
     def send_risk_alert(self, current_state: dict[str, Any]) -> bool:
-        if not self.enabled:
+        if not self.enabled or not settings.telegram_risk_enabled:
             return False
         daily = current_state.get("daily_summary", {})
         lines = [
@@ -171,7 +171,7 @@ class TelegramNotifier:
         )
 
     def send_ops_alert(self, title: str, lines: list[str]) -> bool:
-        if not self.enabled:
+        if not self.enabled or not settings.telegram_ops_enabled:
             return False
         body = "\n".join([f"[{settings.company_name}] {title}", *lines])
         lowered = title.lower()
@@ -185,7 +185,7 @@ class TelegramNotifier:
         )
 
     def send_stale_execution_alert(self, summary: dict[str, Any]) -> bool:
-        if not self.enabled:
+        if not self.enabled or not settings.telegram_stale_enabled:
             return False
         stale_items = list(summary.get("stale_live") or [])[:3]
         stale_count = int(summary.get("stale_count", 0) or 0)
@@ -211,7 +211,7 @@ class TelegramNotifier:
         )
 
     def send_realtime_decision_alert(self, snapshot: dict[str, Any]) -> bool:
-        if not self.enabled:
+        if not self.enabled or not settings.telegram_realtime_enabled:
             return False
         strategy_book = snapshot.get("strategy_book", {}) or {}
         runtime_profile = snapshot.get("runtime_profile", {}) or {}
