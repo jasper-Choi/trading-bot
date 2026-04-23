@@ -10,6 +10,7 @@ build/
 
 # Dependencies
 node_modules/
+frontend/dist/
 
 # Logs & runtime data
 logs/*.log

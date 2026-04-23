@@ -316,6 +316,8 @@ export default function App() {
     }`
   const readinessItems = (readiness?.checklist || []).slice(0, 6)
   const readinessNextActions = (readiness?.next_actions || []).slice(0, 3)
+  const readinessHeadline = readiness?.status_headline || 'Go-live review required'
+  const readinessCurrentStep = readiness?.current_step || readinessNextActions[0] || 'Review readiness checks'
 
   const statusCards = [
     {
@@ -519,6 +521,10 @@ export default function App() {
                 <span>Blocked {readiness?.block_count ?? 0}</span>
                 <span>Caution {readiness?.warn_count ?? 0}</span>
               </div>
+              <div className="execution-strip-sub">
+                {readinessHeadline}
+                {readinessCurrentStep ? ` / next: ${readinessCurrentStep}` : ''}
+              </div>
               <div className="readiness-grid">
                 {readinessItems.map((item, idx) => (
                   <div className={`readiness-item readiness-${item.status || 'warn'}`} key={`${item.label || idx}-${idx}`}>
@@ -558,9 +564,11 @@ export default function App() {
                 <div>
                   <div className="panel-title">Upbit Live Pilot</div>
                   <div className="panel-subcopy">
-                    {upbitPilot.go_live_ready
-                      ? `pilot ready / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`
-                      : `pilot blocked / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`}
+                    {upbitPilot?.pilot_headline || (
+                      upbitPilot.go_live_ready
+                        ? `pilot ready / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`
+                        : `pilot blocked / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`
+                    )}
                   </div>
                 </div>
                 <div className={`edge-pill ${upbitPilot.go_live_ready ? 'tone-ok' : 'tone-warn'}`}>

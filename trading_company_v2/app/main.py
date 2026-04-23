@@ -1215,11 +1215,24 @@ def live_readiness_checklist() -> dict:
     if not next_actions:
         next_actions.append("Run one tiny-size live validation cycle before scaling beyond minimum size.")
 
+    current_step = next_actions[0] if next_actions else "Run one tiny-size live validation cycle before scaling beyond minimum size."
+    primary_blocker = next((item["detail"] for item in checklist if item["status"] == "block"), "")
+    status_headline = (
+        "Go-live blocked"
+        if overall == "blocked"
+        else "Go-live needs caution"
+        if overall == "caution"
+        else "Go-live ready for tiny-size validation"
+    )
+
     return {
         "updated_at": state.updated_at,
         "overall": overall,
         "block_count": block_count,
         "warn_count": warn_count,
+        "status_headline": status_headline,
+        "primary_blocker": primary_blocker,
+        "current_step": current_step,
         "execution_mode": mode,
         "execution_summary": execution_summary,
         "entry_block_summary": _entry_block_summary(state),
@@ -1262,9 +1275,27 @@ def upbit_live_pilot() -> dict:
         pilot_cap_krw = int(max(min(round(settings.live_capital_krw * 0.03), 300000), 50000))
 
     go_live_ready = not blockers and bool(upbit.get("balances_ok")) and bool(state.allow_new_entries)
+    pilot_status = (
+        "ready_for_tiny_size"
+        if go_live_ready
+        else "blocked"
+        if blockers
+        else "needs_caution"
+    )
+    pilot_headline = (
+        "Upbit live pilot ready for a tiny-size validation cycle."
+        if go_live_ready
+        else blockers[0]
+        if blockers
+        else cautions[0]
+        if cautions
+        else "Upbit pilot still needs review."
+    )
     return {
         "updated_at": state.updated_at,
         "go_live_ready": go_live_ready,
+        "pilot_status": pilot_status,
+        "pilot_headline": pilot_headline,
         "broker": "upbit",
         "execution_mode": state.execution_mode,
         "pilot_cap_krw": pilot_cap_krw,

@@ -135,6 +135,9 @@ Status:
 - Do not promise profits or guaranteed returns.
 - Prioritize safety, monitoring clarity, and execution correctness before real-money expansion.
 - PowerShell output has shown mojibake on Korean text before. Prefer ASCII-safe edits in critical frontend files when possible.
+- Frontend policy is now source-first:
+  - commit `frontend/src/*`
+  - treat `frontend/dist/*` as local build output unless a deployment path explicitly requires checked-in assets
 
 ## 7. Current known evidence from logs
 
