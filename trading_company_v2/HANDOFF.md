@@ -227,3 +227,24 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
 - There are existing modified / untracked files including `.claude` worktrees, logs, and Oracle SSH key directory.
 - Do not blindly revert unrelated changes.
 - Read before editing when touching files with existing local diffs.
+
+## 11. Oracle Alignment Note
+
+- Oracle VM `.env` has confirmed live Upbit values:
+  - `UPBIT_ACCESS_KEY` set
+  - `UPBIT_SECRET_KEY` set
+  - `UPBIT_ALLOW_LIVE=true`
+  - `LIVE_CAPITAL_KRW=2000000`
+  - `EXECUTION_MODE=upbit_live`
+- Local PC `.env` has been aligned to match those Upbit values for consistency checks.
+- Local DB state has also been updated so `execution_mode=upbit_live`.
+- Local services were restarted and now run normally again.
+- Local readiness is still only `caution`, not `ready`, because:
+  - Upbit balance check returns `401 Unauthorized`
+  - entry gate is still blocked by defensive risk state
+- Practical interpretation:
+  - Oracle VM is still the canonical live host
+  - local PC is config-aligned but not yet confirmed as a safe live trading host
+- Frontend policy remains source-first:
+  - commit `frontend/src/*`
+  - do not rely on checked-in `frontend/dist/*` unless a deployment path explicitly requires it

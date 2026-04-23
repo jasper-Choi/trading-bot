@@ -25,6 +25,7 @@ trading_company_v2/*SSH*/
 
 # Environment
 .env
+trading_company_v2/env.txt
 
 # Windows automation scripts (local only)
 *.bat
