@@ -462,6 +462,12 @@ export default function App() {
         marketOpen={marketOpen}
       />
 
+      {deploymentProfile?.role === 'local_dev' && (
+        <div className="error-banner">
+          Local development profile active. This screen is not a live deployment target.
+        </div>
+      )}
+
       {error && (
         <div className="error-banner">
           {t.apiError}: {error}
