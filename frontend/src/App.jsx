@@ -167,6 +167,7 @@ export default function App() {
   const [lastUpdate, setLastUpdate] = useState(null)
   const [countdown, setCountdown] = useState(REFRESH_SEC)
   const [activeTab, setActiveTab] = useState('coin')
+  const [selectedDesk, setSelectedDesk] = useState('crypto')
 
   const t = T[lang]
 
@@ -254,8 +255,10 @@ export default function App() {
   const readiness = dashboardData?.live_readiness_checklist ?? null
   const brokerHealth = dashboardData?.broker_live_health ?? null
   const upbitPilot = dashboardData?.upbit_live_pilot ?? null
+  const kisPilot = dashboardData?.kis_live_pilot ?? null
   const cryptoLiveLane = dashboard?.crypto_live_lane ?? upbitPilot?.crypto_lane ?? null
   const cryptoLaneHistory = dashboard?.crypto_live_lane_history ?? upbitPilot?.crypto_lane_history ?? []
+  const deskStatus = dashboard?.desk_status ?? {}
   const entryBlockSummary =
     dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
   const deskOffense = dashboard?.desk_offense ?? []
@@ -268,6 +271,30 @@ export default function App() {
   const recentLive = (dashboardData?.state?.execution_log ?? [])
     .filter((item) => item?.source === 'live')
     .slice(0, 3)
+  const stateOpenPositions = dashboardData?.state?.open_positions ?? []
+  const recentClosedByDesk = dashboard?.closed_positions ?? []
+  const executionLog = dashboardData?.state?.execution_log ?? []
+  const deskStats = dashboardData?.state?.daily_summary?.desk_stats ?? {}
+
+  const selectedDeskStatus = deskStatus[selectedDesk] ?? {}
+  const selectedDeskStats = deskStats?.[selectedDesk] ?? {}
+  const selectedDeskCandidates =
+    candidateWatch.find((item) => item.desk === selectedDesk)?.candidates ?? []
+  const selectedDeskOpenPositions = stateOpenPositions.filter((item) => item?.desk === selectedDesk).slice(0, 3)
+  const selectedDeskClosed = recentClosedByDesk.filter((item) => item?.desk === selectedDesk).slice(0, 3)
+  const selectedDeskOrders = executionLog.filter((item) => item?.desk === selectedDesk).slice(0, 3)
+  const selectedPilot =
+    selectedDesk === 'crypto' ? upbitPilot : selectedDesk === 'korea' ? kisPilot : null
+  const selectedDeskLabel =
+    selectedDesk === 'crypto' ? '코인' : selectedDesk === 'korea' ? '한국주식' : '미국주식'
+  const selectedDeskTitle =
+    selectedDeskStatus?.title || candidateWatch.find((item) => item.desk === selectedDesk)?.title || selectedDeskLabel
+  const selectedPrimarySymbol =
+    selectedDeskCandidates.find((item) => item.is_primary)?.symbol ||
+    selectedDeskStatus?.latest_order?.symbol ||
+    selectedDeskStatus?.latest_order?.focus ||
+    'n/a'
+  const selectedDeskTone = deskOffense.find((item) => item.desk === selectedDesk)?.tone || 'muted'
 
   const readinessToneClass =
     readiness?.overall === 'blocked'
@@ -561,47 +588,60 @@ export default function App() {
             </div>
           </div>
 
-          {upbitPilot && (
-            <div className={`pilot-panel ${upbitPilot.go_live_ready ? 'tone-ok' : 'tone-warn'}`}>
+          {(upbitPilot || kisPilot) && (
+            <div className={`pilot-panel tone-${selectedDeskTone}`}>
               <div className="edge-head">
                 <div>
-                  <div className="panel-title">Upbit Live Pilot</div>
+                  <div className="panel-title">{selectedDeskTitle} 상세</div>
                   <div className="panel-subcopy">
-                    {upbitPilot?.pilot_headline || (
-                      upbitPilot.go_live_ready
-                        ? `pilot ready / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`
-                        : `pilot blocked / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`
-                    )}
+                    {selectedPilot?.pilot_headline ||
+                      selectedDeskStatus?.focus ||
+                      `${selectedDeskLabel} desk detail is loading`}
                   </div>
                   <div className="panel-subcopy">
-                    {upbitPilot?.signal_headline || 'crypto signal state loading'}
+                    {selectedDesk === 'crypto'
+                      ? upbitPilot?.signal_headline || 'crypto signal state loading'
+                      : selectedDesk === 'korea'
+                        ? kisPilot?.korea_focus || selectedDeskStatus?.focus || 'korea desk status loading'
+                        : selectedDeskStatus?.focus || 'U.S. desk status loading'}
                   </div>
                 </div>
-                <div className={`edge-pill ${upbitPilot.go_live_ready ? 'tone-ok' : 'tone-warn'}`}>
-                  {upbitPilot.go_live_ready ? 'READY' : 'HOLD'}
+                <div className={`edge-pill tone-${selectedDeskTone}`}>
+                  {String(selectedDeskStatus?.action || 'watch').toUpperCase()}
                 </div>
               </div>
               <div className="pilot-grid">
                 <div className="pilot-col">
-                  <strong>Pilot State</strong>
-                  <span>{`infra ${upbitPilot.go_live_ready ? 'ready' : 'hold'} / signal ${upbitPilot.signal_status || 'waiting'}`}</span>
-                  <span>{`mode ${upbitPilot.execution_mode || 'paper'} / cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`}</span>
+                  <strong>{selectedDeskLabel} 상태</strong>
+                  <span>{`대표 종목 ${selectedPrimarySymbol}`}</span>
+                  <span>{`action ${selectedDeskStatus?.action || 'n/a'} / size ${selectedDeskStatus?.size || '0.00x'}`}</span>
+                  <span>
+                    {selectedPilot
+                      ? `pilot ${selectedPilot.pilot_status || 'review'} / mode ${selectedPilot.execution_mode || 'paper'}`
+                      : `desk bias ${selectedDeskStatus?.bias || 'n/a'}`}
+                  </span>
                 </div>
                 <div className="pilot-col">
-                  <strong>Blockers</strong>
-                  {(upbitPilot.blockers || []).length > 0
-                    ? upbitPilot.blockers.slice(0, 3).map((item, idx) => <span key={`blocker-${idx}`}>{item}</span>)
-                    : <span>No blockers</span>}
+                  <strong>수익 현황</strong>
+                  <span>{`실현 ${Number(selectedDeskStats?.realized_pnl_pct || 0).toFixed(2)}%`}</span>
+                  <span>{`승률 ${Number(selectedDeskStats?.win_rate || 0).toFixed(1)}% / ${selectedDeskStats?.wins || 0}W ${selectedDeskStats?.losses || 0}L`}</span>
+                  <span>{`보유 ${selectedDeskOpenPositions.length} / 종료 ${selectedDeskStats?.closed_positions || 0}`}</span>
                 </div>
                 <div className="pilot-col">
-                  <strong>Next Steps</strong>
-                  {(upbitPilot.suggested_sequence || []).slice(0, 3).map((item, idx) => (
-                    <span key={`step-${idx}`}>{item}</span>
-                  ))}
+                  <strong>준비 종목</strong>
+                  {selectedDeskCandidates.length > 0 ? (
+                    selectedDeskCandidates.slice(0, 5).map((item, idx) => (
+                      <span key={`candidate-${selectedDesk}-${idx}`}>
+                        {`${item.symbol}${item.is_primary ? ' (primary)' : ''}`}
+                      </span>
+                    ))
+                  ) : (
+                    <span>No candidates</span>
+                  )}
                 </div>
-                {cryptoLiveLane && (
+                {selectedDesk === 'crypto' && cryptoLiveLane && (
                   <div className="pilot-col">
-                    <strong>Crypto Lane</strong>
+                    <strong>거래 조건</strong>
                     <span>
                       {`${cryptoLiveLane.symbol || 'KRW-BTC'} / ${cryptoLiveLane.action || 'watchlist_only'} / ${cryptoLiveLane.size || '0.00x'}`}
                     </span>
@@ -611,9 +651,9 @@ export default function App() {
                     <span>{cryptoLiveLane.focus || 'crypto lane waiting for confirmation'}</span>
                   </div>
                 )}
-                {cryptoLaneHistory.length > 0 && (
+                {selectedDesk === 'crypto' && cryptoLaneHistory.length > 0 && (
                   <div className="pilot-col">
-                    <strong>Signal Trend</strong>
+                    <strong>시그널 추이</strong>
                     {cryptoLaneHistory.slice(-4).map((item, idx) => (
                       <span key={`crypto-trend-${idx}`}>
                         {`${item.time || '--:--'} / ${Number(item.signal_score || 0).toFixed(2)} -> ${Number(item.trigger_threshold || 0).toFixed(2)} / ${item.action || 'watchlist_only'}`}
@@ -621,7 +661,31 @@ export default function App() {
                     ))}
                   </div>
                 )}
-                {readinessNextActions.length > 0 && (
+                <div className="pilot-col">
+                  <strong>거래 현황</strong>
+                  {selectedDeskOrders.length > 0 ? (
+                    selectedDeskOrders.map((item, idx) => (
+                      <span key={`desk-order-${selectedDesk}-${idx}`}>
+                        {`${item.symbol || item.focus || 'n/a'} / ${item.status || 'n/a'} / ${item.effect_status || 'n/a'}`}
+                      </span>
+                    ))
+                  ) : (
+                    <span>No active order flow</span>
+                  )}
+                </div>
+                <div className="pilot-col">
+                  <strong>최근 종료 거래</strong>
+                  {selectedDeskClosed.length > 0 ? (
+                    selectedDeskClosed.map((item, idx) => (
+                      <span key={`desk-close-${selectedDesk}-${idx}`}>
+                        {`${item.symbol || 'n/a'} / ${Number(item.pnl_pct || 0).toFixed(2)}% / ${item.closed_reason || 'n/a'}`}
+                      </span>
+                    ))
+                  ) : (
+                    <span>No recent closed trades</span>
+                  )}
+                </div>
+                {selectedPilot && readinessNextActions.length > 0 && (
                   <div className="pilot-col">
                     <strong>Readiness Actions</strong>
                     {readinessNextActions.map((item, idx) => (
@@ -650,7 +714,12 @@ export default function App() {
               </div>
               <div className="edge-grid">
                 {deskOffense.map((item) => (
-                  <div className={`edge-card tone-${item.tone || 'muted'}`} key={item.desk}>
+                  <button
+                    type="button"
+                    className={`edge-card tone-${item.tone || 'muted'} ${selectedDesk === item.desk ? 'is-selected' : ''}`}
+                    key={item.desk}
+                    onClick={() => setSelectedDesk(item.desk)}
+                  >
                     <div className="edge-card-top">
                       <strong>{item.title}</strong>
                       <span>{item.score}</span>
@@ -662,7 +731,7 @@ export default function App() {
                       <span>win rate {Number(item.win_rate || 0).toFixed(1)}%</span>
                       <span>multiplier {Number(item.multiplier || 1).toFixed(2)}x</span>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -729,7 +798,12 @@ export default function App() {
             </div>
             <div className="candidate-watch-grid">
               {candidateWatch.map((desk) => (
-                <div className="candidate-watch-card" key={desk.desk}>
+                <button
+                  type="button"
+                  className={`candidate-watch-card ${selectedDesk === desk.desk ? 'is-selected' : ''}`}
+                  key={desk.desk}
+                  onClick={() => setSelectedDesk(desk.desk)}
+                >
                   <div className="candidate-watch-head">
                     <strong>{desk.title}</strong>
                     <span>{desk.action || 'n/a'}</span>
@@ -745,7 +819,7 @@ export default function App() {
                       </span>
                     ))}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>

@@ -437,6 +437,9 @@ html, body {
 }
 
 .candidate-watch-card {
+  appearance: none;
+  text-align: left;
+  cursor: pointer;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -444,6 +447,12 @@ html, body {
   border-radius: 16px;
   border: 1px solid var(--border);
   background: rgba(7, 16, 29, 0.62);
+}
+
+.candidate-watch-card.is-selected,
+.edge-card.is-selected {
+  border-color: rgba(91, 192, 255, 0.45);
+  box-shadow: 0 0 0 1px rgba(91, 192, 255, 0.18), 0 10px 24px rgba(0, 0, 0, 0.2);
 }
 
 .candidate-watch-head {
@@ -524,6 +533,9 @@ html, body {
 }
 
 .edge-card {
+  appearance: none;
+  text-align: left;
+  cursor: pointer;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid var(--border);

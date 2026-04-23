@@ -1159,6 +1159,7 @@ def dashboard_data() -> dict:
         "broker_live_health": broker_live_health(),
         "live_readiness_checklist": live_readiness_checklist(),
         "upbit_live_pilot": upbit_live_pilot(),
+        "kis_live_pilot": kis_live_pilot(),
     }
 
 
