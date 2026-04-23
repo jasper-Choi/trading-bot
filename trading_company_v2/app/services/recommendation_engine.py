@@ -121,6 +121,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     top_signal_bias = str(gap_candidates[0].get("signal_bias", "neutral") or "neutral") if gap_candidates else "neutral"
     opening_window = bool(session.get("korea_opening_window"))
     mid_session = bool(session.get("korea_mid_session"))
+    _qmeta = {"quality_score": quality_score, "avg_signal": avg_signal, "quality_threshold": 0.58}
 
     if not session.get("korea_open"):
         return {
@@ -130,6 +131,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": ["Scan the next open for rotation leaders."],
+            **_qmeta,
         }
     if regime == "STRESSED":
         return {
@@ -139,6 +141,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": ["Risk committee blocked fresh Korea entries in stress mode."],
+            **_qmeta,
         }
     if gap_candidates and (top_signal < 0.55 or top_gap >= 24.0 or top_rsi >= 74.0 or top_burst >= 10.0 or avg_volume < 3000):
         return {
@@ -151,6 +154,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"top signal {top_signal:.2f} / gap {top_gap:.2f}% / rsi {top_rsi:.1f} / burst {top_burst:.2f}% / penalty {top_penalty:.2f}",
                 "Wait for cleaner follow-through before touching the leader.",
             ],
+            **_qmeta,
         }
     if opening_window and active_gap_count >= 3 and quality_score >= 0.72 and avg_gap >= 3.2 and avg_volume >= 20000 and avg_signal >= 0.64 and top_candidate_score >= 0.74 and top_signal_bias != "neutral" and stance != "DEFENSE":
         return {
@@ -163,6 +167,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"active gaps {active_gap_count}",
                 f"quality {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
             ],
+            **_qmeta,
         }
     if active_gap_count >= 2 and quality_score >= 0.58 and avg_signal >= 0.52 and avg_volume >= 8000 and top_candidate_score >= 0.62:
         return {
@@ -176,6 +181,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"quality {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
                 "Only selective exploration until follow-through proves itself.",
             ],
+            **_qmeta,
         }
     if mid_session:
         return {
@@ -185,6 +191,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": ["Preserve capital unless a cleaner afternoon drive appears."],
+            **_qmeta,
         }
     return {
         "action": "stand_by",
@@ -193,6 +200,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         "symbol": top_ticker,
         "candidate_symbols": candidate_symbols,
         "notes": [f"stay patient (quality {quality_score:.2f} / signal {avg_signal:.2f})"],
+        **_qmeta,
     }
 
 
@@ -207,6 +215,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
     top_ticker = candidate_symbols[0] if candidate_symbols else ""
     top_signal = float(leaders[0].get("signal_score", 0.0) or 0.0) if leaders else 0.0
     top_change = float(leaders[0].get("change_pct", 0.0) or 0.0) if leaders else 0.0
+    _qmeta = {"quality_score": quality_score, "avg_signal": avg_signal, "quality_threshold": 0.72}
 
     if not (session.get("us_premarket") or session.get("us_regular")):
         return {
@@ -216,6 +225,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": ["Review leaders again during pre-market or regular hours."],
+            **_qmeta,
         }
     if session.get("us_premarket") and not session.get("us_regular"):
         return {
@@ -225,6 +235,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": ["Wait for regular session confirmation before entering US names."],
+            **_qmeta,
         }
     if regime == "STRESSED":
         return {
@@ -234,6 +245,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
             "notes": ["Risk committee blocked fresh US entries in stress mode."],
+            **_qmeta,
         }
     if leaders and (top_signal < 0.56 or top_change >= 8.5):
         return {
@@ -246,6 +258,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
                 f"top signal {top_signal:.2f} / top change {top_change:.2f}%",
                 "Wait for cleaner regular-session follow-through.",
             ],
+            **_qmeta,
         }
     if quality_score < 0.72 or avg_signal < 0.62 or active_us_count < 3 or avg_change < 0.35:
         return {
@@ -258,6 +271,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
                 f"quality {quality_score:.2f} / active leaders {active_us_count} / avg change {avg_change:.2f}% / avg signal {avg_signal:.2f}",
                 "US entries need a stronger regular-session backdrop.",
             ],
+            **_qmeta,
         }
     if active_us_count >= 4 and quality_score >= 0.76 and avg_change >= 0.55 and avg_volume >= 2000000 and avg_signal >= 0.66 and stance != "DEFENSE":
         return {
@@ -270,6 +284,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
                 f"leaders in force {active_us_count}",
                 f"quality {quality_score:.2f} / avg change {avg_change:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
             ],
+            **_qmeta,
         }
     if active_us_count >= 3 and quality_score >= 0.70 and avg_signal >= 0.60:
         return {
@@ -282,6 +297,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
                 f"watchlist leaders {active_us_count}",
                 f"quality {quality_score:.2f} / avg change {avg_change:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
             ],
+            **_qmeta,
         }
     return {
         "action": "stand_by",
@@ -290,4 +306,5 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
         "symbol": top_ticker,
         "candidate_symbols": candidate_symbols,
         "notes": [f"stay selective (quality {quality_score:.2f} / signal {avg_signal:.2f})"],
+        **_qmeta,
     }
