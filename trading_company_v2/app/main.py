@@ -613,6 +613,19 @@ def _build_ops_flags(state: CompanyState) -> dict:
             add_flag("info", f"{desk_name}_hold", f"{label} 데스크 보류: {plan.get('focus', 'n/a')}")
 
     crypto_lane = _crypto_live_lane_snapshot(state)
+    signal_ready = crypto_lane.get("action") in {"probe_longs", "selective_probe", "attack_opening_drive"}
+    signal_status = (
+        "signal_ready"
+        if signal_ready
+        else "signal_arming"
+        if crypto_lane.get("trigger_state") == "arming"
+        else "signal_waiting"
+    )
+    signal_headline = (
+        "Crypto signal is ready for a tiny live pilot."
+        if signal_ready
+        else f"Crypto signal still waiting: {crypto_lane.get('signal_score', 0.0):.2f} / {crypto_lane.get('trigger_threshold', 0.0):.2f}."
+    )
     if normalize_execution_mode(settings.execution_mode) == "upbit_live" and allow_new_entries and crypto_lane.get("action") in {"watchlist_only", "capital_preservation"}:
         add_flag(
             "info",
@@ -1334,11 +1347,27 @@ def upbit_live_pilot() -> dict:
         if configured_mode == "upbit_live"
         else "Set EXECUTION_MODE=upbit_live only after readiness blockers clear."
     )
+    signal_ready = crypto_lane.get("action") in {"probe_longs", "selective_probe", "attack_opening_drive"}
+    signal_status = (
+        "signal_ready"
+        if signal_ready
+        else "signal_arming"
+        if crypto_lane.get("trigger_state") == "arming"
+        else "signal_waiting"
+    )
+    signal_headline = (
+        "Crypto signal is ready for a tiny live pilot."
+        if signal_ready
+        else f"Crypto signal still waiting: {crypto_lane.get('signal_score', 0.0):.2f} / {crypto_lane.get('trigger_threshold', 0.0):.2f}."
+    )
     return {
         "updated_at": state.updated_at,
         "go_live_ready": go_live_ready,
         "pilot_status": pilot_status,
         "pilot_headline": pilot_headline,
+        "signal_ready": signal_ready,
+        "signal_status": signal_status,
+        "signal_headline": signal_headline,
         "broker": "upbit",
         "execution_mode": configured_mode,
         "pilot_cap_krw": pilot_cap_krw,

@@ -571,12 +571,20 @@ export default function App() {
                         : `pilot blocked / suggested cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`
                     )}
                   </div>
+                  <div className="panel-subcopy">
+                    {upbitPilot?.signal_headline || 'crypto signal state loading'}
+                  </div>
                 </div>
                 <div className={`edge-pill ${upbitPilot.go_live_ready ? 'tone-ok' : 'tone-warn'}`}>
                   {upbitPilot.go_live_ready ? 'READY' : 'HOLD'}
                 </div>
               </div>
               <div className="pilot-grid">
+                <div className="pilot-col">
+                  <strong>Pilot State</strong>
+                  <span>{`infra ${upbitPilot.go_live_ready ? 'ready' : 'hold'} / signal ${upbitPilot.signal_status || 'waiting'}`}</span>
+                  <span>{`mode ${upbitPilot.execution_mode || 'paper'} / cap KRW ${Number(upbitPilot.pilot_cap_krw || 0).toLocaleString('ko-KR')}`}</span>
+                </div>
                 <div className="pilot-col">
                   <strong>Blockers</strong>
                   {(upbitPilot.blockers || []).length > 0
