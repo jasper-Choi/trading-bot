@@ -1316,7 +1316,7 @@ def _embedded_dashboard_html() -> str:
     .access-url{font-family:var(--mono);font-size:.82rem;color:var(--text);word-break:break-all}
     .hero-actions{position:relative;z-index:1;display:flex;flex-direction:column;align-items:flex-end;gap:12px;min-width:250px}
     .hero-action-row{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
-    .btn-cycle,.btn-ghost{appearance:none;border:none;cursor:pointer;border-radius:12px;padding:10px 16px;font-weight:700}
+    .btn-cycle,.btn-ghost{appearance:none;border:none;cursor:pointer;border-radius:12px;padding:10px 16px;font-weight:700;min-height:44px;min-width:44px}
     .btn-cycle{background:linear-gradient(135deg, rgba(107,199,255,.22), rgba(107,199,255,.08));color:var(--blue);border:1px solid rgba(107,199,255,.30)}
     .btn-ghost{background:rgba(151,170,191,.10);color:var(--text);border:1px solid rgba(151,170,191,.24)} .btn-cycle:disabled{opacity:.55;cursor:not-allowed}
     .meta-stamp{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
@@ -1343,7 +1343,7 @@ def _embedded_dashboard_html() -> str:
     .action-pill{display:inline-flex;align-items:center;justify-content:center;padding:5px 9px;border-radius:999px;font-size:.72rem;font-weight:700;flex-shrink:0}
     .action-pill.buy{background:rgba(103,232,165,.15);color:var(--green)} .action-pill.sell{background:rgba(255,124,124,.15);color:var(--red)} .action-pill.watch{background:rgba(151,170,191,.12);color:var(--muted)} .action-pill.probe{background:rgba(107,199,255,.12);color:var(--blue)}
     .desk-size{font-family:var(--mono);font-size:.76rem;color:var(--blue)} .content-grid{position:relative;z-index:1;display:grid;grid-template-columns:1.06fr .94fr;gap:14px}
-    .col{display:flex;flex-direction:column;gap:14px}.panel-body{padding:0 18px 18px}.table-wrap{overflow:auto}.pos-table{width:100%;border-collapse:collapse;font-size:.80rem}
+    .col{display:flex;flex-direction:column;gap:14px}.panel-body{padding:0 18px 18px}.table-wrap{overflow:auto;overflow-x:auto;-webkit-overflow-scrolling:touch}.pos-table{width:100%;border-collapse:collapse;font-size:.80rem}
     .pos-table th{padding:10px 12px;text-align:left;font-size:.68rem;text-transform:uppercase;letter-spacing:.10em;color:var(--muted);border-bottom:1px solid var(--border)} .pos-table td{padding:12px;border-bottom:1px solid rgba(141,177,199,.10)}
     .pos-table tr:last-child td{border-bottom:none}.symbol-cell{font-family:var(--mono);font-weight:700}.desk-chip{display:inline-flex;padding:4px 8px;border-radius:999px;background:rgba(107,199,255,.12);color:var(--blue);font-size:.68rem;font-weight:700}
     .empty-msg{padding:18px 0;color:var(--muted);font-size:.82rem;text-align:center}.badge{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 8px;border-radius:999px;background:rgba(107,199,255,.12);color:var(--blue);font-size:.72rem;font-weight:700}
@@ -1353,7 +1353,7 @@ def _embedded_dashboard_html() -> str:
     .pos{color:var(--green)!important}.neg{color:var(--red)!important}.neutral{color:var(--text)!important}
     @media (max-width:1180px){.signal-grid,.content-grid{grid-template-columns:1fr}.hero-shell{flex-direction:column}.hero-actions{align-items:flex-start}}
     @media (max-width:820px){.hero-overview{grid-template-columns:repeat(2,1fr)}.metric-grid{grid-template-columns:repeat(2,1fr)}}
-    @media (max-width:560px){.app{padding:14px 12px 48px}.hero-shell{padding:18px}.hero-title{font-size:1.7rem}.hero-overview,.metric-grid,.hero-meta{grid-template-columns:1fr}.hero-action-row{width:100%}.btn-cycle,.btn-ghost{width:100%}.check-item,.broker-card,.desk-row{flex-direction:column;align-items:flex-start}.insight-row{grid-template-columns:1fr}.panel-head{align-items:flex-start;flex-direction:column}.panel-value,.meta-stamp{font-size:.74rem}.access-url{font-size:.76rem}}
+    @media (max-width:560px){.app{padding:14px 12px 48px}.hero-shell{padding:14px;flex-direction:column}.hero-actions{min-width:0;width:100%}.hero-title{font-size:1.5rem}.hero-overview,.metric-grid{grid-template-columns:repeat(2,1fr)}.hero-meta{grid-template-columns:1fr}.hero-action-row{width:100%;flex-wrap:wrap}.btn-cycle,.btn-ghost{flex:1 1 0;min-width:0;text-align:center}.check-item,.broker-card,.desk-row{flex-direction:column;align-items:flex-start}.insight-row{grid-template-columns:1fr}.panel-head{align-items:flex-start;flex-direction:column;gap:6px}.panel-value,.meta-stamp{font-size:.74rem}.access-url{font-size:.76rem}.pos-table{min-width:380px}.panel-body.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}}
   </style>
 </head>
 <body>
