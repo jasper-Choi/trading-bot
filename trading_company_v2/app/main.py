@@ -16,7 +16,8 @@ def _to_kst_hhmm(iso: str) -> str:
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.responses import PlainTextResponse
 
 from app.config import settings
@@ -54,6 +55,11 @@ from app.service_manager import (
 
 app = FastAPI(title="Trading Company V2", version="0.1.0")
 orchestrator = CompanyOrchestrator()
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_FRONTEND_DIST = _REPO_ROOT / "frontend" / "dist"
+
+if (_FRONTEND_DIST / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_DIST / "assets")), name="frontend-assets")
 
 
 def _safe_parse_utc(value: str) -> datetime | None:
@@ -2210,8 +2216,11 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
 
 
 @app.get("/", response_class=HTMLResponse)
-def root() -> str:
-    return _embedded_dashboard_html()
+def root():
+    index_path = _FRONTEND_DIST / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path)
+    return HTMLResponse(_embedded_dashboard_html())
 
 
 if __name__ == "__main__":
