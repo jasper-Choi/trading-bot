@@ -255,6 +255,7 @@ export default function App() {
   const brokerHealth = dashboardData?.broker_live_health ?? null
   const upbitPilot = dashboardData?.upbit_live_pilot ?? null
   const cryptoLiveLane = dashboard?.crypto_live_lane ?? upbitPilot?.crypto_lane ?? null
+  const cryptoLaneHistory = dashboard?.crypto_live_lane_history ?? upbitPilot?.crypto_lane_history ?? []
   const entryBlockSummary =
     dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
   const deskOffense = dashboard?.desk_offense ?? []
@@ -607,6 +608,16 @@ export default function App() {
                       {`signal ${Number(cryptoLiveLane.signal_score || 0).toFixed(2)} / trigger ${Number(cryptoLiveLane.trigger_threshold || 0).toFixed(2)} / ${cryptoLiveLane.trigger_state || 'waiting'}`}
                     </span>
                     <span>{cryptoLiveLane.focus || 'crypto lane waiting for confirmation'}</span>
+                  </div>
+                )}
+                {cryptoLaneHistory.length > 0 && (
+                  <div className="pilot-col">
+                    <strong>Signal Trend</strong>
+                    {cryptoLaneHistory.slice(-4).map((item, idx) => (
+                      <span key={`crypto-trend-${idx}`}>
+                        {`${item.time || '--:--'} / ${Number(item.signal_score || 0).toFixed(2)} -> ${Number(item.trigger_threshold || 0).toFixed(2)} / ${item.action || 'watchlist_only'}`}
+                      </span>
+                    ))}
                   </div>
                 )}
                 {readinessNextActions.length > 0 && (

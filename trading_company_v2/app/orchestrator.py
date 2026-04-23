@@ -575,6 +575,22 @@ class CompanyOrchestrator:
                 strategy_allocator_result.payload.get("session", {}),
             ),
         }
+        crypto_signal = float(crypto_desk_result.payload.get("signal_score", 0.0) or 0.0)
+        crypto_recent = float(crypto_desk_result.payload.get("recent_change_pct", 0.0) or 0.0)
+        crypto_lead = str(
+            state.strategy_book.get("crypto_plan", {}).get("symbol")
+            or crypto_desk_result.payload.get("lead_market")
+            or "KRW-BTC"
+        )
+        crypto_weight = float((crypto_desk_result.payload.get("backtest_weights", {}) or {}).get(crypto_lead, 0.0) or 0.0)
+        crypto_trigger = 0.56 if crypto_weight >= 0.30 and crypto_recent >= -0.4 else 0.58
+        state.latest_signals.extend(
+            [
+                f"crypto_signal={crypto_signal:.2f}",
+                f"crypto_trigger={crypto_trigger:.2f}",
+                f"crypto_action={state.strategy_book.get('crypto_plan', {}).get('action', 'watchlist_only')}",
+            ]
+        )
         capital_profile = build_compounding_profile(state.stance, state.regime, state.daily_summary)
         state.strategy_book, capital_overlay_notes = _apply_compounding_overlays(state.strategy_book, capital_profile)
         for note in capital_overlay_notes[:3]:

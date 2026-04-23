@@ -437,6 +437,55 @@ def _crypto_live_lane_snapshot(state: CompanyState) -> dict:
     }
 
 
+def _crypto_live_lane_history(state: CompanyState) -> list[dict]:
+    rows: list[dict] = []
+    for item in list(state.recent_journal or [])[:6]:
+        summary = [str(entry) for entry in (item.get("summary", []) or [])]
+        signal = None
+        trigger = None
+        action = ""
+        for entry in summary:
+            if entry.startswith("crypto_signal="):
+                try:
+                    signal = round(float(entry.split("=", 1)[1]), 2)
+                except ValueError:
+                    signal = None
+            elif entry.startswith("crypto_trigger="):
+                try:
+                    trigger = round(float(entry.split("=", 1)[1]), 2)
+                except ValueError:
+                    trigger = None
+            elif entry.startswith("crypto_action="):
+                action = str(entry.split("=", 1)[1]).strip()
+        if signal is None and trigger is None and not action:
+            continue
+        run_at = str(item.get("run_at", "") or "")
+        rows.append(
+            {
+                "run_at": run_at,
+                "time": run_at[11:16] if len(run_at) >= 16 else run_at,
+                "signal_score": signal,
+                "trigger_threshold": trigger,
+                "distance_to_trigger": round(max((trigger or 0.0) - (signal or 0.0), 0.0), 2) if signal is not None and trigger is not None else None,
+                "action": action or "watchlist_only",
+            }
+        )
+    ordered = list(reversed(rows))
+    if ordered:
+        return ordered
+    snapshot = _crypto_live_lane_snapshot(state)
+    return [
+        {
+            "run_at": state.updated_at,
+            "time": state.updated_at[11:16] if len(state.updated_at) >= 16 else state.updated_at,
+            "signal_score": snapshot.get("signal_score"),
+            "trigger_threshold": snapshot.get("trigger_threshold"),
+            "distance_to_trigger": snapshot.get("distance_to_trigger"),
+            "action": snapshot.get("action", "watchlist_only"),
+        }
+    ]
+
+
 def _build_agent_performance_payload(state: CompanyState) -> list[dict]:
     desk_stats = state.daily_summary.get("desk_stats", {}) or {}
     desk_agent_map = {
@@ -613,6 +662,7 @@ def _build_ops_flags(state: CompanyState) -> dict:
             add_flag("info", f"{desk_name}_hold", f"{label} 데스크 보류: {plan.get('focus', 'n/a')}")
 
     crypto_lane = _crypto_live_lane_snapshot(state)
+    crypto_lane_history = _crypto_live_lane_history(state)
     signal_ready = crypto_lane.get("action") in {"probe_longs", "selective_probe", "attack_opening_drive"}
     signal_status = (
         "signal_ready"
@@ -723,6 +773,7 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
         "capital": _build_capital_payload(state),
         "execution_summary": _build_execution_summary(state),
         "crypto_live_lane": _crypto_live_lane_snapshot(state),
+        "crypto_live_lane_history": _crypto_live_lane_history(state),
         "symbol_edge": _symbol_edge_summary(state),
         "desk_offense": _build_desk_offense_payload(state),
         "agent_performance": _build_agent_performance_payload(state),
@@ -1300,6 +1351,7 @@ def upbit_live_pilot() -> dict:
     execution_summary = broker_health.get("execution_summary", {}) or {}
     configured_mode = normalize_execution_mode(settings.execution_mode)
     crypto_lane = _crypto_live_lane_snapshot(state)
+    crypto_lane_history = _crypto_live_lane_history(state)
 
     blockers: list[str] = []
     cautions: list[str] = []
@@ -1385,6 +1437,7 @@ def upbit_live_pilot() -> dict:
         "cautions": cautions[:5],
         "upbit_health": upbit,
         "crypto_lane": crypto_lane,
+        "crypto_lane_history": crypto_lane_history,
         "entry_block_summary": _entry_block_summary(state),
         "readiness_overall": readiness.get("overall", "blocked"),
     }
