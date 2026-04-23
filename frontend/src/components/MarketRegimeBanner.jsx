@@ -4,10 +4,10 @@
  */
 export default function MarketRegimeBanner({ regime, lastChanged, marketOpen }) {
   const map = {
-    BULL:     { icon: 'UP', label: '상승장', cls: 'regime-bull' },
-    NEUTRAL:  { icon: 'EQ', label: '중립장', cls: 'regime-neutral' },
-    BEAR:     { icon: 'DN', label: '하락장', cls: 'regime-bear' },
-    VOLATILE: { icon: 'VX', label: '변동장', cls: 'regime-volatile' },
+    BULL: { icon: 'UP', label: 'Bullish', cls: 'regime-bull' },
+    NEUTRAL: { icon: 'EQ', label: 'Neutral', cls: 'regime-neutral' },
+    BEAR: { icon: 'DN', label: 'Bearish', cls: 'regime-bear' },
+    VOLATILE: { icon: 'VX', label: 'Volatile', cls: 'regime-volatile' },
   }
   const info = map[regime] ?? map.NEUTRAL
 
@@ -16,11 +16,11 @@ export default function MarketRegimeBanner({ regime, lastChanged, marketOpen }) 
       <span className="regime-icon">{info.icon}</span>
       <span className="regime-label">{info.label}</span>
       {lastChanged && (
-        <span className="regime-changed">변경: {lastChanged.slice(11, 16)}</span>
+        <span className="regime-changed">Changed {lastChanged.slice(11, 16)}</span>
       )}
       <div className="regime-sep" />
       <span className={`market-hours ${marketOpen ? 'market-open' : 'market-closed'}`}>
-        {marketOpen ? '시장 열림' : '시장 닫힘'}
+        {marketOpen ? 'Market Open' : 'Market Closed'}
       </span>
     </div>
   )
