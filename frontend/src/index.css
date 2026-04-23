@@ -167,7 +167,6 @@ html, body {
   flex-direction: column;
   justify-content: space-between;
   gap: 14px;
-  min-width: 0;
 }
 
 .hero-action-group {
@@ -175,7 +174,6 @@ html, body {
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
-  min-width: 0;
 }
 
 .hero-overview {
@@ -352,17 +350,6 @@ html, body {
   min-height: 0;
   overflow: visible;
 }
-.dashboard > *,
-.hero-shell > *,
-.signal-deck > *,
-.edge-deck > *,
-.pilot-grid > *,
-.symbol-edge-grid > *,
-.candidate-watch-grid > *,
-.readiness-grid > *,
-.broker-strip > * {
-  min-width: 0;
-}
 .area-cards    { grid-column: 1 / -1; }
 .area-insights { grid-column: 1 / -1; }
 .area-position { grid-column: 1; min-height: 0; }
@@ -443,75 +430,6 @@ html, body {
   line-height: 1.45;
 }
 
-.candidate-watch-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.candidate-watch-card {
-  appearance: none;
-  text-align: left;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  background: rgba(7, 16, 29, 0.62);
-}
-
-.candidate-watch-card.is-selected,
-.edge-card.is-selected {
-  border-color: rgba(91, 192, 255, 0.45);
-  box-shadow: 0 0 0 1px rgba(91, 192, 255, 0.18), 0 10px 24px rgba(0, 0, 0, 0.2);
-}
-
-.candidate-watch-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 12px;
-}
-
-.candidate-watch-head span {
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  font-size: 10px;
-}
-
-.candidate-watch-sub {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.45;
-}
-
-.candidate-chip-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.candidate-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 7px 10px;
-  border-radius: 999px;
-  border: 1px solid rgba(141, 177, 199, 0.16);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
-  font-size: 11px;
-}
-
-.candidate-chip.is-primary {
-  border-color: rgba(91, 192, 255, 0.45);
-  background: rgba(91, 192, 255, 0.12);
-  color: #d7efff;
-}
-
 .edge-panel {
   min-height: 0;
   padding: 16px 18px;
@@ -546,9 +464,6 @@ html, body {
 }
 
 .edge-card {
-  appearance: none;
-  text-align: left;
-  cursor: pointer;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid var(--border);
@@ -685,11 +600,6 @@ html, body {
   margin-bottom: 10px;
 }
 .dock-panel .table-wrap { margin-top: 8px; }
-
-.edge-head,
-.section-intro {
-  min-width: 0;
-}
 
 /* ?? ?듦퀎 移대뱶 4媛?????????????????????????????????? */
 .stat-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
@@ -1070,7 +980,7 @@ tr:hover td { background: var(--surface2); }
 /* ?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧
    諛섏쓳????960px ?댄븯: 2????1??
 ?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧?먥븧 */
-@media (max-width: 860px) {
+@media (max-width: 960px) {
   .app { height: auto; overflow: auto; }
   .app-shell { padding: 14px; }
   .hero-shell {
@@ -1082,10 +992,6 @@ tr:hover td { background: var(--surface2); }
   }
   .hero-action-group {
     justify-content: flex-start;
-    width: 100%;
-  }
-  .hero-action-group .btn {
-    flex: 1 1 180px;
   }
   .hero-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1109,27 +1015,20 @@ tr:hover td { background: var(--surface2); }
   .edge-deck { grid-template-columns: 1fr; }
   .edge-grid { grid-template-columns: 1fr; }
   .symbol-edge-grid { grid-template-columns: 1fr; }
-  .candidate-watch-grid { grid-template-columns: 1fr; }
   .pilot-grid { grid-template-columns: 1fr; }
-  .edge-head,
-  .section-intro {
-    flex-direction: column;
-    align-items: flex-start;
-  }
 }
 
 /* ?? 紐⑤컮????768px ?댄븯 ?????????????????????????? */
-@media (max-width: 680px) {
+@media (max-width: 768px) {
   .area-insights { grid-column: 1 / -1; }
   .btn { font-size: 13px; padding: 6px 12px; min-height: 44px; }
   .regime-banner { padding: 5px 12px; font-size: 12px; }
-  .hero-shell { border-radius: 20px; padding: 16px; }
+  .hero-shell { border-radius: 20px; }
   .hero-title { max-width: 100%; }
   .hero-summary { font-size: 14px; }
   .hero-title-row { flex-wrap: wrap; gap: 8px; }
   .hero-access-card { padding: 11px 12px; }
   .hero-access-value { font-size: 12px; }
-  .hero-meta { gap: 6px 10px; }
   .stat-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .stat-value { font-size: 18px; }
   .stat-label { font-size: 11px; }
@@ -1141,14 +1040,6 @@ tr:hover td { background: var(--surface2); }
   .readiness-strip { margin-top: 8px; padding: 10px 12px; }
   .readiness-head { font-size: 12px; }
   .readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .broker-strip,
-  .pilot-grid,
-  .candidate-watch-grid,
-  .symbol-edge-grid,
-  .edge-grid,
-  .insight-artifact-grid {
-    grid-template-columns: 1fr;
-  }
   .agent-row { grid-template-columns: 1fr; }
   .agent-metrics { align-items: flex-start; }
   .insight-agent-grid,
@@ -1160,31 +1051,10 @@ tr:hover td { background: var(--surface2); }
   .log-body { font-size: 12px; padding: 8px 10px; }
   .panel { padding: 10px; }
   .panel-title { font-size: 11px; }
-  .execution-strip-item,
-  .broker-item,
-  .edge-card-meta,
-  .candidate-watch-head {
-    flex-direction: column;
-    align-items: flex-start;
-  }
 }
 
 @media (max-width: 560px) {
   .hero-title-row { flex-direction: column; align-items: flex-start; }
-  .hero-overview,
-  .mission-rail,
-  .stat-row,
-  .readiness-grid {
-    grid-template-columns: 1fr;
-  }
-  .hero-action-group {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .hero-action-group .btn {
-    width: 100%;
-    flex: 1 1 auto;
-  }
 }
 @media (max-width: 520px) {
   .app-shell { padding: 10px; }
@@ -1195,7 +1065,7 @@ tr:hover td { background: var(--surface2); }
     font-size: 11px;
   }
   .hero-overview {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .mission-rail,
   .stat-row {
@@ -1224,8 +1094,8 @@ tr:hover td { background: var(--surface2); }
     grid-template-columns: 1fr;
   }
   .dashboard {
-    padding: 0;
-    gap: 8px;
+    padding: 6px;
+    gap: 6px;
   }
   .execution-strip-main {
     flex-direction: column;
@@ -1242,9 +1112,7 @@ tr:hover td { background: var(--surface2); }
   .broker-strip,
   .edge-grid,
   .edge-deck,
-  .symbol-edge-grid,
-  .candidate-watch-grid,
-  .pilot-grid {
+  .symbol-edge-grid {
     grid-template-columns: 1fr;
   }
   .area-position,
@@ -1257,15 +1125,7 @@ tr:hover td { background: var(--surface2); }
   th { font-size: 11px; }
   td { font-size: 12px; }
   .stat-card,
-  .panel,
-  .execution-strip,
-  .readiness-strip,
-  .symbol-edge-panel,
-  .pilot-panel,
-  .edge-panel,
-  .overview-card,
-  .mission-card,
-  .hero-shell { border-radius: 16px; }
+  .panel { border-radius: 8px; }
   .area-chart { min-height: 180px; max-height: 240px; }
   .hero-title { font-size: clamp(22px, 6vw, 32px); }
   .overview-card { padding: 12px; }
@@ -1275,15 +1135,6 @@ tr:hover td { background: var(--surface2); }
   .mission-value { font-size: 15px; }
   .btn { min-height: 44px; padding: 8px 14px; }
   .pilot-grid { gap: 8px; }
-  .hero-summary,
-  .panel-subcopy,
-  .candidate-watch-sub,
-  .execution-strip-sub,
-  .mission-detail,
-  .overview-sub {
-    font-size: 12px;
-  }
-  .hero-access-value {
-    font-size: 11px;
-  }
 }
+
+

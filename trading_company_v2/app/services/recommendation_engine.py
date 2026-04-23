@@ -15,17 +15,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     lead_market = str(payload.get("lead_market", "") or "")
     lead_weight = float(backtest_weights.get(lead_market, 0.0) or 0.0)
     weight_support = lead_weight >= 0.28
-    candidate_symbols = [
-        str(item)
-        for item in (
-            payload.get("candidate_symbols")
-            or list(backtest_weights.keys())
-            or ([lead_market] if lead_market else [])
-        )
-        if str(item or "").strip()
-    ][:5]
-    if lead_market and lead_market not in candidate_symbols:
-        candidate_symbols = [lead_market, *candidate_symbols][:5]
 
     if regime == "STRESSED":
         return {
@@ -33,7 +22,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.00x",
             "focus": "High-stress regime. Preserve crypto capital.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + ["Stress regime blocks aggressive crypto entries."],
         }
     if recent_change >= 2.6 or burst_change >= 3.0 or ema_gap >= 2.4 or (rsi_value is not None and float(rsi_value) >= 69.0):
@@ -42,7 +30,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.00x",
             "focus": f"{lead_market or 'KRW-BTC'} is overheated. Watch only.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% / ema gap {ema_gap:.2f}% / rsi {rsi_value}"],
         }
     if recent_change <= -2.2 or burst_change <= -2.8:
@@ -51,7 +38,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.00x",
             "focus": "Crypto structure is weakening. Preserve capital.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% triggered protection."],
         }
 
@@ -62,7 +48,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.50x" if stance == "BALANCED" else "0.65x",
             "focus": f"{lead_market or 'KRW-BTC'} offensive trend probe.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"signal {signal_score:.2f} / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f}"],
         }
     if bias == "offense" and signal_score >= max(offense_threshold - 0.03, 0.68) and stance != "DEFENSE" and lead_weight >= 0.18:
@@ -71,7 +56,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.30x",
             "focus": f"{lead_market or 'KRW-BTC'} selective offense watch.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"offense bias supported but still below full attack confidence / weight {lead_weight:.2f}"],
         }
 
@@ -89,7 +73,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.00x",
             "focus": f"{lead_market or 'KRW-BTC'} is still defensive, but close to a pilot watch state.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"signal {signal_score:.2f} / recent {recent_change:.2f}% / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f}"],
         }
     if bias == "defense":
@@ -98,7 +81,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.00x",
             "focus": "Crypto structure remains weak. No new exposure.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + ["Wait for momentum recovery before new crypto entries."],
         }
 
@@ -109,7 +91,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "size": "0.20x",
             "focus": f"{lead_market or 'KRW-BTC'} balanced pilot probe.",
             "symbol": lead_market,
-            "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"signal {signal_score:.2f} / ema gap {ema_gap:.2f}% / threshold {pilot_probe_threshold:.2f}"],
         }
     return {
@@ -117,7 +98,6 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         "size": "0.00x",
         "focus": "Crypto confirmation watch.",
         "symbol": lead_market,
-        "candidate_symbols": candidate_symbols,
         "notes": reasons + [f"waiting for stronger confirmation (current {signal_score:.2f}, target {pilot_probe_threshold:.2f}+)"],
     }
 
