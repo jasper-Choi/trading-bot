@@ -241,6 +241,44 @@ class TelegramNotifier:
         )
 
 
+    def send_crypto_pilot_alert(self, current_state: dict[str, Any]) -> bool:
+        if not self.enabled or not settings.telegram_ops_enabled:
+            return False
+        crypto_lane = (current_state.get("dashboard") or {}).get("crypto_live_lane") or {}
+        if not crypto_lane:
+            crypto_lane = current_state.get("crypto_live_lane") or {}
+        trigger_state = str(crypto_lane.get("trigger_state", "") or "")
+        if trigger_state not in {"arming", "ready"}:
+            return False
+        signal_score = float(crypto_lane.get("signal_score", 0.0) or 0.0)
+        trigger_threshold = float(crypto_lane.get("trigger_threshold", 0.0) or 0.0)
+        distance = float(crypto_lane.get("distance_to_trigger", 0.0) or 0.0)
+        symbol = str(crypto_lane.get("symbol", "KRW-BTC") or "KRW-BTC")
+        action = str(crypto_lane.get("action", "watchlist_only") or "watchlist_only")
+        if trigger_state == "ready":
+            title = f"[{settings.company_name}] crypto pilot READY"
+            lines = [
+                f"signal {signal_score:.2f} >= trigger {trigger_threshold:.2f}",
+                f"symbol: {symbol} / plan: {action}",
+                "tiny-size pilot order cycle is now active.",
+            ]
+            key = "crypto_pilot_ready"
+            cooldown = 30 * 60
+            dup_window = 2 * 60 * 60
+        else:
+            title = f"[{settings.company_name}] crypto pilot arming"
+            lines = [
+                f"signal {signal_score:.2f} / trigger {trigger_threshold:.2f} / distance {distance:.2f}",
+                f"symbol: {symbol} / approaching entry threshold.",
+                "Monitor closely — tiny-size pilot entry imminent if signal holds.",
+            ]
+            key = "crypto_pilot_arming"
+            cooldown = 2 * 60 * 60
+            dup_window = 6 * 60 * 60
+        body = "\n".join([title, *lines])
+        return self._send_keyed(key, body, cooldown_seconds=cooldown, suppress_duplicate_seconds=dup_window)
+
+
 notifier = TelegramNotifier(
     token=settings.telegram_bot_token,
     chat_id=settings.telegram_chat_id,

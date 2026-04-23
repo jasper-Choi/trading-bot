@@ -441,6 +441,44 @@ class CompanyOrchestrator:
         return False
 
     @staticmethod
+    def _crypto_pilot_lane(state: CompanyState) -> dict:
+        signals = list(state.latest_signals or [])
+        signal_score: float | None = None
+        trigger_threshold: float | None = None
+        action = "watchlist_only"
+        for entry in signals:
+            if entry.startswith("crypto_signal="):
+                try:
+                    signal_score = round(float(entry.split("=", 1)[1]), 2)
+                except ValueError:
+                    pass
+            elif entry.startswith("crypto_trigger="):
+                try:
+                    trigger_threshold = round(float(entry.split("=", 1)[1]), 2)
+                except ValueError:
+                    pass
+            elif entry.startswith("crypto_action="):
+                action = str(entry.split("=", 1)[1]).strip()
+        if signal_score is None or trigger_threshold is None:
+            return {}
+        distance = round(max(trigger_threshold - signal_score, 0.0), 2)
+        trigger_state = (
+            "ready" if signal_score >= trigger_threshold
+            else "arming" if distance <= 0.08
+            else "waiting"
+        )
+        return {
+            "crypto_live_lane": {
+                "signal_score": signal_score,
+                "trigger_threshold": trigger_threshold,
+                "distance_to_trigger": distance,
+                "trigger_state": trigger_state,
+                "action": action,
+                "symbol": str((state.strategy_book or {}).get("crypto_plan", {}).get("symbol") or "KRW-BTC"),
+            }
+        }
+
+    @staticmethod
     def _ops_flag_snapshot(current_state: dict) -> dict:
         daily = current_state.get("daily_summary", {}) or {}
         strategy_book = current_state.get("strategy_book", {}) or {}
@@ -769,6 +807,7 @@ class CompanyOrchestrator:
             notifier.send_ops_alert(title, lines)
         for title, lines in self._strategy_hold_alert_lines(current_state):
             notifier.send_ops_alert(title, lines)
+        notifier.send_crypto_pilot_alert(self._crypto_pilot_lane(state))
 
         return {
             "state": current_state,
