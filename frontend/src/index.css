@@ -430,6 +430,66 @@ html, body {
   line-height: 1.45;
 }
 
+.candidate-watch-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.candidate-watch-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(7, 16, 29, 0.62);
+}
+
+.candidate-watch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.candidate-watch-head span {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-size: 10px;
+}
+
+.candidate-watch-sub {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.candidate-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.candidate-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(141, 177, 199, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.candidate-chip.is-primary {
+  border-color: rgba(91, 192, 255, 0.45);
+  background: rgba(91, 192, 255, 0.12);
+  color: #d7efff;
+}
+
 .edge-panel {
   min-height: 0;
   padding: 16px 18px;
@@ -1014,8 +1074,9 @@ tr:hover td { background: var(--surface2); }
   .signal-deck { grid-template-columns: 1fr; }
   .edge-deck { grid-template-columns: 1fr; }
   .edge-grid { grid-template-columns: 1fr; }
-  .symbol-edge-grid { grid-template-columns: 1fr; }
-  .pilot-grid { grid-template-columns: 1fr; }
+.symbol-edge-grid { grid-template-columns: 1fr; }
+.candidate-watch-grid { grid-template-columns: 1fr; }
+.pilot-grid { grid-template-columns: 1fr; }
 }
 
 /* ?? 紐⑤컮????768px ?댄븯 ?????????????????????????? */
@@ -1136,5 +1197,3 @@ tr:hover td { background: var(--surface2); }
   .btn { min-height: 44px; padding: 8px 14px; }
   .pilot-grid { gap: 8px; }
 }
-
-

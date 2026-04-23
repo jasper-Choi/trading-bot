@@ -156,6 +156,7 @@ def _build_desk_status(state: CompanyState) -> dict:
             "focus": crypto_plan.get("focus", "크립토 플랜 없음"),
             "size": crypto_plan.get("size", "0.00x"),
             "leaders": (state.market_snapshot.get("crypto_leaders", []) if state.market_snapshot else [])[:3],
+            "candidate_symbols": list(crypto_plan.get("candidate_symbols", []) or [])[:5],
             "latest_order": latest_crypto_order,
         },
         "korea": {
@@ -168,6 +169,7 @@ def _build_desk_status(state: CompanyState) -> dict:
             "avg_signal": float(korea_plan.get("avg_signal", 0.0) or 0.0),
             "quality_threshold": float(korea_plan.get("quality_threshold", 0.58) or 0.58),
             "leaders": ((state.market_snapshot.get("gap_candidates") or state.market_snapshot.get("stock_leaders") or []) if state.market_snapshot else [])[:3],
+            "candidate_symbols": list(korea_plan.get("candidate_symbols", []) or [])[:5],
             "latest_order": latest_korea_order,
         },
         "us": {
@@ -180,9 +182,102 @@ def _build_desk_status(state: CompanyState) -> dict:
             "avg_signal": float(us_plan.get("avg_signal", 0.0) or 0.0),
             "quality_threshold": float(us_plan.get("quality_threshold", 0.72) or 0.72),
             "leaders": (state.market_snapshot.get("us_leaders", []) if state.market_snapshot else [])[:3],
+            "candidate_symbols": list(us_plan.get("candidate_symbols", []) or [])[:5],
             "latest_order": latest_us_order,
         },
     }
+
+
+def _build_candidate_watch_payload(state: CompanyState) -> list[dict]:
+    strategy_book = state.strategy_book or {}
+    desk_views = state.desk_views or {}
+    market_snapshot = state.market_snapshot or {}
+    desk_map = (
+        ("crypto", "Crypto Watchlist", strategy_book.get("crypto_plan", {}) or {}, desk_views.get("crypto_desk", {}) or {}),
+        ("korea", "Korea Watchlist", strategy_book.get("korea_plan", {}) or {}, desk_views.get("korea_stock_desk", {}) or {}),
+        ("us", "U.S. Watchlist", strategy_book.get("us_plan", {}) or {}, desk_views.get("us_stock_desk", {}) or {}),
+    )
+    rows: list[dict] = []
+    for desk, title, plan, view in desk_map:
+        primary_symbol = str(plan.get("symbol", "") or "").strip()
+        candidate_symbols = [str(item).strip() for item in (plan.get("candidate_symbols", []) or []) if str(item).strip()]
+        if primary_symbol and primary_symbol not in candidate_symbols:
+            candidate_symbols = [primary_symbol, *candidate_symbols]
+
+        if desk == "crypto":
+            leader_rows = list(market_snapshot.get("crypto_leaders", []) or [])[:5]
+            leader_map = {
+                str(item.get("market", "")).strip(): {
+                    "symbol": str(item.get("market", "")).strip(),
+                    "label": str(item.get("korean_name", "") or item.get("market", "")).strip(),
+                    "metric": round(float(item.get("signed_change_rate", 0.0) or 0.0) * 100, 2),
+                }
+                for item in leader_rows
+                if str(item.get("market", "")).strip()
+            }
+            for symbol in candidate_symbols:
+                leader_map.setdefault(
+                    symbol,
+                    {
+                        "symbol": symbol,
+                        "label": symbol.replace("KRW-", ""),
+                        "metric": round(float((view.get("backtest_weights", {}) or {}).get(symbol, 0.0) or 0.0), 2),
+                    },
+                )
+        elif desk == "korea":
+            leader_rows = list(market_snapshot.get("gap_candidates") or market_snapshot.get("stock_leaders") or [])[:5]
+            leader_map = {
+                str(item.get("ticker", "")).strip(): {
+                    "symbol": str(item.get("ticker", "")).strip(),
+                    "label": str(item.get("name", "") or item.get("ticker", "")).strip(),
+                    "metric": round(float(item.get("candidate_score", item.get("signal_score", 0.0)) or 0.0), 2),
+                }
+                for item in leader_rows
+                if str(item.get("ticker", "")).strip()
+            }
+        else:
+            leader_rows = list(market_snapshot.get("us_leaders", []) or [])[:5]
+            leader_map = {
+                str(item.get("ticker", "")).strip(): {
+                    "symbol": str(item.get("ticker", "")).strip(),
+                    "label": str(item.get("name", "") or item.get("ticker", "")).strip(),
+                    "metric": round(float(item.get("candidate_score", item.get("signal_score", 0.0)) or 0.0), 2),
+                }
+                for item in leader_rows
+                if str(item.get("ticker", "")).strip()
+            }
+
+        candidates: list[dict] = []
+        seen: set[str] = set()
+        ordered_symbols = [*candidate_symbols, *leader_map.keys()]
+        for symbol in ordered_symbols:
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            payload = leader_map.get(symbol) or {"symbol": symbol, "label": symbol, "metric": 0.0}
+            candidates.append(
+                {
+                    "symbol": symbol,
+                    "label": payload.get("label") or symbol,
+                    "metric": payload.get("metric", 0.0),
+                    "is_primary": symbol == primary_symbol,
+                }
+            )
+            if len(candidates) >= 5:
+                break
+
+        rows.append(
+            {
+                "desk": desk,
+                "title": title,
+                "action": str(plan.get("action", "n/a") or "n/a"),
+                "focus": str(plan.get("focus", "") or ""),
+                "primary_symbol": primary_symbol,
+                "candidate_count": len(candidates),
+                "candidates": candidates,
+            }
+        )
+    return rows
 
 
 def _build_performance_payload(state: CompanyState, closed_positions: list[dict]) -> dict:
@@ -798,6 +893,7 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
             "change_pct": round(latest_equity - 100.0, 2),
         },
         "desk_status": _build_desk_status(state),
+        "candidate_watch": _build_candidate_watch_payload(state),
         "open_positions": state.open_positions,
         "closed_positions": closed_positions,
         "performance": _build_performance_payload(state, closed_positions),

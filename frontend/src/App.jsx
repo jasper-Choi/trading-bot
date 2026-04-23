@@ -259,6 +259,7 @@ export default function App() {
   const entryBlockSummary =
     dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
   const deskOffense = dashboard?.desk_offense ?? []
+  const candidateWatch = dashboard?.candidate_watch ?? []
   const symbolEdge = dashboard?.symbol_edge ?? []
   const agentPerformance = dashboard?.agent_performance ?? []
   const capitalProfile =
@@ -712,6 +713,38 @@ export default function App() {
                   <span>{item.desk} / {item.tone}</span>
                   <span>score {Number(item.score || 0).toFixed(2)}</span>
                   <span>{item.detail || 'fresh symbol bias'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="symbol-edge-panel">
+            <div className="edge-head">
+              <div>
+                <div className="panel-title">Candidate Watchlist</div>
+                <div className="panel-subcopy">
+                  All desks scan multiple candidates. Pilot execution still selects only the strongest setup.
+                </div>
+              </div>
+            </div>
+            <div className="candidate-watch-grid">
+              {candidateWatch.map((desk) => (
+                <div className="candidate-watch-card" key={desk.desk}>
+                  <div className="candidate-watch-head">
+                    <strong>{desk.title}</strong>
+                    <span>{desk.action || 'n/a'}</span>
+                  </div>
+                  <div className="candidate-watch-sub">{desk.focus || 'no current focus'}</div>
+                  <div className="candidate-chip-row">
+                    {(desk.candidates || []).map((item) => (
+                      <span
+                        className={`candidate-chip ${item.is_primary ? 'is-primary' : ''}`}
+                        key={`${desk.desk}-${item.symbol}`}
+                      >
+                        {item.symbol}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
