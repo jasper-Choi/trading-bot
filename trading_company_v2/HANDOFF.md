@@ -209,14 +209,22 @@ Status:
 - `crypto_signal`: 0.35 / `trigger`: 0.56 / `distance`: 0.21 / `trigger_state`: waiting
 - 다음 관전 포인트: signal 0.48 도달 → arming 알림 → 0.56 → ready → tiny live order
 
+## 0.12 모바일 UI 개선 (2026-04-23)
+
+### 완료 (1cd34dc)
+- React (index.css): btn min-height 44px 복원 (768px에서 40px로 잘못 설정됨)
+- React: stat-label/priority-chip/panel-title 폰트 최솟값 11px 적용
+- React: hero-title-row 560px에서 스택 (520px → 560px)
+- React: 520px에서 btn min-height 44px 명시 유지
+- 임베디드 대시보드: 560px btn 44px, pilot-card 패딩/폰트 조정
+
 ## 8. Suggested next work
 
 Priority order:
 
 1. **tiny-size 첫 주문 체결 확인** — signal이 trigger 돌파 시 ₩150,000 한도 단일 주문 정상 체결 확인 (arming/ready Telegram 알림으로 미리 감지)
-2. **모바일 UI 개선** — React + 임베디드 대시보드 모바일 최적화
-3. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
-4. KIS 실전 전환 준비 (한국주식 데스크)
+2. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
+3. KIS 실전 전환 준비 (한국주식 데스크)
 
 ## 9. Useful commands
 
