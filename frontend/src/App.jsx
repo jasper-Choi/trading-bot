@@ -94,6 +94,15 @@ const REFRESH_SEC = 30
 const fmtMoney = (n) =>
   n != null ? `KRW ${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : null
 
+const toKST = (iso) => {
+  if (!iso || iso === '--') return '--:--'
+  try {
+    return new Date(iso).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false })
+  } catch {
+    return String(iso).slice(11, 16) || '--:--'
+  }
+}
+
 function isMarketOpen() {
   const now = new Date()
   const hours = now.getHours()
@@ -314,7 +323,7 @@ export default function App() {
   const primaryNote =
     prioritySignals[0] ||
     `System stable${
-      status?.next_run ? ` / next cycle ${status.next_run.slice(11, 16)}` : ' / cycle idle'
+      status?.next_run ? ` / next cycle ${toKST(status.next_run)}` : ' / cycle idle'
     }`
   const readinessItems = (readiness?.checklist || []).slice(0, 6)
   const readinessNextActions = (readiness?.next_actions || []).slice(0, 3)
@@ -325,7 +334,7 @@ export default function App() {
     {
       label: 'Runtime',
       value: isRunning ? t.running : t.stopped,
-      sub: status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : 'cycle idle',
+      sub: status?.next_run ? `${t.nextRun} ${toKST(status.next_run)}` : 'cycle idle',
     },
     {
       label: 'Readiness',
@@ -355,7 +364,7 @@ export default function App() {
     },
     {
       label: 'Next Cycle',
-      value: status?.next_run ? status.next_run.slice(11, 16) : '--:--',
+      value: status?.next_run ? toKST(status.next_run) : '--:--',
       detail: isRunning ? 'scheduler online' : 'scheduler offline',
       tone: isRunning ? 'tone-ok' : 'tone-warn',
     },
@@ -406,7 +415,7 @@ export default function App() {
             <span>{isRunning ? t.running : t.stopped}</span>
             <span>{t.lastUpdate}: {lastUpdate || '--:--:--'}</span>
             <span>
-              {status?.next_run ? `${t.nextRun} ${status.next_run.slice(11, 16)}` : 'No next cycle scheduled'}
+              {status?.next_run ? `${t.nextRun} ${toKST(status.next_run)}` : 'No next cycle scheduled'}
             </span>
           </div>
           {accessCards.length > 0 && (
