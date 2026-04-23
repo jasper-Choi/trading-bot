@@ -13,6 +13,8 @@ def _to_kst_hhmm(iso: str) -> str:
     except Exception:
         return iso[11:16] if len(iso) >= 16 else iso
 
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, Response
 from starlette.responses import PlainTextResponse
@@ -21,7 +23,14 @@ from app.config import settings
 from app.agents.execution_agent import ExecutionAgent
 from app.agents.us_stock_desk_agent import USStockDeskAgent
 from app.core.models import CompanyState
-from app.core.state_store import init_db, load_closed_positions, load_company_state, load_open_positions, load_performance_quick_stats
+from app.core.state_store import (
+    init_db,
+    load_closed_positions,
+    load_company_state,
+    load_open_positions,
+    load_performance_quick_stats,
+    load_recent_journal,
+)
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 from app.services.kis_broker import get_account_positions as get_kis_account_positions
@@ -33,7 +42,14 @@ from app.services.recommendation_engine import build_crypto_plan, build_korea_pl
 from app.services.upbit_broker import get_account_positions as get_upbit_account_positions
 from app.services.upbit_broker import get_order as get_upbit_order
 from app.services.upbit_broker import normalize_order_state as normalize_upbit_order_state
-from app.service_manager import local_access_urls
+from app.service_manager import (
+    LOOP_LOG_PATH,
+    SERVER_LOG_PATH,
+    local_access_urls,
+    start_services,
+    status as service_status,
+    stop_services,
+)
 
 
 app = FastAPI(title="Trading Company V2", version="0.1.0")
@@ -804,6 +820,181 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
     }
 
 
+def _tail_lines(path: Path, lines: int = 40) -> list[str]:
+    if not path.exists():
+        return []
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return []
+    return content[-max(lines, 1):]
+
+
+def _api_status_payload() -> dict:
+    svc = service_status()
+    state = load_company_state()
+    next_run = None
+    recent = list(state.recent_journal or [])
+    if recent:
+        latest_run = _safe_parse_utc(str(recent[0].get("run_at") or ""))
+        if latest_run is not None:
+            next_run = (latest_run + timedelta(seconds=settings.realtime_watch_interval_seconds)).isoformat()
+    return {
+        "running": bool((svc.get("server", {}) or {}).get("running")) and bool((svc.get("loop", {}) or {}).get("running")),
+        "server": svc.get("server", {}),
+        "loop": svc.get("loop", {}),
+        "updated_at": state.updated_at,
+        "next_run": next_run,
+        "execution_mode": normalize_execution_mode(settings.execution_mode),
+        "access": local_access_urls(),
+    }
+
+
+def _api_crypto_positions_payload(limit: int = 20) -> list[dict]:
+    rows = [item for item in load_open_positions() if item.desk == "crypto"][:limit]
+    result: list[dict] = []
+    for row in rows:
+        capital = round(float(settings.paper_capital_krw) * float(row.notional_pct or 0.0))
+        unrealized = round(capital * float(row.unrealized_pnl_pct or 0.0) / 100)
+        result.append(
+            {
+                "coin": row.symbol,
+                "entry_price": row.entry_price,
+                "current_price": row.current_price,
+                "stop_loss": row.entry_price * 0.985 if row.entry_price else 0.0,
+                "trailing_stop": row.entry_price * 0.99 if row.entry_price else 0.0,
+                "capital": capital,
+                "unrealized_pnl": unrealized,
+                "unrealized_pnl_pct": float(row.unrealized_pnl_pct or 0.0),
+                "entry_date": row.opened_at,
+                "pyramid_count": 0,
+            }
+        )
+    return result
+
+
+def _api_stock_positions_payload(limit: int = 20) -> list[dict]:
+    rows = [item for item in load_open_positions() if item.desk == "korea"][:limit]
+    result: list[dict] = []
+    for row in rows:
+        capital = round(float(settings.paper_capital_krw) * float(row.notional_pct or 0.0))
+        result.append(
+            {
+                "ticker": row.symbol,
+                "name": row.symbol,
+                "entry_price": row.entry_price,
+                "stop_loss": row.entry_price * 0.985 if row.entry_price else 0.0,
+                "capital": capital,
+                "reason": row.action or "watch",
+                "entry_date": row.opened_at,
+            }
+        )
+    return result
+
+
+def _api_trades_payload(limit: int = 50, desk: str | None = None) -> list[dict]:
+    rows = load_closed_positions(limit=max(limit, 1))
+    if desk:
+        rows = [item for item in rows if str(item.get("desk") or "") == desk]
+    result: list[dict] = []
+    for item in rows[:limit]:
+        capital = round(float(settings.paper_capital_krw) * float(item.get("notional_pct", 0.0) or 0.0))
+        pnl_pct = float(item.get("pnl_pct", item.get("realized_pnl_pct", 0.0)) or 0.0)
+        pnl = round(capital * pnl_pct / 100)
+        result.append(
+            {
+                "coin": item.get("symbol", ""),
+                "symbol": item.get("symbol", ""),
+                "entry_price": float(item.get("entry_price", 0.0) or 0.0),
+                "exit_price": float(item.get("exit_price", 0.0) or 0.0),
+                "entry_date": item.get("opened_at", ""),
+                "exit_date": item.get("closed_at", ""),
+                "exit_reason": item.get("closed_reason", ""),
+                "pnl": pnl,
+                "pnl_pct": pnl_pct,
+                "desk": item.get("desk", ""),
+            }
+        )
+    return result
+
+
+def _api_stats_payload() -> dict:
+    state = load_company_state()
+    stats = load_performance_quick_stats()
+    realized_krw = int(state.daily_summary.get("realized_pnl_krw", 0) or 0)
+    unrealized_krw = int(state.daily_summary.get("unrealized_pnl_krw", 0) or 0)
+    total_pnl = realized_krw + unrealized_krw
+    peak = max(1.0, 100.0 + max(float(state.daily_summary.get("realized_pnl_pct", 0.0) or 0.0), 0.0))
+    current = 100.0 + float(state.daily_summary.get("realized_pnl_pct", 0.0) or 0.0) + float(state.daily_summary.get("unrealized_pnl_pct", 0.0) or 0.0)
+    mdd = round(min((current - peak) / peak, 0.0), 4)
+    return {
+        "total_pnl": total_pnl,
+        "win_rate": float(stats.get("win_rate", 0.0) or 0.0) / 100.0,
+        "sharpe": round(float(state.daily_summary.get("expectancy_pct", 0.0) or 0.0) / 1.5, 2),
+        "mdd": mdd,
+        "total_trades": int(stats.get("closed_positions", 0) or 0),
+        "wins": int(state.daily_summary.get("wins", 0) or 0),
+        "losses": int(state.daily_summary.get("losses", 0) or 0),
+    }
+
+
+def _api_market_regime_payload() -> dict:
+    state = load_company_state()
+    regime_map = {
+        "TRENDING": "BULL" if state.stance == "OFFENSE" else "BEAR" if state.stance == "DEFENSE" else "NEUTRAL",
+        "RANGING": "NEUTRAL",
+        "STRESSED": "VOLATILE",
+    }
+    return {
+        "regime": regime_map.get(state.regime, "NEUTRAL"),
+        "lastChanged": state.updated_at,
+    }
+
+
+def _api_insights_payload() -> dict:
+    state = load_company_state()
+    agents: dict[str, dict] = {}
+    for item in state.agent_runs or []:
+        agents[item.name] = {
+            "score": float(item.score or 0.0),
+            "reason": str(item.reason or ""),
+        }
+    return {
+        "insight_score": round(_compute_insight_score(state) / 100, 2),
+        "agents": agents,
+        "timestamp": state.updated_at,
+    }
+
+
+def _api_agent_status_payload() -> dict:
+    state = load_company_state()
+    agents: dict[str, dict] = {}
+    for item in state.agent_runs or []:
+        agents[item.name] = {
+            "status": "ready",
+            "score": float(item.score or 0.0),
+            "last_run_at": item.generated_at,
+        }
+    snapshot = state.market_snapshot or {}
+    return {
+        "agents": agents,
+        "strategy": {
+            "direction": state.stance,
+            "regime": state.regime,
+        },
+        "risk": {
+            "allow_new_entries": state.allow_new_entries,
+            "risk_budget": state.risk_budget,
+        },
+        "artifacts": {
+            "coin_cached_count": len(snapshot.get("crypto_leaders", []) or []),
+            "coin_signal_count": len((state.desk_views.get("crypto_desk", {}) or {}).get("reasons", []) or []),
+            "stock_universe_count": len(snapshot.get("stock_leaders", []) or []),
+            "stock_signal_count": len(snapshot.get("gap_candidates", []) or []),
+        },
+    }
+
+
 @app.on_event("startup")
 def startup() -> None:
     init_db()
@@ -868,6 +1059,67 @@ def dashboard_data() -> dict:
         "live_readiness_checklist": live_readiness_checklist(),
         "upbit_live_pilot": upbit_live_pilot(),
     }
+
+
+@app.get("/api/status")
+def api_status() -> dict:
+    return _api_status_payload()
+
+
+@app.get("/api/positions")
+def api_positions() -> list[dict]:
+    return _api_crypto_positions_payload()
+
+
+@app.get("/api/trades")
+def api_trades(limit: int = 50) -> list[dict]:
+    return _api_trades_payload(limit=limit, desk="crypto")
+
+
+@app.get("/api/stats")
+def api_stats() -> dict:
+    return _api_stats_payload()
+
+
+@app.get("/api/logs")
+def api_logs(lines: int = 40) -> dict:
+    merged = _tail_lines(LOOP_LOG_PATH, lines=max(lines, 1)) + _tail_lines(SERVER_LOG_PATH, lines=max(lines, 1))
+    return {"lines": merged[-max(lines, 1):]}
+
+
+@app.post("/api/bot/start")
+def api_bot_start() -> dict:
+    return start_services()
+
+
+@app.post("/api/bot/stop")
+def api_bot_stop() -> dict:
+    return stop_services()
+
+
+@app.get("/api/bot/market-regime")
+def api_market_regime() -> dict:
+    return _api_market_regime_payload()
+
+
+@app.get("/api/stock/positions")
+def api_stock_positions() -> list[dict]:
+    return _api_stock_positions_payload()
+
+
+@app.get("/api/stock/history")
+def api_stock_history(limit: int = 30) -> list[dict]:
+    return _api_trades_payload(limit=limit, desk="korea")
+
+
+@app.get("/api/insights/")
+def api_insights() -> dict:
+    return _api_insights_payload()
+
+
+@app.get("/api/insights/agents/status")
+def api_agents_status() -> dict:
+    return _api_agent_status_payload()
 
 
 @app.get("/ops-summary")
