@@ -45,7 +45,7 @@ def current_session_snapshot() -> dict:
     korea_mid_session = _is_between(now_korea.time(), time(10, 0), time(14, 30))
     us_premarket = _is_between(now_us.time(), time(4, 0), time(9, 30))
     us_regular = _is_between(now_us.time(), time(9, 30), time(16, 0))
-    crypto_focus = not korea_open
+    crypto_focus = (not korea_open) or korea_mid_session
 
     active_desks: list[str] = []
     if korea_open:
