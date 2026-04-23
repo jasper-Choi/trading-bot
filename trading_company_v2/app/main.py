@@ -412,6 +412,31 @@ def _build_desk_offense_payload(state: CompanyState) -> list[dict]:
     return sorted(offense_rows, key=lambda item: item["score"], reverse=True)
 
 
+def _crypto_live_lane_snapshot(state: CompanyState) -> dict:
+    crypto_plan = state.strategy_book.get("crypto_plan", {}) or {}
+    crypto_view = state.desk_views.get("crypto_desk", {}) or {}
+    signal_score = float(crypto_view.get("signal_score", 0.0) or 0.0)
+    lead_market = str(crypto_plan.get("symbol") or crypto_view.get("lead_market") or "KRW-BTC")
+    lead_weight = float((crypto_view.get("backtest_weights", {}) or {}).get(lead_market, 0.0) or 0.0)
+    trigger_threshold = 0.56 if lead_weight >= 0.30 and float(crypto_view.get("recent_change_pct", 0.0) or 0.0) >= -0.4 else 0.58
+    distance_to_trigger = round(max(trigger_threshold - signal_score, 0.0), 2)
+    return {
+        "action": str(crypto_plan.get("action", "watchlist_only") or "watchlist_only"),
+        "size": str(crypto_plan.get("size", "0.00x") or "0.00x"),
+        "focus": str(crypto_plan.get("focus", "") or ""),
+        "symbol": lead_market,
+        "desk_bias": str(crypto_view.get("desk_bias", "balanced") or "balanced"),
+        "signal_score": round(signal_score, 2),
+        "recent_change_pct": round(float(crypto_view.get("recent_change_pct", 0.0) or 0.0), 2),
+        "ema_gap_pct": round(float(crypto_view.get("ema_gap_pct", 0.0) or 0.0), 2),
+        "lead_weight": round(lead_weight, 2),
+        "trigger_threshold": round(trigger_threshold, 2),
+        "distance_to_trigger": distance_to_trigger,
+        "trigger_state": "ready" if signal_score >= trigger_threshold else "arming" if distance_to_trigger <= 0.08 else "waiting",
+        "notes": [str(item) for item in (crypto_plan.get("notes", []) or [])][:3],
+    }
+
+
 def _build_agent_performance_payload(state: CompanyState) -> list[dict]:
     desk_stats = state.daily_summary.get("desk_stats", {}) or {}
     desk_agent_map = {
@@ -587,6 +612,14 @@ def _build_ops_flags(state: CompanyState) -> dict:
         if action in {"stand_by", "watchlist_only"} and any("overheated" in note or "weakly confirmed" in note for note in notes):
             add_flag("info", f"{desk_name}_hold", f"{label} 데스크 보류: {plan.get('focus', 'n/a')}")
 
+    crypto_lane = _crypto_live_lane_snapshot(state)
+    if normalize_execution_mode(settings.execution_mode) == "upbit_live" and allow_new_entries and crypto_lane.get("action") in {"watchlist_only", "capital_preservation"}:
+        add_flag(
+            "info",
+            "crypto_live_wait",
+            f"crypto live waiting: signal {crypto_lane.get('signal_score', 0.0):.2f} / trigger {crypto_lane.get('trigger_threshold', 0.0):.2f} / {crypto_lane.get('desk_bias', 'balanced')}",
+        )
+
     execution_summary = _build_execution_summary(state)
     if int(execution_summary.get("partial_count", 0) or 0) > 0:
         add_flag("warning", "live_partial_fill", f"live 부분체결 {execution_summary.get('partial_count', 0)}건 확인 필요")
@@ -676,6 +709,7 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
         "performance": _build_performance_payload(state, closed_positions),
         "capital": _build_capital_payload(state),
         "execution_summary": _build_execution_summary(state),
+        "crypto_live_lane": _crypto_live_lane_snapshot(state),
         "symbol_edge": _symbol_edge_summary(state),
         "desk_offense": _build_desk_offense_payload(state),
         "agent_performance": _build_agent_performance_payload(state),
@@ -1252,6 +1286,7 @@ def upbit_live_pilot() -> dict:
     upbit = broker_health.get("upbit", {}) or {}
     execution_summary = broker_health.get("execution_summary", {}) or {}
     configured_mode = normalize_execution_mode(settings.execution_mode)
+    crypto_lane = _crypto_live_lane_snapshot(state)
 
     blockers: list[str] = []
     cautions: list[str] = []
@@ -1320,6 +1355,7 @@ def upbit_live_pilot() -> dict:
         "blockers": blockers,
         "cautions": cautions[:5],
         "upbit_health": upbit,
+        "crypto_lane": crypto_lane,
         "entry_block_summary": _entry_block_summary(state),
         "readiness_overall": readiness.get("overall", "blocked"),
     }

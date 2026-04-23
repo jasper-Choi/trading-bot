@@ -254,6 +254,7 @@ export default function App() {
   const readiness = dashboardData?.live_readiness_checklist ?? null
   const brokerHealth = dashboardData?.broker_live_health ?? null
   const upbitPilot = dashboardData?.upbit_live_pilot ?? null
+  const cryptoLiveLane = dashboard?.crypto_live_lane ?? upbitPilot?.crypto_lane ?? null
   const entryBlockSummary =
     dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
   const deskOffense = dashboard?.desk_offense ?? []
@@ -588,6 +589,18 @@ export default function App() {
                     <span key={`step-${idx}`}>{item}</span>
                   ))}
                 </div>
+                {cryptoLiveLane && (
+                  <div className="pilot-col">
+                    <strong>Crypto Lane</strong>
+                    <span>
+                      {`${cryptoLiveLane.symbol || 'KRW-BTC'} / ${cryptoLiveLane.action || 'watchlist_only'} / ${cryptoLiveLane.size || '0.00x'}`}
+                    </span>
+                    <span>
+                      {`signal ${Number(cryptoLiveLane.signal_score || 0).toFixed(2)} / trigger ${Number(cryptoLiveLane.trigger_threshold || 0).toFixed(2)} / ${cryptoLiveLane.trigger_state || 'waiting'}`}
+                    </span>
+                    <span>{cryptoLiveLane.focus || 'crypto lane waiting for confirmation'}</span>
+                  </div>
+                )}
                 {readinessNextActions.length > 0 && (
                   <div className="pilot-col">
                     <strong>Readiness Actions</strong>
