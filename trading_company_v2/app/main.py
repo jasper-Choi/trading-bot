@@ -18,6 +18,7 @@ from app.orchestrator import CompanyOrchestrator
 from app.services.kis_broker import get_account_positions as get_kis_account_positions
 from app.services.kis_broker import get_order as get_kis_order
 from app.services.kis_broker import normalize_order_state as normalize_kis_order_state
+from app.services.broker_router import normalize_execution_mode
 from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_us_daily_prices, get_us_data_status
 from app.services.recommendation_engine import build_crypto_plan, build_korea_plan, build_us_plan
 from app.services.upbit_broker import get_account_positions as get_upbit_account_positions
@@ -1076,9 +1077,10 @@ def broker_live_health() -> dict:
                 snapshot["latest_order_error"] = f"order_failed: {exc}"
         return snapshot
 
+    configured_mode = normalize_execution_mode(settings.execution_mode)
     return {
         "updated_at": state.updated_at,
-        "execution_mode": state.execution_mode,
+        "execution_mode": configured_mode,
         "execution_summary": execution_summary,
         "upbit": upbit_snapshot(),
         "kis": kis_snapshot(),
@@ -1118,7 +1120,7 @@ def live_readiness_checklist() -> dict:
         )
     )
 
-    mode = str(state.execution_mode or "paper")
+    mode = normalize_execution_mode(settings.execution_mode)
     if mode == "paper":
         checklist.append(_check_item("warn", "Execution Mode", "currently paper mode"))
     else:
@@ -1249,6 +1251,7 @@ def upbit_live_pilot() -> dict:
     readiness = live_readiness_checklist()
     upbit = broker_health.get("upbit", {}) or {}
     execution_summary = broker_health.get("execution_summary", {}) or {}
+    configured_mode = normalize_execution_mode(settings.execution_mode)
 
     blockers: list[str] = []
     cautions: list[str] = []
@@ -1259,7 +1262,7 @@ def upbit_live_pilot() -> dict:
         blockers.append("Upbit API credentials are missing.")
     if not bool(settings.upbit_allow_live):
         blockers.append("UPBIT_ALLOW_LIVE is false.")
-    if str(state.execution_mode or "paper") != "upbit_live":
+    if configured_mode != "upbit_live":
         cautions.append("EXECUTION_MODE is not set to upbit_live yet.")
     if not bool(upbit.get("balances_ok")):
         cautions.append("Upbit balance check has not passed yet.")
@@ -1291,13 +1294,18 @@ def upbit_live_pilot() -> dict:
         if cautions
         else "Upbit pilot still needs review."
     )
+    mode_step = (
+        "Keep EXECUTION_MODE=upbit_live on the live host."
+        if configured_mode == "upbit_live"
+        else "Set EXECUTION_MODE=upbit_live only after readiness blockers clear."
+    )
     return {
         "updated_at": state.updated_at,
         "go_live_ready": go_live_ready,
         "pilot_status": pilot_status,
         "pilot_headline": pilot_headline,
         "broker": "upbit",
-        "execution_mode": state.execution_mode,
+        "execution_mode": configured_mode,
         "pilot_cap_krw": pilot_cap_krw,
         "pilot_guardrails": {
             "max_order_krw": settings.upbit_pilot_max_krw,
@@ -1305,7 +1313,7 @@ def upbit_live_pilot() -> dict:
         },
         "suggested_sequence": [
             "Verify balances and credentials with Upbit health check.",
-            "Set EXECUTION_MODE=upbit_live only after readiness blockers clear.",
+            mode_step,
             "Run one tiny-size crypto entry/exit cycle first.",
             "Confirm order lookup, fill state, and position sync before scaling.",
         ],
