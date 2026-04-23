@@ -64,12 +64,22 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": lead_market,
             "notes": reasons + ["모멘텀 회복까지 대기"],
         }
+    # balanced bias: 낮은 기준으로 파일럿 검증용 소량 탐색 허용
+    # 손실 최소화 — 파일럿 한도(₩60,000)가 실제 주문액 상한
+    if bias == "balanced" and signal_score >= 0.58 and stance != "DEFENSE" and ema_gap <= 1.5 and recent_change > -1.0:
+        return {
+            "action": "probe_longs",
+            "size": "0.20x",
+            "focus": f"{lead_market or 'KRW-BTC'} 균형 국면 파일럿 탐색",
+            "symbol": lead_market,
+            "notes": reasons + [f"균형 편향 파일럿: 시그널 {signal_score:.2f} / EMA갭 {ema_gap:.2f}% (₩60,000 한도 적용)"],
+        }
     return {
         "action": "watchlist_only",
         "size": "0.00x",
         "focus": "선별적 크립토 감시",
         "symbol": lead_market,
-        "notes": reasons + [f"더 강한 확인 신호 대기 (가중치 {lead_weight:.2f})"],
+        "notes": reasons + [f"더 강한 확인 신호 대기 (현재 {signal_score:.2f}, 목표 0.58+)"],
     }
 
 
