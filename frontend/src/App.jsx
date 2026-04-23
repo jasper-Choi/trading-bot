@@ -315,6 +315,7 @@ export default function App() {
       status?.next_run ? ` / next cycle ${status.next_run.slice(11, 16)}` : ' / cycle idle'
     }`
   const readinessItems = (readiness?.checklist || []).slice(0, 6)
+  const readinessNextActions = (readiness?.next_actions || []).slice(0, 3)
 
   const statusCards = [
     {
@@ -538,6 +539,16 @@ export default function App() {
                   <span>{brokerHealth?.kis?.balances_ok ? `balances ${brokerHealth?.kis?.balances_count || 0}` : 'balance check pending'}</span>
                 </div>
               </div>
+              {readinessNextActions.length > 0 && (
+                <div className="pilot-grid">
+                  <div className="pilot-col">
+                    <strong>Go-Live Next Actions</strong>
+                    {readinessNextActions.map((item, idx) => (
+                      <span key={`readiness-next-${idx}`}>{item}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -569,6 +580,14 @@ export default function App() {
                     <span key={`step-${idx}`}>{item}</span>
                   ))}
                 </div>
+                {readinessNextActions.length > 0 && (
+                  <div className="pilot-col">
+                    <strong>Readiness Actions</strong>
+                    {readinessNextActions.map((item, idx) => (
+                      <span key={`pilot-readiness-${idx}`}>{item}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
