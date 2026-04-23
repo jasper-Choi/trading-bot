@@ -183,6 +183,33 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
+    # Single strong candidate — smaller size, tighter criteria
+    if active_gap_count >= 1 and quality_score >= 0.65 and avg_signal >= 0.58 and top_candidate_score >= 0.66 and not mid_session:
+        return {
+            "action": "selective_probe",
+            "size": "0.20x",
+            "focus": f"{top_name} cautious single-candidate probe (opening window).",
+            "symbol": top_ticker,
+            "candidate_symbols": candidate_symbols,
+            "notes": [
+                f"single candidate quality {quality_score:.2f} / signal {avg_signal:.2f} / candidate_score {top_candidate_score:.2f}",
+                "Small size — only 1 gap candidate confirmed.",
+            ],
+            **_qmeta,
+        }
+    if mid_session and active_gap_count >= 1 and quality_score >= 0.70 and avg_signal >= 0.60 and top_candidate_score >= 0.68:
+        return {
+            "action": "selective_probe",
+            "size": "0.15x",
+            "focus": f"{top_name} mid-session follow-through probe.",
+            "symbol": top_ticker,
+            "candidate_symbols": candidate_symbols,
+            "notes": [
+                f"mid-session quality {quality_score:.2f} / signal {avg_signal:.2f} / candidate_score {top_candidate_score:.2f}",
+                "Small size — mid-session entry, requires high conviction.",
+            ],
+            **_qmeta,
+        }
     if mid_session:
         return {
             "action": "stand_by",
@@ -260,7 +287,7 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
             ],
             **_qmeta,
         }
-    if quality_score < 0.72 or avg_signal < 0.62 or active_us_count < 3 or avg_change < 0.35:
+    if quality_score < 0.62 or avg_signal < 0.52 or active_us_count < 2 or avg_change < 0.20:
         return {
             "action": "stand_by",
             "size": "0.00x",
@@ -296,6 +323,20 @@ def build_us_plan(stance: str, regime: str, payload: dict[str, Any], session: di
             "notes": [
                 f"watchlist leaders {active_us_count}",
                 f"quality {quality_score:.2f} / avg change {avg_change:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+            ],
+            **_qmeta,
+        }
+    # 2-leader fallback — small size, tighter individual stock requirement
+    if active_us_count >= 2 and quality_score >= 0.64 and avg_signal >= 0.54 and top_signal >= 0.60 and stance != "DEFENSE":
+        return {
+            "action": "selective_probe",
+            "size": "0.10x",
+            "focus": f"{top_ticker} cautious 2-leader probe.",
+            "symbol": top_ticker,
+            "candidate_symbols": candidate_symbols,
+            "notes": [
+                f"2-leader setup / quality {quality_score:.2f} / avg signal {avg_signal:.2f} / top signal {top_signal:.2f}",
+                "Small size — only 2 confirmed leaders in session.",
             ],
             **_qmeta,
         }
