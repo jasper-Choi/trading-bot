@@ -834,15 +834,20 @@ def _api_status_payload() -> dict:
     svc = service_status()
     state = load_company_state()
     next_run = None
+    loop_running = bool((svc.get("loop", {}) or {}).get("running"))
+    updated_at = _safe_parse_utc(state.updated_at)
+    if updated_at is not None:
+        freshness_limit = max(int(settings.realtime_watch_interval_seconds) * 3, 180)
+        loop_running = loop_running or (datetime.now(timezone.utc) - updated_at).total_seconds() <= freshness_limit
     recent = list(state.recent_journal or [])
     if recent:
         latest_run = _safe_parse_utc(str(recent[0].get("run_at") or ""))
         if latest_run is not None:
             next_run = (latest_run + timedelta(seconds=settings.realtime_watch_interval_seconds)).isoformat()
     return {
-        "running": bool((svc.get("server", {}) or {}).get("running")) and bool((svc.get("loop", {}) or {}).get("running")),
-        "server": svc.get("server", {}),
-        "loop": svc.get("loop", {}),
+        "running": loop_running,
+        "server": {**(svc.get("server", {}) or {}), "running": True},
+        "loop": {**(svc.get("loop", {}) or {}), "running": loop_running},
         "updated_at": state.updated_at,
         "next_run": next_run,
         "execution_mode": normalize_execution_mode(settings.execution_mode),
