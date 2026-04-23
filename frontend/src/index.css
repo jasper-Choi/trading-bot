@@ -1021,48 +1021,45 @@ tr:hover td { background: var(--surface2); }
 /* ?? 紐⑤컮????768px ?댄븯 ?????????????????????????? */
 @media (max-width: 768px) {
   .area-insights { grid-column: 1 / -1; }
-  .btn { font-size: 12px; padding: 4px 9px; min-height: 40px; }
+  .btn { font-size: 13px; padding: 6px 12px; min-height: 44px; }
   .regime-banner { padding: 5px 12px; font-size: 12px; }
-  .hero-shell { border-radius: 24px; }
+  .hero-shell { border-radius: 20px; }
   .hero-title { max-width: 100%; }
   .hero-summary { font-size: 14px; }
+  .hero-title-row { flex-wrap: wrap; gap: 8px; }
   .hero-access-card { padding: 11px 12px; }
-  .hero-access-value { font-size: 11px; }
+  .hero-access-value { font-size: 12px; }
   .stat-row { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .stat-value { font-size: 18px; }
-  .stat-label { font-size: 10px; }
+  .stat-label { font-size: 11px; }
   .stat-sub   { font-size: 11px; }
-  .execution-strip { margin-top: 8px; padding: 9px 10px; }
+  .execution-strip { margin-top: 8px; padding: 10px 12px; }
   .execution-strip-main,
-  .execution-strip-sub { font-size: 11px; }
-  .priority-chip { font-size: 10px; }
-  .readiness-strip { margin-top: 8px; padding: 9px 10px; }
-  .readiness-head { font-size: 11px; }
+  .execution-strip-sub { font-size: 12px; }
+  .priority-chip { font-size: 11px; }
+  .readiness-strip { margin-top: 8px; padding: 10px 12px; }
+  .readiness-head { font-size: 12px; }
   .readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .agent-row {
-    grid-template-columns: 1fr;
-  }
-  .agent-metrics {
-    align-items: flex-start;
-  }
+  .agent-row { grid-template-columns: 1fr; }
+  .agent-metrics { align-items: flex-start; }
   .insight-agent-grid,
   .insight-runtime-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   table { font-size: 12px; min-width: 380px; }
-  th, td { padding: 6px 6px; }
+  th, td { padding: 6px 8px; }
   .badge { font-size: 11px; padding: 2px 6px; }
-  .log-body { font-size: 11px; padding: 8px 10px; }
+  .log-body { font-size: 12px; padding: 8px 10px; }
   .panel { padding: 10px; }
-  .panel-title { font-size: 10px; }
+  .panel-title { font-size: 11px; }
 }
 
+@media (max-width: 560px) {
+  .hero-title-row { flex-direction: column; align-items: flex-start; }
+}
 @media (max-width: 520px) {
   .app-shell { padding: 10px; }
   .hero-shell,
   .overview-card { padding: 14px; }
-  .hero-title-row {
-    flex-direction: column;
-  }
   .hero-meta {
     gap: 8px 12px;
     font-size: 11px;
@@ -1125,19 +1122,19 @@ tr:hover td { background: var(--surface2); }
     min-height: 220px;
   }
   table { min-width: 320px; }
-  th { font-size: 10px; }
-  td { font-size: 11px; }
+  th { font-size: 11px; }
+  td { font-size: 12px; }
   .stat-card,
-  .panel {
-    border-radius: 8px;
-  }
+  .panel { border-radius: 8px; }
   .area-chart { min-height: 180px; max-height: 240px; }
   .hero-title { font-size: clamp(22px, 6vw, 32px); }
   .overview-card { padding: 12px; }
   .overview-value { font-size: 18px; }
-  .overview-label { font-size: 10px; }
+  .overview-label { font-size: 11px; }
   .mission-card { padding: 11px 12px; }
   .mission-value { font-size: 15px; }
+  .btn { min-height: 44px; padding: 8px 14px; }
+  .pilot-grid { gap: 8px; }
 }
 
 
