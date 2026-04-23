@@ -235,6 +235,7 @@ export default function App() {
   const marketOpen    = isMarketOpen()
   const dashboard     = dashboardData?.dashboard ?? null
   const access        = dashboardData?.access ?? null
+  const deploymentProfile = dashboardData?.deployment_profile ?? null
   const executionSummary = dashboard?.execution_summary ?? {}
   const opsFlags      = dashboard?.ops_flags ?? { severity: 'stable', items: [] }
   const readiness     = dashboardData?.live_readiness_checklist ?? null
@@ -315,6 +316,32 @@ export default function App() {
       tone: brokerHealth?.upbit?.balances_ok || brokerHealth?.kis?.balances_ok ? 'tone-ok' : 'tone-warn',
     },
   ]
+  const missionRailCards = [
+    {
+      label: 'Entry Gate',
+      value: entryBlockSummary?.blocked ? 'Blocked' : 'Open',
+      detail: entryBlockSummary?.detail || 'risk gate open',
+      tone: entryBlockSummary?.blocked ? 'tone-risk' : 'tone-ok',
+    },
+    {
+      label: 'Next Cycle',
+      value: status?.next_run ? status.next_run.slice(11, 16) : '--:--',
+      detail: isRunning ? 'scheduler online' : 'scheduler offline',
+      tone: isRunning ? 'tone-ok' : 'tone-warn',
+    },
+    {
+      label: 'Latest Live',
+      value: latestLive?.symbol || latestLive?.focus || 'None',
+      detail: latestLive ? `${latestLive.status || 'n/a'} / ${latestLive.effect_status || 'n/a'}` : 'no live execution yet',
+      tone: latestLive ? liveToneClass : 'tone-muted',
+    },
+    {
+      label: 'Profile',
+      value: deploymentProfile?.label || 'Unknown',
+      detail: deploymentProfile?.summary || 'deployment profile unavailable',
+      tone: deploymentProfile?.role === 'live_target' ? 'tone-info' : 'tone-muted',
+    },
+  ]
   const accessCards = [
     access?.public_url
       ? { label: access?.public_label || 'Public URL', value: access.public_url }
@@ -393,7 +420,7 @@ export default function App() {
       </section>
 
       <section className="mission-rail">
-        {missionRail.map((item) => (
+        {missionRailCards.map((item) => (
           <div className={`mission-card ${item.tone}`} key={item.label}>
             <span className="mission-label">{item.label}</span>
             <strong className="mission-value">{item.value}</strong>
