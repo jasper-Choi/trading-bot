@@ -1,10 +1,12 @@
 export default function InsightPanel({ data, agentStatus }) {
-  if (!data) return (
-    <div className="panel insight-panel">
-      <div className="panel-title">인사이트 점수</div>
-      <div className="empty">인사이트 엔진 로딩 중...</div>
-    </div>
-  )
+  if (!data) {
+    return (
+      <div className="panel insight-panel">
+        <div className="panel-title">Insight Score</div>
+        <div className="empty">Loading operator insight data...</div>
+      </div>
+    )
+  }
 
   const score = data.insight_score
   const color = score >= 0.6 ? 'c-green' : score >= 0.4 ? 'c-yellow' : 'c-red'
@@ -18,8 +20,10 @@ export default function InsightPanel({ data, agentStatus }) {
     <div className="panel insight-panel">
       <div className="insight-header">
         <div>
-          <div className="panel-title">인사이트 점수</div>
-          <div className="panel-subcopy">모델 신뢰도, 런타임 에이전트 상태, 캐시 준비도.</div>
+          <div className="panel-title">Insight Score</div>
+          <div className="panel-subcopy">
+            Model flow confidence, runtime agent health, and cache readiness.
+          </div>
         </div>
         <div className={`insight-score-badge ${color}`}>
           {(score * 100).toFixed(0)}
@@ -34,7 +38,7 @@ export default function InsightPanel({ data, agentStatus }) {
             <div key={name} className="insight-agent-card">
               <div className="insight-agent-name">{name}</div>
               <div className={`insight-agent-score ${c}`}>{(s * 100).toFixed(0)}</div>
-              <div className="insight-agent-reason">{agent.reason?.slice(0, 52) || '분석 없음'}</div>
+              <div className="insight-agent-reason">{agent.reason?.slice(0, 52) || 'No reasoning available'}</div>
             </div>
           )
         })}
@@ -42,14 +46,14 @@ export default function InsightPanel({ data, agentStatus }) {
 
       <div className="insight-runtime">
         <div className="insight-runtime-head">
-          <span>전략: {strategy.direction || 'NEUTRAL'}</span>
-          <span>위험: {risk.allow_new_entries === false ? '차단' : '개방'}</span>
+          <span>Strategy: {strategy.direction || 'NEUTRAL'}</span>
+          <span>Risk: {risk.allow_new_entries === false ? 'Blocked' : 'Open'}</span>
         </div>
         <div className="insight-runtime-grid">
           {Object.entries(runtimeAgents).map(([name, agent]) => (
             <div key={name} className="insight-runtime-card">
               <div className="insight-runtime-name">{name}</div>
-              <div className="insight-runtime-status">{agent.status || '대기'}</div>
+              <div className="insight-runtime-status">{agent.status || 'idle'}</div>
               <div className="insight-runtime-time">{agent.last_run_at?.slice(11, 19) || '--:--:--'}</div>
             </div>
           ))}

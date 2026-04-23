@@ -37,7 +37,9 @@ export default function PositionTable({ positions, t, embedded = false }) {
                     <span>손절가 {money(stop)}</span>
                     <span>수익률 {pct(pos.unrealized_pnl_pct)}</span>
                     <span>진입 {pos.entry_date?.slice(5, 16) || '--'}</span>
-                    {Number(pos.pyramid_count || 0) > 0 && <span>피라미딩 x{Number(pos.pyramid_count) + 1}</span>}
+                    {Number(pos.pyramid_count || 0) > 0 && (
+                      <span>피라미딩 x{Number(pos.pyramid_count) + 1}</span>
+                    )}
                   </div>
                 </article>
               )
@@ -76,8 +78,7 @@ export default function PositionTable({ positions, t, embedded = false }) {
                     <td className="c-red">{money(stop)}</td>
                     <td>
                       <span className={`badge ${badgeCls}`}>
-                        {isPos ? '+' : '-'}{money(pnlVal)}
-                        &nbsp;({pct(pos.unrealized_pnl_pct)})
+                        {isPos ? '+' : '-'}{money(pnlVal)} &nbsp;({pct(pos.unrealized_pnl_pct)})
                       </span>
                     </td>
                     <td className="c-muted">{pos.entry_date?.slice(5, 16) || '--'}</td>
