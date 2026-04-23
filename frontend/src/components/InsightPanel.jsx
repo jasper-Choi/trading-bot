@@ -1,3 +1,5 @@
+import { formatKstDateTime } from '../utils/time'
+
 export default function InsightPanel({ data, agentStatus }) {
   if (!data) {
     return (
@@ -38,7 +40,9 @@ export default function InsightPanel({ data, agentStatus }) {
             <div key={name} className="insight-agent-card">
               <div className="insight-agent-name">{name}</div>
               <div className={`insight-agent-score ${c}`}>{(s * 100).toFixed(0)}</div>
-              <div className="insight-agent-reason">{agent.reason?.slice(0, 52) || 'No reasoning available'}</div>
+              <div className="insight-agent-reason">
+                {agent.reason?.slice(0, 52) || 'No reasoning available'}
+              </div>
             </div>
           )
         })}
@@ -54,7 +58,7 @@ export default function InsightPanel({ data, agentStatus }) {
             <div key={name} className="insight-runtime-card">
               <div className="insight-runtime-name">{name}</div>
               <div className="insight-runtime-status">{agent.status || 'idle'}</div>
-              <div className="insight-runtime-time">{agent.last_run_at?.slice(11, 19) || '--:--:--'}</div>
+              <div className="insight-runtime-time">{formatKstDateTime(agent.last_run_at)}</div>
             </div>
           ))}
         </div>
@@ -63,12 +67,12 @@ export default function InsightPanel({ data, agentStatus }) {
       <div className="insight-artifact-grid">
         <div>코인 캐시: {artifacts.coin_cached_count ?? 0}</div>
         <div>코인 시그널: {artifacts.coin_signal_count ?? 0}</div>
-        <div>주식 캐시: {artifacts.stock_universe_count ?? 0}</div>
+        <div>주식 유니버스: {artifacts.stock_universe_count ?? 0}</div>
         <div>주식 시그널: {artifacts.stock_signal_count ?? 0}</div>
       </div>
 
       <div className="insight-footer">
-        {data.timestamp?.slice(11, 19)} UTC
+        {formatKstDateTime(data.timestamp)} KST
       </div>
     </div>
   )

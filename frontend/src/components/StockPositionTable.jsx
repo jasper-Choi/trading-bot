@@ -1,4 +1,4 @@
-/** Open stock position table. */
+import { formatKstDateTime } from '../utils/time'
 
 const money = (n) =>
   n != null ? `KRW ${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : '--'
@@ -19,7 +19,7 @@ export default function StockPositionTable({ positions }) {
                 <th>손절가</th>
                 <th>자본</th>
                 <th>사유</th>
-                <th>진입일</th>
+                <th>진입 시각</th>
               </tr>
             </thead>
             <tbody>
@@ -37,7 +37,7 @@ export default function StockPositionTable({ positions }) {
                   <td>
                     <span className="badge badge-blue">{pos.reason || '--'}</span>
                   </td>
-                  <td className="c-muted">{pos.entry_date?.slice(5, 16) || '--'}</td>
+                  <td className="c-muted">{formatKstDateTime(pos.entry_date)}</td>
                 </tr>
               ))}
             </tbody>

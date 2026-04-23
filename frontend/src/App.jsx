@@ -1,9 +1,10 @@
-import { Suspense, lazy, startTransition, useState, useEffect, useCallback } from 'react'
+﻿import { Suspense, lazy, startTransition, useState, useEffect, useCallback } from 'react'
 import { api } from './api'
 import StatCard from './components/StatCard'
 import PositionTable from './components/PositionTable'
 import MarketRegimeBanner from './components/MarketRegimeBanner'
 import StockPositionTable from './components/StockPositionTable'
+import { formatKstTime, getKstClock } from './utils/time'
 
 const PnlChart = lazy(() => import('./components/PnlChart'))
 const TradeHistory = lazy(() => import('./components/TradeHistory'))
@@ -36,15 +37,15 @@ const T = {
     currentPrice: '현재가',
     stopLoss: '손절가',
     unrealizedPnl: '미실현 손익',
-    entryDate: '진입일',
-    exitDate: '청산일',
+    entryDate: '진입 시각',
+    exitDate: '청산 시각',
     exitReason: '사유',
     exitPrice: '청산가',
     pnl: '손익',
     pnlPct: '수익률',
-    noPosition: '보유 포지션 없음',
-    noTradeData: '거래 내역 없음',
-    noLog: '로그 없음',
+    noPosition: '보유 중인 포지션이 없습니다',
+    noTradeData: '거래 내역이 없습니다',
+    noLog: '로그가 없습니다',
     apiError: 'API 서버에 연결할 수 없습니다',
     tabCoin: '코인',
     tabStock: '주식',
@@ -94,20 +95,16 @@ const REFRESH_SEC = 30
 const fmtMoney = (n) =>
   n != null ? `KRW ${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : null
 
-const toKST = (iso) => {
-  if (!iso || iso === '--') return '--:--'
-  try {
-    return new Date(iso).toLocaleTimeString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: false })
-  } catch {
-    return String(iso).slice(11, 16) || '--:--'
-  }
-}
-
 function isMarketOpen() {
-  const now = new Date()
-  const hours = now.getHours()
-  const minutes = now.getMinutes()
-  const day = now.getDay()
+  const clock = getKstClock()
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    weekday: 'short',
+  }).format(new Date())
+  const hours = Number(clock.hour ?? 0)
+  const minutes = Number(clock.minute ?? 0)
+  const dayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const day = dayMap[weekday] ?? 0
   if (day === 0 || day === 6) return false
   const totalMin = hours * 60 + minutes
   return totalMin >= 9 * 60 && totalMin <= 15 * 60 + 30
@@ -208,13 +205,7 @@ export default function App() {
       if (secondary.agents) setAgentStatus(secondary.agents)
     })
 
-    setLastUpdate(
-      new Date().toLocaleTimeString('ko-KR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      })
-    )
+    setLastUpdate(formatKstTime(new Date()))
     setCountdown(REFRESH_SEC)
   }, [])
 
@@ -323,7 +314,7 @@ export default function App() {
   const primaryNote =
     prioritySignals[0] ||
     `System stable${
-      status?.next_run ? ` / next cycle ${toKST(status.next_run)}` : ' / cycle idle'
+      status?.next_run ? ` / next cycle ${formatKstTime(status.next_run)}` : ' / cycle idle'
     }`
   const readinessItems = (readiness?.checklist || []).slice(0, 6)
   const readinessNextActions = (readiness?.next_actions || []).slice(0, 3)
@@ -334,7 +325,7 @@ export default function App() {
     {
       label: 'Runtime',
       value: isRunning ? t.running : t.stopped,
-      sub: status?.next_run ? `${t.nextRun} ${toKST(status.next_run)}` : 'cycle idle',
+      sub: status?.next_run ? `${t.nextRun} ${formatKstTime(status.next_run)}` : 'cycle idle',
     },
     {
       label: 'Readiness',
@@ -364,7 +355,7 @@ export default function App() {
     },
     {
       label: 'Next Cycle',
-      value: status?.next_run ? toKST(status.next_run) : '--:--',
+      value: status?.next_run ? formatKstTime(status.next_run) : '--:--',
       detail: isRunning ? 'scheduler online' : 'scheduler offline',
       tone: isRunning ? 'tone-ok' : 'tone-warn',
     },
@@ -415,7 +406,7 @@ export default function App() {
             <span>{isRunning ? t.running : t.stopped}</span>
             <span>{t.lastUpdate}: {lastUpdate || '--:--:--'}</span>
             <span>
-              {status?.next_run ? `${t.nextRun} ${toKST(status.next_run)}` : 'No next cycle scheduled'}
+              {status?.next_run ? `${t.nextRun} ${formatKstTime(status.next_run)}` : 'No next cycle scheduled'}
             </span>
           </div>
           {accessCards.length > 0 && (
@@ -472,7 +463,7 @@ export default function App() {
 
       <MarketRegimeBanner
         regime={regime?.regime ?? 'NEUTRAL'}
-        lastChanged={regime?.last_changed ?? null}
+        lastChanged={regime?.last_changed ?? regime?.lastChanged ?? null}
         marketOpen={marketOpen}
       />
 

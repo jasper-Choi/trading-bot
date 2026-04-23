@@ -1,4 +1,4 @@
-/** Open crypto position table. */
+import { formatKstDateTime } from '../utils/time'
 
 const money = (n) =>
   n != null ? `KRW ${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : '--'
@@ -6,9 +6,6 @@ const money = (n) =>
 const pct = (n) =>
   n != null ? `${n >= 0 ? '+' : ''}${Number(n).toFixed(2)}%` : '--'
 
-/**
- * embedded=true renders only the table body so the parent panel can wrap it.
- */
 export default function PositionTable({ positions, t, embedded = false }) {
   const tableBody = (
     <div className="table-wrap">
@@ -32,13 +29,13 @@ export default function PositionTable({ positions, t, embedded = false }) {
                     </span>
                   </div>
                   <div className="mobile-card-grid">
-                    <span>진입가 {money(pos.entry_price)}</span>
-                    <span>현재가 {money(pos.current_price)}</span>
-                    <span>손절가 {money(stop)}</span>
-                    <span>수익률 {pct(pos.unrealized_pnl_pct)}</span>
-                    <span>진입 {pos.entry_date?.slice(5, 16) || '--'}</span>
+                    <span>{`진입가 ${money(pos.entry_price)}`}</span>
+                    <span>{`현재가 ${money(pos.current_price)}`}</span>
+                    <span>{`손절가 ${money(stop)}`}</span>
+                    <span>{`수익률 ${pct(pos.unrealized_pnl_pct)}`}</span>
+                    <span>{`진입 ${formatKstDateTime(pos.entry_date)}`}</span>
                     {Number(pos.pyramid_count || 0) > 0 && (
-                      <span>피라미딩 x{Number(pos.pyramid_count) + 1}</span>
+                      <span>{`피라미딩 x${Number(pos.pyramid_count) + 1}`}</span>
                     )}
                   </div>
                 </article>
@@ -81,7 +78,7 @@ export default function PositionTable({ positions, t, embedded = false }) {
                         {isPos ? '+' : '-'}{money(pnlVal)} &nbsp;({pct(pos.unrealized_pnl_pct)})
                       </span>
                     </td>
-                    <td className="c-muted">{pos.entry_date?.slice(5, 16) || '--'}</td>
+                    <td className="c-muted">{formatKstDateTime(pos.entry_date)}</td>
                   </tr>
                 )
               })}

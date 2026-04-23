@@ -1,4 +1,4 @@
-/** Recent trade history table. */
+import { formatKstDateTime } from '../utils/time'
 
 const money = (n) =>
   n != null ? `KRW ${Math.round(Math.abs(n)).toLocaleString('ko-KR')}` : '--'
@@ -28,12 +28,12 @@ export default function TradeHistory({ trades, t }) {
                       <span className={`badge ${badgeCls}`}>{sign}{Math.abs(pnlPct).toFixed(2)}%</span>
                     </div>
                     <div className="mobile-card-grid">
-                      <span>진입 {tr.entry_date || '--'}</span>
-                      <span>청산 {tr.exit_date || '--'}</span>
-                      <span>사유 {tr.exit_reason || '--'}</span>
-                      <span>손익 {sign}{money(pnl)}</span>
-                      <span>진입가 {money(tr.entry_price)}</span>
-                      <span>청산가 {money(tr.exit_price)}</span>
+                      <span>{`진입 ${formatKstDateTime(tr.entry_date)}`}</span>
+                      <span>{`청산 ${formatKstDateTime(tr.exit_date)}`}</span>
+                      <span>{`사유 ${tr.exit_reason || '--'}`}</span>
+                      <span>{`손익 ${sign}${money(pnl)}`}</span>
+                      <span>{`진입가 ${money(tr.entry_price)}`}</span>
+                      <span>{`청산가 ${money(tr.exit_price)}`}</span>
                     </div>
                   </article>
                 )
@@ -64,8 +64,8 @@ export default function TradeHistory({ trades, t }) {
                   return (
                     <tr key={`${symbol}-${tr.exit_date || i}-${i}`}>
                       <td><strong>{symbol}</strong></td>
-                      <td className="c-muted">{tr.entry_date || '--'}</td>
-                      <td className="c-muted">{tr.exit_date || '--'}</td>
+                      <td className="c-muted">{formatKstDateTime(tr.entry_date)}</td>
+                      <td className="c-muted">{formatKstDateTime(tr.exit_date)}</td>
                       <td>
                         <span className="badge badge-blue">{tr.exit_reason || '--'}</span>
                       </td>
