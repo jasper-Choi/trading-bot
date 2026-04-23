@@ -1458,6 +1458,87 @@ def upbit_live_pilot() -> dict:
     }
 
 
+@app.get("/diagnostics/kis-live-pilot")
+def kis_live_pilot() -> dict:
+    state = load_company_state()
+    broker_health = broker_live_health()
+    readiness = live_readiness_checklist()
+    kis = broker_health.get("kis", {}) or {}
+    execution_summary = broker_health.get("execution_summary", {}) or {}
+    configured_mode = normalize_execution_mode(settings.execution_mode)
+
+    blockers: list[str] = []
+    cautions: list[str] = []
+
+    if settings.live_capital_krw <= 0:
+        blockers.append("LIVE_CAPITAL_KRW is not configured.")
+    if not bool(kis.get("configured")):
+        blockers.append("KIS API credentials are missing (KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO / KIS_PRODUCT_CODE).")
+    if not bool(settings.kis_allow_live):
+        blockers.append("KIS_ALLOW_LIVE is false.")
+    if configured_mode != "kis_live":
+        cautions.append("EXECUTION_MODE is not set to kis_live yet.")
+    if not bool(kis.get("balances_ok")):
+        cautions.append("KIS balance check has not passed yet.")
+    if not bool(state.allow_new_entries):
+        cautions.append("Entry gate is currently blocked by risk mode.")
+    if int(execution_summary.get("pending_count", 0) or 0) > 0:
+        cautions.append("There are pending live orders that should be clean before pilot.")
+    if int(execution_summary.get("stale_count", 0) or 0) > 0:
+        blockers.append("There are stale live orders that must be cleared first.")
+
+    go_live_ready = not blockers and bool(kis.get("balances_ok")) and bool(state.allow_new_entries)
+    pilot_status = (
+        "ready_for_tiny_size"
+        if go_live_ready
+        else "blocked"
+        if blockers
+        else "needs_caution"
+    )
+    pilot_headline = (
+        "KIS live pilot ready for a tiny-size Korea stock validation cycle."
+        if go_live_ready
+        else blockers[0]
+        if blockers
+        else cautions[0]
+        if cautions
+        else "KIS pilot still needs review."
+    )
+    mode_step = (
+        "Keep EXECUTION_MODE=kis_live on the live host."
+        if configured_mode == "kis_live"
+        else "Set EXECUTION_MODE=kis_live only after readiness blockers clear."
+    )
+    korea_plan = (state.strategy_book or {}).get("korea_plan", {}) or {}
+    korea_signal_ready = korea_plan.get("action") in {"attack_opening_drive", "selective_probe"}
+    return {
+        "updated_at": state.updated_at,
+        "go_live_ready": go_live_ready,
+        "pilot_status": pilot_status,
+        "pilot_headline": pilot_headline,
+        "broker": "kis",
+        "execution_mode": configured_mode,
+        "korea_signal_ready": korea_signal_ready,
+        "korea_action": korea_plan.get("action", "n/a"),
+        "korea_focus": korea_plan.get("focus", ""),
+        "korea_quality_score": float(korea_plan.get("quality_score", 0.0) or 0.0),
+        "korea_quality_threshold": float(korea_plan.get("quality_threshold", 0.58) or 0.58),
+        "suggested_sequence": [
+            "Register KIS API credentials on the live host .env (KIS_APP_KEY, KIS_APP_SECRET, KIS_ACCOUNT_NO, KIS_PRODUCT_CODE).",
+            "Set KIS_ALLOW_LIVE=true and restart the service.",
+            "Verify KIS balance check passes via /diagnostics/broker-live-health.",
+            mode_step,
+            "Run one tiny-size Korea stock entry/exit cycle during market hours (09:00-15:30 KST).",
+            "Confirm fill state and position sync before scaling.",
+        ],
+        "blockers": blockers,
+        "cautions": cautions[:5],
+        "kis_health": kis,
+        "entry_block_summary": _entry_block_summary(state),
+        "readiness_overall": readiness.get("overall", "blocked"),
+    }
+
+
 @app.post("/cycle")
 def cycle() -> dict:
     return orchestrator.run_cycle()
@@ -1755,7 +1836,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   function fmtKrwFull(v,sign){var n=parseInt(v)||0;var prefix=sign?(n>=0?'+':''):'';return prefix+'\\u20a9'+Math.abs(n).toLocaleString('ko-KR');}
   function pctCls(v){var n=parseFloat(v)||0;return n>0?'pos':n<0?'neg':'';}
   function actionCls(a){var s=String(a||'').toLowerCase();if(s.indexOf('probe_long')>=0||s.indexOf('attack')>=0)return 'buy';if(s.indexOf('reduce')>=0||s.indexOf('preservation')>=0)return 'sell';if(s.indexOf('probe')>=0||s.indexOf('selective')>=0)return 'probe';return 'watch';}
-  function actionKo(a){var s=String(a||'').toLowerCase();if(s==='probe_longs')return '롱 진입 탐색';if(s==='selective_probe')return '선택적 진입';if(s==='attack_opening_drive')return '공세 진입';if(s==='reduce_risk')return '리스크 축소';if(s==='capital_preservation')return '자본 보존';if(s==='watchlist_only')return '관찰 대기';if(s==='stand_by')return '대기';return a||'대기';}
+  function actionKo(a){var s=String(a||'').toLowerCase();if(s==='probe_longs')return '롱 진입 탐색';if(s==='selective_probe')return '선택적 진입';if(s==='attack_opening_drive')return '공세 진입';if(s==='reduce_risk')return '리스크 축소';if(s==='capital_preservation')return '자본 보존';if(s==='watchlist_only')return '관찰 대기';if(s==='stand_by')return '대기';if(s==='pre_market_watch')return '장 외 대기';if(s==='n/a')return '--';return a||'대기';}
   function toggleDetail(id,btn){var el=document.getElementById(id);el.classList.toggle('open');btn.classList.toggle('open');}
   function renderPnl(perf,cap){var rp=parseFloat(perf.realized_pnl_pct||0),up=parseFloat(perf.unrealized_pnl_pct||0);var rc=document.getElementById('pnl-realized-card'),uc=document.getElementById('pnl-unrealized-card');document.getElementById('pnl-realized').textContent=fmtPct(rp);document.getElementById('pnl-realized').className='pnl-value '+(rp>0?'pos':rp<0?'neg':'neu');document.getElementById('pnl-realized-krw').textContent=fmtKrwFull(perf.realized_pnl_krw,true);rc.className='pnl-card'+(rp>0?' hl-pos':rp<0?' hl-neg':'');document.getElementById('pnl-unrealized').textContent=fmtPct(up);document.getElementById('pnl-unrealized').className='pnl-value '+(up>0?'pos':up<0?'neg':'neu');document.getElementById('pnl-unrealized-krw').textContent=fmtKrwFull(perf.unrealized_pnl_krw,true);uc.className='pnl-card'+(up>0?' hl-pos':up<0?' hl-neg':'');var wr=parseFloat(perf.win_rate||0);document.getElementById('pnl-winrate').textContent=wr.toFixed(1)+'%';document.getElementById('pnl-winrate').className='pnl-value '+(wr>=55?'pos':wr<40?'neg':'neu');document.getElementById('pnl-trades').textContent=(perf.wins||0)+'승 / '+(perf.losses||0)+'패 / 기대값 '+fmtPct(perf.expectancy_pct);document.getElementById('pnl-capital').textContent='\\u20a9'+(parseInt(cap.total_krw||0)).toLocaleString('ko-KR');document.getElementById('pnl-capital-base').textContent='기준 \\u20a9'+(parseInt(cap.base_krw||0)).toLocaleString('ko-KR');}
   function renderStatusBar(state,readiness,blockSummary){var stance=String(state.stance||'--');var regime=String(state.regime||'--');var allow=!!((readiness.exposure||{}).allow_new_entries!=null?(readiness.exposure||{}).allow_new_entries:state.allow_new_entries);var overall=String(readiness.overall||'caution');var stanceCls=stance==='BULLISH'?'ok':stance==='DEFENSE'?'bad':'warn';var regimeCls=regime==='TRENDING'?'ok':regime==='STRESSED'?'bad':'warn';var bar=document.getElementById('status-bar');bar.innerHTML='<div class="s-pill '+stanceCls+'"><span class="lbl">스탠스</span>'+stance+'</div>'+'<div class="s-pill '+regimeCls+'"><span class="lbl">국면</span>'+regime+'</div>'+'<div class="s-pill '+(allow?'ok':'bad')+'"><span class="lbl">진입</span>'+(allow?'허용':'차단')+'</div>'+'<div class="s-pill '+(overall==='ready'?'ok':overall==='caution'?'warn':'bad')+'"><span class="lbl">준비도</span>'+overall.toUpperCase()+'</div>';}

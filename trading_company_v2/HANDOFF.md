@@ -218,13 +218,34 @@ Status:
 - React: 520px에서 btn min-height 44px 명시 유지
 - 임베디드 대시보드: 560px btn 44px, pilot-card 패딩/폰트 조정
 
+## 0.13 임베디드 대시보드 개편 + 시간대 수정 (2026-04-23)
+
+### 완료
+- 임베디드 대시보드(`:8080`) 전면 개편: 트레이딩 앱 스타일
+  - P&L 히어로 (오늘 실현/미실현/승률/실전자본) 최상단 배치
+  - 코인 파일럿 시그널 게이지 (progress bar, arming/ready 색상)
+  - 한국주식·미국주식 데스크 카드에 품질 게이지 추가 (quality_score vs 진입 임계값)
+  - 데스크 액션명 한국어 번역 (`watchlist_only`→관찰 대기, `pre_market_watch`→장 외 대기 등)
+  - 브로커·준비도 섹션 접기 가능 (기본 숨김)
+- `recommendation_engine.py`: Korea/US plan 모든 반환값에 `quality_score`, `avg_signal`, `quality_threshold` 추가
+- 시간 표시 전면 KST 수정 (UTC 저장 유지, 표시만 변환)
+  - embedded dashboard JS: `toKST()` 헬퍼, 업데이트 시각/진입 시각/청산 시각
+  - React App.jsx: `toKST()` 헬퍼, `next_run` 시각
+  - Python: `_to_kst_hhmm()`, equity curve label, crypto lane history `time` 필드
+- `/diagnostics/kis-live-pilot` 엔드포인트 추가 (Upbit pilot과 동일한 구조)
+
+### KIS 실전 전환 준비 상태
+- 코드 scaffold 완성 (place_order, get_account_positions, token/hashkey)
+- 진단 엔드포인트: `/diagnostics/kis-live-pilot`, `/diagnostics/broker-live-health`
+- **남은 사용자 작업**: Oracle VM `.env`에 KIS 자격증명 등록 후 KIS_ALLOW_LIVE=true
+
 ## 8. Suggested next work
 
 Priority order:
 
 1. **tiny-size 첫 주문 체결 확인** — signal이 trigger 돌파 시 ₩150,000 한도 단일 주문 정상 체결 확인 (arming/ready Telegram 알림으로 미리 감지)
 2. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
-3. KIS 실전 전환 준비 (한국주식 데스크)
+3. **KIS 실전 전환** — Oracle VM `.env`에 KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO / KIS_PRODUCT_CODE 등록 후 KIS_ALLOW_LIVE=true → `/diagnostics/kis-live-pilot` 확인
 
 ## 9. Useful commands
 
