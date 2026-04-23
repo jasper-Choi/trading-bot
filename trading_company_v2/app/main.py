@@ -273,6 +273,33 @@ def _build_execution_summary(state: CompanyState) -> dict:
     }
 
 
+def _deployment_profile(state: CompanyState) -> dict:
+    access = local_access_urls()
+    execution_mode = str(state.execution_mode or settings.execution_mode or "paper")
+    app_env = str(settings.app_env or "local")
+    role = "local_dev"
+    if app_env in {"prod", "production"} or execution_mode != "paper":
+        role = "live_target"
+    label_map = {
+        "local_dev": "Local Development",
+        "live_target": "Live Target",
+    }
+    return {
+        "app_env": app_env,
+        "role": role,
+        "label": label_map.get(role, role),
+        "execution_mode": execution_mode,
+        "public_url": access.get("public_url", ""),
+        "local_url": access.get("local_url", ""),
+        "lan_url": access.get("lan_url", ""),
+        "summary": (
+            "paper-first local environment"
+            if role == "local_dev"
+            else "live-target deployment profile"
+        ),
+    }
+
+
 def _symbol_edge_summary(state: CompanyState) -> list[dict]:
     closed_positions = load_closed_positions(limit=20)
     plan_symbols: list[tuple[str, str]] = []
@@ -720,6 +747,7 @@ def dashboard_data() -> dict:
         "company_name": settings.company_name,
         "operator_name": settings.operator_name,
         "access": local_access_urls(),
+        "deployment_profile": _deployment_profile(state),
         "state": state.model_dump(),
         "dashboard": _build_dashboard_payload(state),
         "broker_live_health": broker_live_health(),
@@ -791,6 +819,7 @@ def mobile_summary() -> dict:
     return {
         "updated_at": state.updated_at,
         "access": local_access_urls(),
+        "deployment_profile": _deployment_profile(state),
         "phase": state.session_state.get("market_phase", "n/a"),
         "risk": {
             "stance": state.stance,
