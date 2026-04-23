@@ -193,11 +193,27 @@ Status:
 */5 * * * * /home/ubuntu/auto_pull.sh
 ```
 
+## 0.11 Crypto pilot signal 추적 + arming 알림 (2026-04-23)
+
+### 완료
+- crypto signal trend 저널 기록 (orchestrator: crypto_signal, crypto_trigger, crypto_action)
+- Signal Trend 패널 React 대시보드에 추가 (App.jsx)
+- main.py: `_crypto_live_lane_snapshot`, `_crypto_live_lane_history` 함수 추가
+- `trigger_state` 계산: waiting (distance>0.08) / arming (≤0.08) / ready (≥trigger)
+- **Telegram 사전 알림 추가** (a8bccd1):
+  - `arming` 진입 시: "signal approaching trigger" 알림 (cooldown 2h)
+  - `ready` 진입 시: "pilot READY" 알림 (cooldown 30m)
+  - `notifier.send_crypto_pilot_alert()` / `orchestrator._crypto_pilot_lane()` 추가
+
+### 현재 시그널 상태
+- `crypto_signal`: 0.35 / `trigger`: 0.56 / `distance`: 0.21 / `trigger_state`: waiting
+- 다음 관전 포인트: signal 0.48 도달 → arming 알림 → 0.56 → ready → tiny live order
+
 ## 8. Suggested next work
 
 Priority order:
 
-1. **tiny-size 첫 주문 체결 확인** — 신호 발생 시 ₩60,000 단일 주문 정상 체결 확인
+1. **tiny-size 첫 주문 체결 확인** — signal이 trigger 돌파 시 ₩150,000 한도 단일 주문 정상 체결 확인 (arming/ready Telegram 알림으로 미리 감지)
 2. **모바일 UI 개선** — React + 임베디드 대시보드 모바일 최적화
 3. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
 4. KIS 실전 전환 준비 (한국주식 데스크)
