@@ -616,7 +616,7 @@ class CompanyOrchestrator:
         )
         route_summary = route_orders(paper_orders, requested_execution_mode)
         execution_result.payload["execution_router"] = route_summary
-        state.execution_mode = str(route_summary.get("applied_mode") or "paper")
+        state.execution_mode = requested_execution_mode
         if route_summary.get("broker_live"):
             state.notes.append("broker live routing active")
         elif route_summary.get("requested_mode") != route_summary.get("applied_mode"):
