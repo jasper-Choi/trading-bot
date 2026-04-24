@@ -1981,7 +1981,7 @@ def kis_live_pilot() -> dict:
         else "Set EXECUTION_MODE=kis_live only after readiness blockers clear."
     )
     korea_plan = (state.strategy_book or {}).get("korea_plan", {}) or {}
-    korea_signal_ready = korea_plan.get("action") in {"attack_opening_drive", "selective_probe"}
+    korea_signal_ready = korea_plan.get("action") in {"attack_opening_drive", "selective_probe", "probe_longs"}
     return {
         "updated_at": state.updated_at,
         "go_live_ready": go_live_ready,

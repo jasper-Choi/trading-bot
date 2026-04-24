@@ -360,9 +360,45 @@ Status:
 ### 다음 작업 우선순위
 
 1. **Oracle VM auto_pull** — 5분 내 자동 반영 (수동 확인 불필요)
-2. **대시보드에서 Korea 브레이크아웃 후보 확인** — `gap_candidates` 항목 중 `is_breakout: true` 등장 여부
-3. **크립토 브레이크아웃 신호 강도 확인** — `breakout_confirmed` / `breakout_count` 값 대시보드 로그
-4. **KIS 실전 전환** — Oracle VM `.env` KIS 자격증명 등록 후 `KIS_ALLOW_LIVE=true`
+2. **대시보드에서 Korea 브레이크아웃 후보 확인** — 데스크 카드 클릭 → "후보 종목" 섹션에 BK 뱃지 등장 여부
+3. **KIS 실전 전환** — Oracle VM `.env` KIS 자격증명 등록 후 `KIS_ALLOW_LIVE=true`
+
+## 0.17 브레이크아웃 신호 대시보드 표시 (2026-04-24)
+
+### 완료
+
+**`app/main.py`**
+- `_build_desk_drilldown_payload()`:
+  - Korea candidate_details에 `is_breakout`, `breakout_count`, `vol_ratio`, `rsi` 추가
+  - Crypto candidate_details에 `breakout_confirmed`, `breakout_count`, `vol_ratio`, `rsi` 추가 (candidate_markets 맵에서 조회)
+  - 드릴다운 payload에 `breakout_confirmed_count`, `breakout_partial_count` 추가
+- `_build_desk_status()`: Korea 항목에 `breakout_confirmed_count`, `breakout_partial_count` 추가
+- `loadData()` JS: `window.__deskDrilldown = dash.desk_drilldown` — 기존에 빈 `{}` 고정이었음 → 수정
+- `renderDeskDetail()` JS: "후보 종목" 섹션 추가 (BK 뱃지, 갭%, 거래량 배율, RSI 표시)
+- `renderDesks()` JS: Korea/Crypto 카드에 BK 뱃지 표시 (confirmed=녹색, partial=노란)
+- CSS: `.desk-bk-badge`, `.bk-badge`, `.bk-chip`, `.cand-row` 스타일 추가
+- `kis_live_pilot()`: `korea_signal_ready` 조건에 `probe_longs` 추가 (브레이크아웃 경로)
+
+**`frontend/src/App.jsx`**
+- 후보 종목 행에 `BK N/4` 뱃지 (confirmed=녹색/partial=노란)
+- `vol_ratio` (≥1.5x), `rsi` 메트릭 추가 표시
+
+**`frontend/src/index.css`**
+- `.bk-tag.full`, `.bk-tag.partial` 스타일 추가
+
+### 다음 작업 우선순위
+
+1. **KIS 실전 전환** — Oracle VM `.env`에 KIS 자격증명 등록:
+   ```
+   KIS_APP_KEY=...
+   KIS_APP_SECRET=...
+   KIS_ACCOUNT_NO=...  (예: 12345678-01)
+   KIS_PRODUCT_CODE=01
+   KIS_ALLOW_LIVE=true
+   ```
+   등록 후: `sudo systemctl restart trading-loop trading-dashboard`
+2. **첫 브레이크아웃 신호 확인** — 한국 장 중 대시보드에서 BK 뱃지 확인
+3. **자본 스케일업** — 첫 swing +4% 완료 후 `UPBIT_PILOT_MAX_KRW` 증액, `UPBIT_PILOT_SINGLE_ORDER_ONLY=false`
 
 ## 8. Suggested next work
 
