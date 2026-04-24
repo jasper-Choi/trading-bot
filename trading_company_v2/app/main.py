@@ -167,6 +167,8 @@ def _build_desk_status(state: CompanyState) -> dict:
             "quality_score": float(korea_plan.get("quality_score", 0.0) or 0.0),
             "avg_signal": float(korea_plan.get("avg_signal", 0.0) or 0.0),
             "quality_threshold": float(korea_plan.get("quality_threshold", 0.58) or 0.58),
+            "breakout_confirmed_count": int(korea_view.get("breakout_confirmed_count", 0) or 0),
+            "breakout_partial_count": int(korea_view.get("breakout_partial_count", 0) or 0),
             "leaders": ((state.market_snapshot.get("gap_candidates") or state.market_snapshot.get("stock_leaders") or []) if state.market_snapshot else [])[:3],
             "latest_order": latest_korea_order,
         },
@@ -235,19 +237,29 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
             ranked_candidates = []
             backtest_weights = view.get("backtest_weights", {}) or {}
             lead_market = str(view.get("lead_market", "") or target_symbol).strip()
+            # candidate_markets has per-symbol breakout data from CryptoDeskAgent
+            cand_markets_map = {
+                str(m.get("market", "")): m
+                for m in (view.get("candidate_markets") or [])
+            }
             for symbol in candidate_symbols[:5]:
                 weight = float(backtest_weights.get(symbol, 0.0) or 0.0)
                 leader_bonus = 0.03 if symbol == lead_market else 0.0
+                mdata = cand_markets_map.get(symbol, {}) or {}
                 ranked_candidates.append(
                     {
                         "symbol": symbol,
                         "label": symbol.replace("KRW-", ""),
-                        "score": round(float(view.get("signal_score", 0.0) or 0.0) + (weight * 0.1) + leader_bonus, 2),
-                        "bias": str(view.get("desk_bias", "balanced") or "balanced"),
+                        "score": round(float(mdata.get("combined_score", view.get("signal_score", 0.0)) or 0.0) + (weight * 0.1) + leader_bonus, 2),
+                        "bias": str(mdata.get("bias", view.get("desk_bias", "balanced")) or "balanced"),
                         "weight": round(weight, 3),
-                        "recent_change_pct": float(view.get("recent_change_pct", 0.0) or 0.0),
-                        "pullback_gap_pct": float(view.get("pullback_gap_pct", 0.0) or 0.0),
-                        "range_4_pct": float(view.get("range_4_pct", 0.0) or 0.0),
+                        "recent_change_pct": float(mdata.get("recent_change_pct", view.get("recent_change_pct", 0.0)) or 0.0),
+                        "pullback_gap_pct": float(mdata.get("pullback_gap_pct", view.get("pullback_gap_pct", 0.0)) or 0.0),
+                        "range_4_pct": float(mdata.get("range_4_pct", view.get("range_4_pct", 0.0)) or 0.0),
+                        "rsi": mdata.get("rsi") or view.get("rsi"),
+                        "breakout_count": int(mdata.get("breakout_count", 0) or 0),
+                        "vol_ratio": float(mdata.get("vol_ratio", 0.0) or 0.0),
+                        "breakout_confirmed": bool(mdata.get("breakout_confirmed", False)),
                         "is_primary": symbol == lead_market,
                     }
                 )
@@ -264,6 +276,10 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
                         "gap_pct": float(item.get("gap_pct", 0.0) or 0.0),
                         "signal_score": float(item.get("signal_score", 0.0) or 0.0),
                         "burst_change_pct": float(item.get("burst_change_pct", 0.0) or 0.0),
+                        "rsi": item.get("rsi"),
+                        "is_breakout": bool(item.get("is_breakout", False)),
+                        "breakout_count": int(item.get("breakout_count", 0) or 0),
+                        "vol_ratio": float(item.get("vol_ratio", 0.0) or 0.0),
                         "is_primary": symbol == target_symbol,
                     }
                 )
@@ -346,6 +362,8 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
             "active_count": int(
                 view.get("active_gap_count", view.get("active_us_count", len(candidate_details))) or 0
             ),
+            "breakout_confirmed_count": int(view.get("breakout_confirmed_count", 0) or 0),
+            "breakout_partial_count": int(view.get("breakout_partial_count", 0) or 0),
         }
 
     return payload
@@ -2189,6 +2207,22 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     .desk-row-act.buy{color:var(--green)}.desk-row-act.probe{color:var(--blue)}.desk-row-act.sell{color:var(--red)}.desk-row-act.watch{color:var(--muted)}.desk-row-act.wanted{color:var(--yellow)}
     .desk-row-note{font-size:.71rem;color:var(--muted);line-height:1.4;margin-top:1px}
     .cycle-signals{font-size:.71rem;color:var(--muted);margin-top:5px;padding-top:5px;border-top:1px solid var(--border-subtle);line-height:1.4}
+    /* ── 브레이크아웃 뱃지 + 후보 종목 ── */
+    .desk-bk-badge{font-size:.62rem;font-weight:700;padding:1px 5px;border-radius:4px;vertical-align:middle;margin-left:3px}
+    .desk-bk-badge.full{background:rgba(63,185,80,.18);color:var(--green);border:1px solid rgba(63,185,80,.3)}
+    .desk-bk-badge.partial{background:rgba(210,153,34,.15);color:var(--yellow);border:1px solid rgba(210,153,34,.25)}
+    .bk-badge{font-size:.65rem;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap}
+    .bk-badge.full{background:rgba(63,185,80,.18);color:var(--green);border:1px solid rgba(63,185,80,.3)}
+    .bk-badge.partial{background:rgba(210,153,34,.15);color:var(--yellow);border:1px solid rgba(210,153,34,.25)}
+    .bk-chip{display:inline-block;font-size:.65rem;padding:1px 5px;border-radius:4px;background:rgba(255,255,255,.06);margin-right:4px;color:var(--muted)}
+    .cand-row{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border-subtle);gap:8px}
+    .cand-row:last-child{border-bottom:none}
+    .cand-row.primary .cand-name{color:var(--blue);font-weight:700}
+    .cand-left{flex:1;min-width:0}
+    .cand-name{font-size:.82rem;font-weight:600;margin-bottom:2px}
+    .cand-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
+    .cand-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
+    .cand-score{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
     /* ── 반응형 ── */
     @media(max-width:900px){.pnl-hero{grid-template-columns:repeat(2,1fr)}.desk-grid{grid-template-columns:repeat(3,1fr)}}
     @media(max-width:600px){.app{padding:12px 12px 72px}.topbar{padding:10px 12px}.pnl-hero{grid-template-columns:repeat(2,1fr)}.pnl-value{font-size:1.2rem}.desk-grid{grid-template-columns:repeat(3,1fr)}.desk-card{padding:10px}.desk-action{font-size:.8rem}.desk-focus{display:none}.status-bar{gap:6px}.s-pill{font-size:.75rem;padding:5px 10px}.btn{padding:6px 12px;font-size:.78rem}}
@@ -2270,9 +2304,9 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
 
   <!-- 데스크 카드 -->
   <div class="desk-grid" id="desk-grid">
-    <button type="button" class="desk-card" data-desk="crypto" onclick="toggleDeskDetail('crypto')"><div class="desk-name">코인</div><div class="desk-action watch" id="dk-crypto-act">--</div><div class="desk-focus" id="dk-crypto-focus">--</div><div class="desk-size" id="dk-crypto-size">0.00x</div></button>
-    <button type="button" class="desk-card" data-desk="korea" onclick="toggleDeskDetail('korea')"><div class="desk-name">한국주식</div><div class="desk-action watch" id="dk-korea-act">--</div><div class="desk-focus" id="dk-korea-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-korea-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-korea-qval">품질 --</span><span id="dk-korea-qthr">기준 --</span></div></div><div class="desk-size" id="dk-korea-size">0.00x</div></button>
-    <button type="button" class="desk-card" data-desk="us" onclick="toggleDeskDetail('us')"><div class="desk-name">미국주식</div><div class="desk-action watch" id="dk-us-act">--</div><div class="desk-focus" id="dk-us-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-us-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-us-qval">품질 --</span><span id="dk-us-qthr">기준 --</span></div></div><div class="desk-size" id="dk-us-size">0.00x</div></button>
+    <button type="button" class="desk-card" data-desk="crypto" onclick="toggleDeskDetail('crypto')"><div class="desk-name">코인 <span class="desk-bk-badge" id="dk-crypto-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-crypto-act">--</div><div class="desk-focus" id="dk-crypto-focus">--</div><div class="desk-size" id="dk-crypto-size">0.00x</div></button>
+    <button type="button" class="desk-card" data-desk="korea" onclick="toggleDeskDetail('korea')"><div class="desk-name">한국주식 <span class="desk-bk-badge" id="dk-korea-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-korea-act">--</div><div class="desk-focus" id="dk-korea-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-korea-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-korea-qval">품질 --</span><span id="dk-korea-qthr">기준 --</span></div></div><div class="desk-size" id="dk-korea-size">0.00x</div></button>
+    <button type="button" class="desk-card" data-desk="us" onclick="toggleDeskDetail('us')"><div class="desk-name">미국주식 <span class="desk-bk-badge" id="dk-us-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-us-act">--</div><div class="desk-focus" id="dk-us-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-us-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-us-qval">품질 --</span><span id="dk-us-qthr">기준 --</span></div></div><div class="desk-size" id="dk-us-size">0.00x</div></button>
   </div>
 
   <div class="desk-detail-panel" id="desk-detail-panel">
@@ -2293,6 +2327,10 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
         <div class="desk-detail-label">Performance</div>
         <div class="desk-detail-main" id="desk-detail-pnl">--</div>
         <div class="desk-detail-sub" id="desk-detail-winrate">--</div>
+      </div>
+      <div class="desk-detail-card desk-detail-card-wide">
+        <div class="desk-detail-label">후보 종목 <span style="font-size:.7rem;color:var(--muted);font-weight:400">BK = 브레이크아웃 신호 수</span></div>
+        <div id="desk-detail-candidates"></div>
       </div>
       <div class="desk-detail-card desk-detail-card-wide">
         <div class="desk-detail-label">Watchlist</div>
@@ -2401,6 +2439,29 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     document.getElementById('desk-detail-pnl').className='desk-detail-main '+pctCls(item.realized_pnl_pct||0);
     document.getElementById('desk-detail-winrate').textContent='승률 '+Number(item.win_rate||0).toFixed(1)+'% / '+(item.wins||0)+'승 '+(item.losses||0)+'패';
     document.getElementById('desk-detail-watchlist').innerHTML=(item.watch_symbols||[]).length?(item.watch_symbols||[]).map(function(symbol){return '<span class="desk-chip">'+symbol+'</span>';}).join(''):'<span class="desk-detail-sub">감시 종목 없음</span>';
+    // Candidate details with breakout badges
+    var candEl=document.getElementById('desk-detail-candidates');
+    if(candEl){
+      var cands=item.candidate_details||[];
+      if(!cands.length){candEl.innerHTML='<div class="empty-row">후보 종목 없음</div>';}
+      else{
+        candEl.innerHTML=cands.map(function(c){
+          var isPrim=c.is_primary;var label=String(c.label||c.symbol||'--');
+          var bkCount=parseInt(c.breakout_count||0);var isBreakout=c.is_breakout||bkCount>=3;
+          var volRatio=parseFloat(c.vol_ratio||0);var score=parseFloat(c.score||0);
+          var gapPct=parseFloat(c.gap_pct||0);var rsiVal=c.rsi!=null?parseFloat(c.rsi):null;
+          var bkBadge=isBreakout?'<span class="bk-badge full">BK '+bkCount+'/4</span>':
+                      bkCount>=2?'<span class="bk-badge partial">BK '+bkCount+'/4</span>':'';
+          var gapStr=gapPct>0.2?'<span class="bk-chip">갭 +'+gapPct.toFixed(1)+'%</span>':'';
+          var volStr=volRatio>=2?'<span class="bk-chip">거래량 '+volRatio.toFixed(1)+'x</span>':'';
+          var rsiStr=rsiVal!=null?'<span class="bk-chip">RSI '+rsiVal.toFixed(0)+'</span>':'';
+          return '<div class="cand-row'+(isPrim?' primary':'')+'">'+
+            '<div class="cand-left"><div class="cand-name">'+label+'</div>'+
+            '<div class="cand-chips">'+gapStr+volStr+rsiStr+'</div></div>'+
+            '<div class="cand-right"><span class="cand-score">'+score.toFixed(2)+'</span>'+bkBadge+'</div></div>';
+        }).join('');
+      }
+    }
     document.getElementById('desk-detail-open').innerHTML=listHtml(item.open_positions||[],'보유 포지션 없음',function(row){return '<div class="desk-list-item"><div><div class="desk-list-main">'+(row.symbol||'--')+'</div><div class="desk-list-sub">'+toKST(row.opened_at||'')+' / '+(row.action||'watch')+'</div></div><div class="desk-list-side '+pctCls(row.unrealized_pnl_pct||0)+'">'+fmtPct(row.unrealized_pnl_pct||0)+'</div></div>';});
     document.getElementById('desk-detail-orders').innerHTML=listHtml(item.recent_orders||[],'최근 주문 없음',function(row){return '<div class="desk-list-item"><div><div class="desk-list-main">'+(row.symbol||'--')+'</div><div class="desk-list-sub">'+(row.status||'n/a')+' / '+(row.effect_status||'n/a')+'</div></div><div class="desk-list-side">'+toKST(row.created_at||'')+'</div></div>';});
     document.getElementById('desk-detail-closed').innerHTML=listHtml(item.recent_closed||[],'최근 청산 없음',function(row){return '<div class="desk-list-item"><div><div class="desk-list-main">'+(row.symbol||'--')+'</div><div class="desk-list-sub">'+(row.closed_reason||'--')+'</div></div><div class="desk-list-side '+pctCls(row.pnl_pct||0)+'">'+fmtPct(row.pnl_pct||0)+'</div></div>';});
@@ -2410,7 +2471,10 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   function renderPnl(perf,cap){var rp=parseFloat(perf.realized_pnl_pct||0),up=parseFloat(perf.unrealized_pnl_pct||0);var rc=document.getElementById('pnl-realized-card'),uc=document.getElementById('pnl-unrealized-card');document.getElementById('pnl-realized').textContent=fmtPct(rp);document.getElementById('pnl-realized').className='pnl-value '+(rp>0?'pos':rp<0?'neg':'neu');document.getElementById('pnl-realized-krw').textContent=fmtKrwFull(perf.realized_pnl_krw,true);rc.className='pnl-card'+(rp>0?' hl-pos':rp<0?' hl-neg':'');document.getElementById('pnl-unrealized').textContent=fmtPct(up);document.getElementById('pnl-unrealized').className='pnl-value '+(up>0?'pos':up<0?'neg':'neu');document.getElementById('pnl-unrealized-krw').textContent=fmtKrwFull(perf.unrealized_pnl_krw,true);uc.className='pnl-card'+(up>0?' hl-pos':up<0?' hl-neg':'');var wr=parseFloat(perf.win_rate||0);document.getElementById('pnl-winrate').textContent=wr.toFixed(1)+'%';document.getElementById('pnl-winrate').className='pnl-value '+(wr>=55?'pos':wr<40?'neg':'neu');document.getElementById('pnl-trades').textContent=(perf.wins||0)+'승 / '+(perf.losses||0)+'패 / 기대값 '+fmtPct(perf.expectancy_pct);document.getElementById('pnl-capital').textContent='\\u20a9'+(parseInt(cap.total_krw||0)).toLocaleString('ko-KR');document.getElementById('pnl-capital-base').textContent='기준 \\u20a9'+(parseInt(cap.base_krw||0)).toLocaleString('ko-KR');}
   function renderStatusBar(state,readiness,blockSummary){var stance=String(state.stance||'--');var regime=String(state.regime||'--');var allow=!!((readiness.exposure||{}).allow_new_entries!=null?(readiness.exposure||{}).allow_new_entries:state.allow_new_entries);var overall=String(readiness.overall||'caution');var stanceCls=stance==='BULLISH'?'ok':stance==='DEFENSE'?'bad':'warn';var regimeCls=regime==='TRENDING'?'ok':regime==='STRESSED'?'bad':'warn';var bar=document.getElementById('status-bar');bar.innerHTML='<div class="s-pill '+stanceCls+'"><span class="lbl">스탠스</span>'+stance+'</div>'+'<div class="s-pill '+regimeCls+'"><span class="lbl">국면</span>'+regime+'</div>'+'<div class="s-pill '+(allow?'ok':'bad')+'"><span class="lbl">진입</span>'+(allow?'허용':'차단')+'</div>'+'<div class="s-pill '+(overall==='ready'?'ok':overall==='caution'?'warn':'bad')+'"><span class="lbl">준비도</span>'+overall.toUpperCase()+'</div>';}
   function renderSignal(lane,history){var ts=String((lane||{}).trigger_state||'waiting');var sig=parseFloat((lane||{}).signal_score||0);var trig=parseFloat((lane||{}).trigger_threshold||0.56);var dist=parseFloat((lane||{}).distance_to_trigger||0);var sym=String((lane||{}).symbol||'KRW-BTC');var act=String((lane||{}).action||'watchlist_only');var card=document.getElementById('signal-card');var badge=document.getElementById('signal-badge');card.className='signal-card '+(ts==='ready'?'ready':ts==='arming'?'arming':'');badge.className='signal-badge '+ts;badge.textContent=ts==='ready'?'진입 준비':ts==='arming'?'접근 중':'대기';document.getElementById('signal-sym').textContent=sym+' · '+actionKo(act);var pct=trig>0?Math.min(sig/trig*100,100):0;var fill=document.getElementById('gauge-fill');fill.style.width=pct.toFixed(1)+'%';fill.className='gauge-fill '+(ts==='ready'?'ready':ts==='arming'?'arming':'');document.getElementById('gauge-cur').textContent='현재 '+sig.toFixed(2);document.getElementById('gauge-trig').textContent='진입 '+trig.toFixed(2);document.getElementById('signal-meta').textContent=ts==='ready'?'진입 조건 충족 — 파일럿 주문 실행 중':ts==='arming'?'진입까지 거리 '+dist.toFixed(2)+' — 모니터링 강화':'진입까지 거리 '+dist.toFixed(2)+' (필요: '+trig.toFixed(2)+')';var chips=(history||[]).slice(-4).map(function(r){var rs=parseFloat(r.signal_score||0),rt=parseFloat(r.trigger_threshold||0);return '<span class="trend-chip">'+(r.time||'--:--')+' '+rs.toFixed(2)+'</span>';});document.getElementById('trend-mini').innerHTML=chips.join('');}
-  function renderDesks(desks){var map=[['crypto','dk-crypto'],['korea','dk-korea'],['us','dk-us']];var dg=document.getElementById('desk-grid');var cards=dg.querySelectorAll('.desk-card');map.forEach(function(m,i){var key=m[0],pfx=m[1],item=(desks||{})[key]||{};var cls=actionCls(item.action);cards[i].className='desk-card '+(cls==='watch'?'':''+cls);document.getElementById(pfx+'-act').textContent=actionKo(item.action);document.getElementById(pfx+'-act').className='desk-action '+cls;document.getElementById(pfx+'-focus').textContent=item.focus||'신호 없음';var sizeEl=document.getElementById(pfx+'-size');sizeEl.textContent=item.size||'0.00x';sizeEl.className='desk-size'+(item.size&&item.size!=='0.00x'?' active':'');var qfill=document.getElementById(pfx+'-qfill');if(qfill){var qs=parseFloat(item.quality_score||0),qt=parseFloat(item.quality_threshold||0.58);var qpct=qt>0?Math.min(qs/qt*100,100):0;qfill.style.width=qpct.toFixed(1)+'%';qfill.className='mini-gauge-fill'+(qpct>=100?' ready':qpct>=70?' arming':'');var qvalEl=document.getElementById(pfx+'-qval');var qthrEl=document.getElementById(pfx+'-qthr');if(qvalEl)qvalEl.textContent='품질 '+qs.toFixed(2);if(qthrEl)qthrEl.textContent='기준 '+qt.toFixed(2);}});}
+  function renderDesks(desks){var map=[['crypto','dk-crypto'],['korea','dk-korea'],['us','dk-us']];var dg=document.getElementById('desk-grid');var cards=dg.querySelectorAll('.desk-card');map.forEach(function(m,i){var key=m[0],pfx=m[1],item=(desks||{})[key]||{};var cls=actionCls(item.action);cards[i].className='desk-card '+(cls==='watch'?'':''+cls);document.getElementById(pfx+'-act').textContent=actionKo(item.action);document.getElementById(pfx+'-act').className='desk-action '+cls;document.getElementById(pfx+'-focus').textContent=item.focus||'신호 없음';var sizeEl=document.getElementById(pfx+'-size');sizeEl.textContent=item.size||'0.00x';sizeEl.className='desk-size'+(item.size&&item.size!=='0.00x'?' active':'');var qfill=document.getElementById(pfx+'-qfill');if(qfill){var qs=parseFloat(item.quality_score||0),qt=parseFloat(item.quality_threshold||0.58);var qpct=qt>0?Math.min(qs/qt*100,100):0;qfill.style.width=qpct.toFixed(1)+'%';qfill.className='mini-gauge-fill'+(qpct>=100?' ready':qpct>=70?' arming':'');var qvalEl=document.getElementById(pfx+'-qval');var qthrEl=document.getElementById(pfx+'-qthr');if(qvalEl)qvalEl.textContent='품질 '+qs.toFixed(2);if(qthrEl)qthrEl.textContent='기준 '+qt.toFixed(2);}
+      // Breakout badge for Korea / Crypto desks
+      var bkEl=document.getElementById(pfx+'-bk');if(bkEl){var bkC=parseInt(item.breakout_confirmed_count||0),bkP=parseInt(item.breakout_partial_count||0);if(bkC>0){bkEl.textContent='BK '+bkC;bkEl.className='desk-bk-badge full';bkEl.style.display='inline-block';}else if(bkP>0){bkEl.textContent='BK ~'+bkP;bkEl.className='desk-bk-badge partial';bkEl.style.display='inline-block';}else{bkEl.style.display='none';}}
+    });}
   function renderOrderBar(exec){var pending=parseInt(exec.pending_count||0),partial=parseInt(exec.partial_count||0),stale=parseInt(exec.stale_count||0),live=parseInt(exec.live_count||0);var items=[];if(stale>0)items.push('<div class="o-badge bad"><span class="num">'+stale+'</span> 미처리 주문</div>');if(partial>0)items.push('<div class="o-badge warn"><span class="num">'+partial+'</span> 부분 체결</div>');if(pending>0)items.push('<div class="o-badge warn"><span class="num">'+pending+'</span> 대기 중</div>');if(live>0&&!pending&&!partial&&!stale)items.push('<div class="o-badge ok"><span class="num">'+live+'</span> 실전 주문 정상</div>');var bar=document.getElementById('order-bar');if(items.length){bar.innerHTML=items.join('');bar.style.display='flex';}else{bar.style.display='none';}}
   function renderPositions(pos){var cnt=document.getElementById('pos-count'),body=document.getElementById('positions-body');if(!pos||!pos.length){cnt.textContent='0';body.innerHTML='<div class="empty-row">보유 포지션 없음</div>';return;}cnt.textContent=String(pos.length);var rows=pos.map(function(p){var pnl=parseFloat(p.unrealized_pnl_pct||0);return '<tr><td class="sym">'+(p.symbol||'--')+'</td><td><span class="desk-tag">'+(p.desk||'--')+'</span></td><td>'+Number(p.entry_price||0).toLocaleString('ko-KR')+'</td><td class="'+(pnl>0?'pos':pnl<0?'neg':'')+'" style="font-weight:700">'+fmtPct(pnl)+'</td><td style="color:var(--muted);font-size:.78rem">'+toKST(p.opened_at||'')+'</td></tr>';}).join('');body.innerHTML='<table class="pos-table"><thead><tr><th>종목</th><th>데스크</th><th>진입가</th><th>미실현</th><th>시각</th></tr></thead><tbody>'+rows+'</tbody></table>';}
   function renderTrades(closed){var body=document.getElementById('trades-body');var items=(closed||[]).slice(0,15);if(!items.length){body.innerHTML='<div class="empty-row">청산 내역 없음</div>';return;}var rows=items.map(function(t){var pnl=parseFloat(t.pnl_pct||0);return '<tr><td class="sym">'+(t.symbol||'--')+'</td><td><span class="desk-tag">'+(t.desk||'--')+'</span></td><td class="'+(pnl>0?'pos':pnl<0?'neg':'')+'" style="font-weight:700">'+fmtPct(pnl)+'</td><td style="color:var(--muted);font-size:.78rem">'+(t.closed_reason||'--')+'</td><td style="color:var(--muted);font-size:.78rem">'+toKST(t.closed_at||'')+'</td></tr>';}).join('');body.innerHTML='<table class="pos-table"><thead><tr><th>종목</th><th>데스크</th><th>손익</th><th>사유</th><th>시각</th></tr></thead><tbody>'+rows+'</tbody></table>';}
@@ -2445,7 +2509,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     body.innerHTML=html;
   }
   function renderBroker(health,readiness){var bhtml='';['upbit','kis'].forEach(function(key){var item=(health||{})[key]||{};var ok=item.balances_ok,cfg=item.configured!==false;bhtml+='<div class="broker-row"><div><div class="broker-name">'+key.toUpperCase()+'</div><div class="'+(cfg?ok?'broker-ok':'broker-warn':'broker-muted')+'">'+(cfg?ok?'잔고 확인':'잔고 오류':'미설정')+'</div></div><div class="status-tag '+(cfg?ok?'pass':'warn':'')+'">'+( cfg?ok?'연결':'점검':'미설정')+'</div></div>';});var rhtml='';((readiness||{}).checklist||[]).slice(0,6).forEach(function(item){var st=item.status||'warn';rhtml+='<div class="check-row"><div><div class="check-lbl">'+(item.label||'--')+'</div><div class="check-det">'+(item.detail||'')+'</div></div><div class="status-tag '+st+'">'+(st==='pass'?'통과':st==='block'?'차단':'주의')+'</div></div>';});document.getElementById('broker-rows').innerHTML=bhtml;document.getElementById('readiness-rows').innerHTML=rhtml||'<div style="color:var(--muted);font-size:.82rem;padding:8px 0">준비도 데이터 없음</div>';}
-  async function loadData(){try{var dr=await fetch('/dashboard-data'),hr=await fetch('/health');var data=await dr.json(),health=await hr.json();var state=data.state||{},dash=data.dashboard||{},readiness=data.live_readiness_checklist||{},brokerH=data.broker_live_health||{},exec=(dash.execution_summary||{}),perf=(dash.performance||{}),cap=(dash.capital||{}),blockSummary=((dash.exposure||{}).entry_block_summary)||((readiness||{}).entry_block_summary)||{};var isLive=String(readiness.execution_mode||'').indexOf('live')>=0;var dot=document.getElementById('status-dot');dot.className='status-dot'+(blockSummary.blocked?' err':isLive?' ':'');var modeEl=document.getElementById('mode-tag');modeEl.textContent=String(readiness.execution_mode||'모의투자');modeEl.className='mode-tag'+(isLive?' live':'');document.getElementById('update-time').textContent=toKST(state.updated_at);if(blockSummary&&blockSummary.blocked){var ab=document.getElementById('alert-bar');ab.textContent='\\u26a0\\ufe0f '+String(blockSummary.detail||blockSummary.headline||'실행 차단');ab.className='alert-bar visible';}else{document.getElementById('alert-bar').className='alert-bar';}renderPnl(perf,cap);renderStatusBar(state,readiness,blockSummary);renderSignal(dash.crypto_live_lane||null,dash.crypto_live_lane_history||[]);renderDesks(dash.desk_status||{});renderOrderBar(exec);renderPositions(dash.open_positions||[]);renderTrades(dash.closed_positions||[]);renderEquity(dash.equity_curve||[]);renderBroker(brokerH,readiness);renderAgentLog(dash.agent_log||[]);}catch(e){var dot2=document.getElementById('status-dot');dot2.className='status-dot err';document.getElementById('alert-bar').textContent='\\u26a0\\ufe0f 데이터 로딩 실패: '+e.message;document.getElementById('alert-bar').className='alert-bar visible';}}
+  async function loadData(){try{var dr=await fetch('/dashboard-data'),hr=await fetch('/health');var data=await dr.json(),health=await hr.json();var state=data.state||{},dash=data.dashboard||{},readiness=data.live_readiness_checklist||{},brokerH=data.broker_live_health||{},exec=(dash.execution_summary||{}),perf=(dash.performance||{}),cap=(dash.capital||{}),blockSummary=((dash.exposure||{}).entry_block_summary)||((readiness||{}).entry_block_summary)||{};var isLive=String(readiness.execution_mode||'').indexOf('live')>=0;var dot=document.getElementById('status-dot');dot.className='status-dot'+(blockSummary.blocked?' err':isLive?' ':'');var modeEl=document.getElementById('mode-tag');modeEl.textContent=String(readiness.execution_mode||'모의투자');modeEl.className='mode-tag'+(isLive?' live':'');document.getElementById('update-time').textContent=toKST(state.updated_at);if(blockSummary&&blockSummary.blocked){var ab=document.getElementById('alert-bar');ab.textContent='\\u26a0\\ufe0f '+String(blockSummary.detail||blockSummary.headline||'실행 차단');ab.className='alert-bar visible';}else{document.getElementById('alert-bar').className='alert-bar';}renderPnl(perf,cap);renderStatusBar(state,readiness,blockSummary);renderSignal(dash.crypto_live_lane||null,dash.crypto_live_lane_history||[]);window.__deskDrilldown=dash.desk_drilldown||{};renderDesks(dash.desk_status||{});renderOrderBar(exec);renderPositions(dash.open_positions||[]);renderTrades(dash.closed_positions||[]);renderEquity(dash.equity_curve||[]);renderBroker(brokerH,readiness);renderAgentLog(dash.agent_log||[]);}catch(e){var dot2=document.getElementById('status-dot');dot2.className='status-dot err';document.getElementById('alert-bar').textContent='\\u26a0\\ufe0f 데이터 로딩 실패: '+e.message;document.getElementById('alert-bar').className='alert-bar visible';}}
   async function runCycle(){var btn=document.getElementById('cycle-btn');btn.disabled=true;btn.textContent='실행 중...';try{await fetch('/cycle',{method:'POST'});await loadData();}catch(e){console.error(e);}finally{btn.disabled=false;btn.textContent='사이클 실행';}}
   setInterval(function(){loadData().catch(function(){});},20000);loadData().catch(function(){});
 </script>

@@ -457,6 +457,27 @@ html, body {
   border-top: 0;
 }
 
+/* Breakout badge in candidate rows */
+.bk-tag {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+.bk-tag.full {
+  background: rgba(63, 185, 80, 0.18);
+  color: #3fb950;
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+.bk-tag.partial {
+  background: rgba(210, 153, 34, 0.15);
+  color: #d2933a;
+  border: 1px solid rgba(210, 153, 34, 0.25);
+}
+
 .candidate-copy,
 .candidate-metrics {
   min-width: 0;

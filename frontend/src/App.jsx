@@ -760,12 +760,21 @@ export default function App() {
                     </div>
                     <div className="candidate-list">
                       {candidates.length > 0 ? (
-                        candidates.map((item, idx) => (
+                        candidates.map((item, idx) => {
+                          const bkCount = Number(item.breakout_count || 0)
+                          const isBreakout = item.is_breakout || bkCount >= 3
+                          const bkBadge = isBreakout
+                            ? <span className="bk-tag full">BK {bkCount}/4</span>
+                            : bkCount >= 2
+                              ? <span className="bk-tag partial">BK {bkCount}/4</span>
+                              : null
+                          return (
                           <div className="candidate-row" key={`${panel.key}-${item.symbol || idx}`}>
                             <div className="candidate-copy">
                               <strong>
                                 {item.label || item.symbol || '--'}
                                 {item.is_primary ? ' · lead' : ''}
+                                {bkBadge}
                               </strong>
                               <span>
                                 {item.bias || 'neutral'}
@@ -775,12 +784,15 @@ export default function App() {
                             </div>
                             <div className="candidate-metrics">
                               <span>score {Number(item.score || 0).toFixed(2)}</span>
-                              {item.gap_pct != null && <span>gap {Number(item.gap_pct || 0).toFixed(1)}%</span>}
+                              {item.gap_pct != null && item.gap_pct > 0.2 && <span>gap {Number(item.gap_pct || 0).toFixed(1)}%</span>}
+                              {item.vol_ratio != null && item.vol_ratio >= 1.5 && <span>vol {Number(item.vol_ratio || 0).toFixed(1)}x</span>}
+                              {item.rsi != null && <span>RSI {Number(item.rsi || 0).toFixed(0)}</span>}
                               {item.pullback_gap_pct != null && <span>pullback {Number(item.pullback_gap_pct || 0).toFixed(2)}%</span>}
                               {item.change_pct != null && <span>change {Number(item.change_pct || 0).toFixed(2)}%</span>}
                             </div>
                           </div>
-                        ))
+                          )
+                        })
                       ) : (
                         <div className="candidate-empty">No candidate details yet</div>
                       )}
