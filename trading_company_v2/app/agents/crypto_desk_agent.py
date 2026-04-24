@@ -13,30 +13,81 @@ class CryptoDeskAgent(BaseAgent):
 
     def run(self) -> AgentResult:
         weights = get_crypto_weights()
-        # BTC always drives direction — it leads the market; ETH/XRP follow
         direction_symbol = "KRW-BTC"
-        candles = get_upbit_15m_candles(direction_symbol, count=40)
-        signal = summarize_crypto_signal(candles)
-        # Execution targets the highest backtest-weighted symbol
-        lead_market = next(iter(weights), "KRW-BTC")
-        recent_change = float(signal.get("recent_change_pct", 0.0) or 0.0)
-        burst_change = float(signal.get("burst_change_pct", 0.0) or 0.0)
-        ema_gap = float(signal.get("ema_gap_pct", 0.0) or 0.0)
-        rsi_value = signal.get("rsi")
+        direction_signal = summarize_crypto_signal(get_upbit_15m_candles(direction_symbol, count=40))
+
+        ranked_candidates: list[dict] = []
+        for market, weight in list(weights.items())[:4]:
+            signal = summarize_crypto_signal(get_upbit_15m_candles(market, count=40))
+            combined_score = round(
+                (float(signal.get("score", 0.5) or 0.5) * 0.72)
+                + (float(direction_signal.get("score", 0.5) or 0.5) * 0.18)
+                + (float(weight or 0.0) * 0.10),
+                3,
+            )
+            ranked_candidates.append(
+                {
+                    "market": market,
+                    "weight": round(float(weight or 0.0), 4),
+                    "signal_score": float(signal.get("score", 0.5) or 0.5),
+                    "combined_score": combined_score,
+                    "bias": str(signal.get("bias", "balanced") or "balanced"),
+                    "recent_change_pct": float(signal.get("recent_change_pct", 0.0) or 0.0),
+                    "burst_change_pct": float(signal.get("burst_change_pct", 0.0) or 0.0),
+                    "ema_gap_pct": float(signal.get("ema_gap_pct", 0.0) or 0.0),
+                    "pullback_gap_pct": float(signal.get("pullback_gap_pct", 0.0) or 0.0),
+                    "range_4_pct": float(signal.get("range_4_pct", 0.0) or 0.0),
+                    "rsi": signal.get("rsi"),
+                    "reasons": list(signal.get("reasons", [])),
+                }
+            )
+
+        ranked_candidates.sort(key=lambda item: item.get("combined_score", 0.0), reverse=True)
+        leader = ranked_candidates[0] if ranked_candidates else {
+            "market": next(iter(weights), "KRW-BTC"),
+            "weight": 0.0,
+            "signal_score": float(direction_signal.get("score", 0.5) or 0.5),
+            "combined_score": float(direction_signal.get("score", 0.5) or 0.5),
+            "bias": str(direction_signal.get("bias", "balanced") or "balanced"),
+            "recent_change_pct": float(direction_signal.get("recent_change_pct", 0.0) or 0.0),
+            "burst_change_pct": float(direction_signal.get("burst_change_pct", 0.0) or 0.0),
+            "ema_gap_pct": float(direction_signal.get("ema_gap_pct", 0.0) or 0.0),
+            "pullback_gap_pct": float(direction_signal.get("pullback_gap_pct", 0.0) or 0.0),
+            "range_4_pct": float(direction_signal.get("range_4_pct", 0.0) or 0.0),
+            "rsi": direction_signal.get("rsi"),
+            "reasons": list(direction_signal.get("reasons", [])),
+        }
+
+        lead_market = str(leader.get("market", "") or next(iter(weights), "KRW-BTC"))
+        candidate_markets = [str(item.get("market", "")).strip() for item in ranked_candidates if str(item.get("market", "")).strip()]
+        candidate_summary = [
+            f"{item['market']} score {item['combined_score']:.2f} / bias {item['bias']} / weight {item['weight']:.2f}"
+            for item in ranked_candidates[:3]
+        ]
+
         return AgentResult(
             name=self.name,
-            score=float(signal["score"]),
-            reason=f"BTC direction {signal['bias']} → execute {lead_market} (weight {weights.get(lead_market, 0):.2f})",
+            score=float(leader.get("combined_score", 0.5) or 0.5),
+            reason=(
+                f"crypto leader {lead_market} selected with score {leader.get('combined_score', 0.0):.2f} "
+                f"under BTC backdrop {direction_signal.get('bias', 'balanced')}"
+            ),
             payload={
                 "lead_market": lead_market,
                 "direction_market": direction_symbol,
-                "desk_bias": signal["bias"],
-                "reasons": signal["reasons"],
-                "signal_score": signal["score"],
-                "recent_change_pct": recent_change,
-                "burst_change_pct": burst_change,
-                "ema_gap_pct": ema_gap,
-                "rsi": rsi_value,
+                "desk_bias": leader.get("bias", "balanced"),
+                "reasons": candidate_summary + list(direction_signal.get("reasons", []))[:2] + list(leader.get("reasons", []))[:2],
+                "signal_score": float(leader.get("combined_score", 0.5) or 0.5),
+                "recent_change_pct": float(leader.get("recent_change_pct", 0.0) or 0.0),
+                "burst_change_pct": float(leader.get("burst_change_pct", 0.0) or 0.0),
+                "ema_gap_pct": float(leader.get("ema_gap_pct", 0.0) or 0.0),
+                "pullback_gap_pct": float(leader.get("pullback_gap_pct", 0.0) or 0.0),
+                "range_4_pct": float(leader.get("range_4_pct", 0.0) or 0.0),
+                "rsi": leader.get("rsi"),
                 "backtest_weights": weights,
+                "candidate_symbols": candidate_markets[:4],
+                "candidate_markets": ranked_candidates[:4],
+                "direction_bias": direction_signal.get("bias", "balanced"),
+                "direction_score": float(direction_signal.get("score", 0.5) or 0.5),
             },
         )
