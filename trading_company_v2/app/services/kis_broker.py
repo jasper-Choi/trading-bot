@@ -13,7 +13,7 @@ from app.core.models import PaperOrder
 
 
 KIS_PROD_BASE_URL = "https://openapi.koreainvestment.com:9443"
-KIS_MOCK_BASE_URL = "https://openapivts.koreainvestment.com:9443"
+KIS_MOCK_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 KIS_TOKEN_PATH = "/oauth2/tokenP"
 KIS_HASHKEY_PATH = "/uapi/hashkey"
 KIS_ORDER_CASH_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
