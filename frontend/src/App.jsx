@@ -4,7 +4,7 @@ import StatCard from './components/StatCard'
 import PositionTable from './components/PositionTable'
 import MarketRegimeBanner from './components/MarketRegimeBanner'
 import StockPositionTable from './components/StockPositionTable'
-import { formatKstTime, getKstClock } from './utils/time'
+import { formatKstTime, formatKstDateTime, getKstClock } from './utils/time'
 
 const PnlChart = lazy(() => import('./components/PnlChart'))
 const TradeHistory = lazy(() => import('./components/TradeHistory'))
@@ -387,6 +387,7 @@ export default function App() {
   const capitalModeLabel = capitalProfile?.mode
     ? String(capitalProfile.mode).replaceAll('_', ' ')
     : 'neutral'
+  const agentLog = dashboard?.agent_log ?? []
 
   return (
     <div className="app app-shell">
@@ -716,6 +717,57 @@ export default function App() {
               ))}
             </div>
           </div>
+
+          {agentLog.length > 0 && (
+            <div className="agent-log-panel">
+              <div className="edge-head">
+                <div>
+                  <div className="panel-title">AI {'\uc5d0\uc774\uc804\ud2b8'} {'\ud310\ub2e8'} {'\uc774\ub825'}</div>
+                  <div className="panel-subcopy">
+                    {agentLog.length}{'\uc0ac\uc774\ud074'} {'\uae30\ub85d'} / {'\ucd5c\uadfc'} {formatKstDateTime(agentLog[0]?.run_at)}
+                  </div>
+                </div>
+                <div className="edge-pill tone-info">{agentLog.length} cycles</div>
+              </div>
+              <div className="agent-cycles">
+                {agentLog.slice(0, 6).map((cycle, idx) => (
+                  <div className={`agent-cycle${idx === 0 ? ' latest' : ''}`} key={cycle.run_at || idx}>
+                    <div className="agent-cycle-head">
+                      <span className="agent-cycle-time">{formatKstDateTime(cycle.run_at)}</span>
+                      <span className={`agent-stance-tag ${cycle.stance?.includes('OFFENSE') ? 'tone-ok' : cycle.stance?.includes('DEFENSE') ? 'tone-risk' : 'tone-muted'}`}>
+                        {cycle.stance || '--'}
+                      </span>
+                      <span className="agent-stance-tag tone-muted">{cycle.regime || '--'}</span>
+                    </div>
+                    <div className="agent-desk-rows">
+                      {(cycle.desks || []).map((d) => {
+                        const isActionable = ['probe_longs', 'selective_probe', 'attack_opening_drive'].includes(d.action)
+                        const isIdle = d.status === 'idle'
+                        const cls = isActionable && !isIdle ? 'c-green' : isActionable && isIdle ? 'c-yellow' : 'c-muted'
+                        const deskLabel = d.desk === 'crypto' ? '\ucf54\uc778' : d.desk === 'korea' ? '\ud55c\uad6d' : '\ubbf8\uad6d'
+                        const symPart = d.symbol ? ` \u00b7 ${d.symbol.replace('KRW-', '')}` : ''
+                        const szPart = isActionable && !isIdle ? ` \u00b7 ${d.size}` : ''
+                        return (
+                          <div className="agent-desk-row" key={d.desk}>
+                            <span className="agent-desk-tag">{deskLabel}</span>
+                            <div className="agent-desk-body">
+                              <span className={`agent-desk-act ${cls}`}>{d.action.replace(/_/g, ' ')}{symPart}{szPart}</span>
+                              {d.notes?.slice(0, 1).map((note, ni) => (
+                                <span className="agent-desk-note" key={ni}>{note}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {cycle.signals?.length > 0 && (
+                      <div className="agent-cycle-signals">{cycle.signals.slice(0, 2).join(' \u00b7 ')}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="stat-row">
             <StatCard
