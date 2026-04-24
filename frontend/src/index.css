@@ -379,6 +379,103 @@ html, body {
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
 }
 
+.candidate-panel {
+  margin-top: 12px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(11, 21, 37, 0.88), rgba(9, 17, 31, 0.78));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.candidate-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(7, 16, 29, 0.62);
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.candidate-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.candidate-card-head strong,
+.candidate-copy strong {
+  display: block;
+}
+
+.candidate-card-head span,
+.candidate-copy span,
+.candidate-metrics span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.candidate-card-size {
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 8px;
+}
+
+.candidate-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: flex-start;
+  padding-top: 8px;
+  border-top: 1px solid rgba(141, 177, 199, 0.12);
+}
+
+.candidate-row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.candidate-copy,
+.candidate-metrics {
+  min-width: 0;
+}
+
+.candidate-metrics {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+}
+
+.candidate-empty {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .pilot-panel {
   margin-top: 12px;
   padding: 16px 18px;
@@ -1042,6 +1139,9 @@ tr:hover td { background: var(--surface2); }
   .readiness-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .agent-row { grid-template-columns: 1fr; }
   .agent-metrics { align-items: flex-start; }
+  .candidate-grid { grid-template-columns: 1fr; }
+  .candidate-row { grid-template-columns: 1fr; }
+  .candidate-metrics { align-items: flex-start; text-align: left; }
   .insight-agent-grid,
   .insight-runtime-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -1112,7 +1212,8 @@ tr:hover td { background: var(--surface2); }
   .broker-strip,
   .edge-grid,
   .edge-deck,
-  .symbol-edge-grid {
+  .symbol-edge-grid,
+  .candidate-grid {
     grid-template-columns: 1fr;
   }
   .area-position,

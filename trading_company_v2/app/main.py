@@ -207,6 +207,7 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
     execution_log = list(state.execution_log or [])
     open_positions = list(state.open_positions or [])
     desk_stats = state.daily_summary.get("desk_stats", {}) or {}
+    desk_views = state.desk_views or {}
     strategy_book = state.strategy_book or {}
     config_map = {
         "crypto": ("crypto_plan", "crypto"),
@@ -219,8 +220,68 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
         status = desk_status.get(desk, {}) or {}
         plan = strategy_book.get(plan_key, {}) or {}
         stats = desk_stats.get(desk_stat_key, {}) or {}
+        desk_view_key = {
+            "crypto": "crypto_desk",
+            "korea": "korea_stock_desk",
+            "us": "us_stock_desk",
+        }.get(desk, "")
+        view = desk_views.get(desk_view_key, {}) or {}
         target_symbol = str(plan.get("symbol") or "") or str(status.get("focus") or "")
         watch_symbols = _leaders_to_symbols(status.get("leaders") or [])
+        candidate_symbols = [str(item).strip() for item in (plan.get("candidate_symbols") or view.get("candidate_symbols") or []) if str(item).strip()]
+        candidate_details: list[dict] = []
+
+        if desk == "crypto":
+            ranked_candidates = []
+            backtest_weights = view.get("backtest_weights", {}) or {}
+            lead_market = str(view.get("lead_market", "") or target_symbol).strip()
+            for symbol in candidate_symbols[:5]:
+                weight = float(backtest_weights.get(symbol, 0.0) or 0.0)
+                leader_bonus = 0.03 if symbol == lead_market else 0.0
+                ranked_candidates.append(
+                    {
+                        "symbol": symbol,
+                        "label": symbol.replace("KRW-", ""),
+                        "score": round(float(view.get("signal_score", 0.0) or 0.0) + (weight * 0.1) + leader_bonus, 2),
+                        "bias": str(view.get("desk_bias", "balanced") or "balanced"),
+                        "weight": round(weight, 3),
+                        "recent_change_pct": float(view.get("recent_change_pct", 0.0) or 0.0),
+                        "pullback_gap_pct": float(view.get("pullback_gap_pct", 0.0) or 0.0),
+                        "range_4_pct": float(view.get("range_4_pct", 0.0) or 0.0),
+                        "is_primary": symbol == lead_market,
+                    }
+                )
+            candidate_details = ranked_candidates
+        elif desk == "korea":
+            for item in (view.get("gap_candidates") or [])[:5]:
+                symbol = str(item.get("ticker", "")).strip()
+                candidate_details.append(
+                    {
+                        "symbol": symbol,
+                        "label": str(item.get("name", "") or symbol),
+                        "score": round(float(item.get("candidate_score", 0.0) or 0.0), 2),
+                        "bias": str(item.get("signal_bias", "neutral") or "neutral"),
+                        "gap_pct": float(item.get("gap_pct", 0.0) or 0.0),
+                        "signal_score": float(item.get("signal_score", 0.0) or 0.0),
+                        "burst_change_pct": float(item.get("burst_change_pct", 0.0) or 0.0),
+                        "is_primary": symbol == target_symbol,
+                    }
+                )
+        elif desk == "us":
+            for item in (view.get("leaders") or [])[:5]:
+                symbol = str(item.get("ticker", "")).strip()
+                candidate_details.append(
+                    {
+                        "symbol": symbol,
+                        "label": symbol,
+                        "score": round(float(item.get("candidate_score", 0.0) or 0.0), 2),
+                        "bias": str(item.get("signal_bias", "neutral") or "neutral"),
+                        "change_pct": float(item.get("change_pct", 0.0) or 0.0),
+                        "signal_score": float(item.get("signal_score", 0.0) or 0.0),
+                        "volume": float(item.get("volume", 0.0) or 0.0),
+                        "is_primary": symbol == target_symbol,
+                    }
+                )
 
         desk_open_positions = [
             {
@@ -268,6 +329,8 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
             "size": status.get("size") or "0.00x",
             "target_symbol": target_symbol,
             "watch_symbols": watch_symbols,
+            "candidate_symbols": candidate_symbols or watch_symbols,
+            "candidate_details": candidate_details,
             "latest_order": status.get("latest_order"),
             "open_positions": desk_open_positions,
             "recent_orders": desk_recent_orders,
@@ -276,6 +339,13 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
             "win_rate": float(stats.get("win_rate", 0.0) or 0.0),
             "wins": int(stats.get("wins", 0) or 0),
             "losses": int(stats.get("losses", 0) or 0),
+            "quality_score": float(plan.get("quality_score", view.get("quality_score", 0.0)) or 0.0),
+            "avg_signal": float(plan.get("avg_signal", view.get("avg_signal_score_top3", view.get("signal_score", 0.0))) or 0.0),
+            "quality_threshold": float(plan.get("quality_threshold", 0.0) or 0.0),
+            "desk_bias": str(view.get("desk_bias", status.get("bias", "neutral")) or "neutral"),
+            "active_count": int(
+                view.get("active_gap_count", view.get("active_us_count", len(candidate_details))) or 0
+            ),
         }
 
     return payload

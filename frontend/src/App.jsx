@@ -259,6 +259,7 @@ export default function App() {
   const entryBlockSummary =
     dashboard?.exposure?.entry_block_summary ?? readiness?.entry_block_summary ?? null
   const deskOffense = dashboard?.desk_offense ?? []
+  const deskDrilldown = dashboard?.desk_drilldown ?? {}
   const symbolEdge = dashboard?.symbol_edge ?? []
   const agentPerformance = dashboard?.agent_performance ?? []
   const capitalProfile =
@@ -388,6 +389,11 @@ export default function App() {
     ? String(capitalProfile.mode).replaceAll('_', ' ')
     : 'neutral'
   const agentLog = dashboard?.agent_log ?? []
+  const candidatePanels = [
+    { key: 'crypto', title: 'Crypto', detail: deskDrilldown?.crypto ?? null },
+    { key: 'korea', title: 'Korea', detail: deskDrilldown?.korea ?? null },
+    { key: 'us', title: 'U.S.', detail: deskDrilldown?.us ?? null },
+  ]
 
   return (
     <div className="app app-shell">
@@ -715,6 +721,73 @@ export default function App() {
                   <span>{item.detail || 'fresh symbol bias'}</span>
                 </div>
               ))}
+            </div>
+          </div>
+
+          <div className="candidate-panel">
+            <div className="edge-head">
+              <div>
+                <div className="panel-title">Candidate Quality</div>
+                <div className="panel-subcopy">
+                  Live candidate desks ranked for current profit-maximization focus
+                </div>
+              </div>
+            </div>
+            <div className="candidate-grid">
+              {candidatePanels.map((panel) => {
+                const detail = panel.detail || {}
+                const candidates = (detail.candidate_details || []).slice(0, 4)
+                const tone =
+                  detail.action === 'attack_opening_drive' || detail.action === 'probe_longs'
+                    ? 'tone-press'
+                    : detail.action === 'selective_probe'
+                      ? 'tone-balanced'
+                      : 'tone-muted'
+                return (
+                  <div className={`candidate-card ${tone}`} key={panel.key}>
+                    <div className="candidate-card-head">
+                      <div>
+                        <strong>{panel.title}</strong>
+                        <span>{detail.focus || 'no active focus'}</span>
+                      </div>
+                      <span className="candidate-card-size">{detail.size || '0.00x'}</span>
+                    </div>
+                    <div className="candidate-meta">
+                      <span>leader {detail.target_symbol || '--'}</span>
+                      <span>quality {Number(detail.quality_score || 0).toFixed(2)}</span>
+                      <span>signal {Number(detail.avg_signal || 0).toFixed(2)}</span>
+                      <span>active {Number(detail.active_count || 0)}</span>
+                    </div>
+                    <div className="candidate-list">
+                      {candidates.length > 0 ? (
+                        candidates.map((item, idx) => (
+                          <div className="candidate-row" key={`${panel.key}-${item.symbol || idx}`}>
+                            <div className="candidate-copy">
+                              <strong>
+                                {item.label || item.symbol || '--'}
+                                {item.is_primary ? ' · lead' : ''}
+                              </strong>
+                              <span>
+                                {item.bias || 'neutral'}
+                                {item.signal_score != null ? ` / signal ${Number(item.signal_score || 0).toFixed(2)}` : ''}
+                                {item.weight != null ? ` / weight ${Number(item.weight || 0).toFixed(2)}` : ''}
+                              </span>
+                            </div>
+                            <div className="candidate-metrics">
+                              <span>score {Number(item.score || 0).toFixed(2)}</span>
+                              {item.gap_pct != null && <span>gap {Number(item.gap_pct || 0).toFixed(1)}%</span>}
+                              {item.pullback_gap_pct != null && <span>pullback {Number(item.pullback_gap_pct || 0).toFixed(2)}%</span>}
+                              {item.change_pct != null && <span>change {Number(item.change_pct || 0).toFixed(2)}%</span>}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="candidate-empty">No candidate details yet</div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
