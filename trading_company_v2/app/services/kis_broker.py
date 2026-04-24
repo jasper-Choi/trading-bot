@@ -13,6 +13,7 @@ from app.core.models import PaperOrder
 
 
 KIS_PROD_BASE_URL = "https://openapi.koreainvestment.com:9443"
+KIS_MOCK_BASE_URL = "https://openapivts.koreainvestment.com:9443"
 KIS_TOKEN_PATH = "/oauth2/tokenP"
 KIS_HASHKEY_PATH = "/uapi/hashkey"
 KIS_ORDER_CASH_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
@@ -133,7 +134,7 @@ def get_account_positions() -> list[dict[str, Any]]:
             "CTX_AREA_FK100": "",
             "CTX_AREA_NK100": "",
         },
-        tr_id="TTTC8434R",
+        tr_id="VTTC8434R" if settings.kis_mock else "TTTC8434R",
     )
     rows = _extract_rows(response, "output1")
     positions: list[dict[str, Any]] = []
@@ -195,7 +196,7 @@ def get_order(odno: str, symbol: str = "", side_hint: str = "") -> dict[str, Any
             "CTX_AREA_NK100": "",
             "EXCG_ID_DVSN_CD": "KRX",
         },
-        tr_id="TTTC0081R",
+        tr_id="VTTC0081R" if settings.kis_mock else "TTTC0081R",
     )
     rows = _extract_rows(response, "output1")
     target = str(odno or "").strip()
@@ -347,7 +348,7 @@ def _request(
     body = json_body or {}
     if include_hashkey:
         headers["hashkey"] = _issue_hashkey(body)
-    url = f"{KIS_PROD_BASE_URL}{path}"
+    url = f"{_kis_base_url()}{path}"
     if method.upper() == "POST":
         response = requests.post(url, headers=headers, json=body, timeout=REQUEST_TIMEOUT)
     else:
@@ -376,7 +377,7 @@ def _get_access_token() -> str:
         return cached_token
 
     response = requests.post(
-        f"{KIS_PROD_BASE_URL}{KIS_TOKEN_PATH}",
+        f"{_kis_base_url()}{KIS_TOKEN_PATH}",
         headers={"content-type": "application/json; charset=utf-8"},
         json={
             "grant_type": "client_credentials",
@@ -398,7 +399,7 @@ def _get_access_token() -> str:
 
 def _issue_hashkey(payload: dict[str, Any]) -> str:
     response = requests.post(
-        f"{KIS_PROD_BASE_URL}{KIS_HASHKEY_PATH}",
+        f"{_kis_base_url()}{KIS_HASHKEY_PATH}",
         headers={
             "content-type": "application/json; charset=utf-8",
             "appkey": settings.kis_app_key,
@@ -415,7 +416,16 @@ def _issue_hashkey(payload: dict[str, Any]) -> str:
     return hashkey
 
 
+def _kis_base_url() -> str:
+    """모의투자(KIS_MOCK=true)면 VTS 서버, 실전이면 PROD 서버 반환."""
+    return KIS_MOCK_BASE_URL if settings.kis_mock else KIS_PROD_BASE_URL
+
+
 def _order_tr_id(action: str) -> str:
+    # 모의투자: VTTC0802U(매수) / VTTC0801U(매도)
+    # 실전투자: TTTC0802U(매수) / TTTC0801U(매도)
+    if settings.kis_mock:
+        return "VTTC0802U" if _is_buy_action(action) else "VTTC0801U"
     return "TTTC0802U" if _is_buy_action(action) else "TTTC0801U"
 
 

@@ -58,6 +58,7 @@ class Settings:
     kis_account_no: str = os.environ.get("KIS_ACCOUNT_NO", "")
     kis_product_code: str = os.environ.get("KIS_PRODUCT_CODE", "")
     kis_allow_live: bool = os.environ.get("KIS_ALLOW_LIVE", "false").lower() == "true"
+    kis_mock: bool = os.environ.get("KIS_MOCK", "false").lower() == "true"
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
     telegram_notify_every_cycle: bool = os.environ.get("TELEGRAM_NOTIFY_EVERY_CYCLE", "false").lower() == "true"
