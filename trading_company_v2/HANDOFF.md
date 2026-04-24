@@ -239,13 +239,44 @@ Status:
 - 진단 엔드포인트: `/diagnostics/kis-live-pilot`, `/diagnostics/broker-live-health`
 - **남은 사용자 작업**: Oracle VM `.env`에 KIS 자격증명 등록 후 KIS_ALLOW_LIVE=true
 
+## 0.14 AI 에이전트 판단 이력 대시보드 (2026-04-24)
+
+### 완료 (2e6e58c)
+- **핵심 문제 해결**: 봇이 실시간으로 판단하고 있지만 대시보드에서 전혀 보이지 않는 문제
+- `main.py`: `_build_agent_log()` 함수 추가
+  - `state.recent_journal` → per-cycle, per-desk 판단 이력 포맷
+  - 각 사이클: 스탠스, 국면, 데스크별 action/symbol/size/status/차단 사유
+  - `agent_log`를 `_build_dashboard_payload`에 추가
+  - `load_closed_positions(limit=8)` → `limit=20`으로 상향
+- 임베디드 대시보드 (`:8080/`):
+  - "AI 에이전트 판단 이력" 섹션 추가 (데스크 카드 아래)
+  - 최근 8사이클 표시, 최신 사이클 파란 테두리 강조
+  - `코인`/`한국`/`미국` 태그 + 액션명 (진입 시도했으나 차단 → 노란색, 실제 진입 → 녹색)
+  - 차단 사유 note 2개까지 표시
+  - 청산 내역 6건 → 15건
+  - `toKSTFull()` JS 헬퍼 추가
+- React 프론트엔드 (`App.jsx`):
+  - `agentLog = dashboard?.agent_log` 추출
+  - symbol-edge-panel 아래, stat-row 위에 AI 판단 이력 패널 삽입
+  - 6사이클 x (데스크별 row: 태그/액션/심볼/사이즈/note)
+  - `formatKstDateTime()` 임포트 추가
+- `index.css`: agent-log-panel, agent-cycle, agent-desk-row 스타일 추가
+
+### 항목별 입력 threshold 완화 (528cd71 — 이전 세션)
+- Korea: single-gap tier 추가 (gap≥1, quality≥0.65, 0.20x size)
+- Korea: mid-session probe tier 추가 (gap≥1, quality≥0.70, 0.15x)
+- US: stand_by 기준 완화 (quality 0.72→0.62, signal 0.62→0.52, count 3→2)
+- US: 2-leader fallback tier 추가 (0.10x probe)
+
 ## 8. Suggested next work
 
 Priority order:
 
-1. **tiny-size 첫 주문 체결 확인** — signal이 trigger 돌파 시 ₩150,000 한도 단일 주문 정상 체결 확인 (arming/ready Telegram 알림으로 미리 감지)
-2. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
-3. **KIS 실전 전환** — Oracle VM `.env`에 KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO / KIS_PRODUCT_CODE 등록 후 KIS_ALLOW_LIVE=true → `/diagnostics/kis-live-pilot` 확인
+1. **AI 판단 이력 확인** — Oracle VM에서 `agent_log`가 실제 사이클 데이터를 보여주는지 확인 (`:8080/` 대시보드 또는 `/dashboard-data` JSON에서 `dashboard.agent_log` 배열 확인)
+2. **Korea/US threshold 완화 효과 확인** — 새 single-gap 진입 tier가 실제로 작동하는지 대시보드에서 확인 (초록색/노란색 Korea/US 데스크 row 확인)
+3. **tiny-size 첫 주문 체결 확인** — signal이 trigger 돌파 시 ₩150,000 한도 단일 주문 정상 체결 확인 (arming/ready Telegram 알림으로 미리 감지)
+4. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
+5. **KIS 실전 전환** — Oracle VM `.env`에 KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO / KIS_PRODUCT_CODE 등록 후 KIS_ALLOW_LIVE=true → `/diagnostics/kis-live-pilot` 확인
 
 ## 9. Useful commands
 
