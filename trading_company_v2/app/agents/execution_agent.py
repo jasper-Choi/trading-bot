@@ -62,28 +62,25 @@ class ExecutionAgent(BaseAgent):
 
     @staticmethod
     def _desk_limits(desk: str) -> tuple[int, float]:
+        # (max_concurrent_positions, max_desk_notional_x)
+        # Crypto: 2 positions allowed to build portfolio; cap at 1.2x (2 × 0.6x)
+        # Korea/US: 2 positions, 1.0x cap
         if desk == "crypto":
-            return 1, 0.6
+            return 2, 1.2
         if desk == "us":
-            return 2, 0.55
-        return 2, 0.5
+            return 2, 0.8
+        return 2, 0.8
 
     @staticmethod
     def _expected_pnl_pct(desk: str, action: str) -> float:
         if action in {"watchlist_only", "reduce_risk", "stand_by", "capital_preservation", "pre_market_watch"}:
             return 0.0
         if desk == "crypto":
-            if action == "probe_longs":
-                return 4.0
-            if action == "selective_probe":
-                return 3.2
-            return 3.8
+            # All crypto actions target +4% (vol-breakout strategy)
+            return 4.0
         if desk == "korea":
-            if action == "attack_opening_drive":
-                return 3.0
-            if action == "selective_probe":
-                return 2.2
-            return 2.8
+            # Momentum-breakout strategy: all actionable entries target +4%
+            return 4.0
         if action == "probe_longs":
             return 3.2
         if action == "selective_probe":
@@ -130,7 +127,8 @@ class ExecutionAgent(BaseAgent):
         last_trade_positive = float(last_trade.get("pnl_pct", 0.0) or 0.0) > 0
         last_two_realized = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in last_two)
         last_three_losses = sum(1 for item in last_three if float(item.get("pnl_pct", 0.0) or 0.0) <= 0)
-        return last_trade_positive and last_two_realized >= 0.35 and last_three_losses <= 1
+        # With 4% targets, require at least 1.5% cumulative profit over last 2 trades
+        return last_trade_positive and last_two_realized >= 1.5 and last_three_losses <= 1
 
     def _repeated_loss_block(self, desk: str, symbol: str) -> bool:
         if not symbol:
@@ -161,7 +159,8 @@ class ExecutionAgent(BaseAgent):
             if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}
         )
         pnl_total = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent[:5])
-        return stop_like >= 2 or pnl_total <= -2.0
+        # With -2.5% stop per trade, 2 stops = -5%; block after -5% cumulative or 2 stops
+        return stop_like >= 2 or pnl_total <= -5.0
 
     def _desk_loss_pressure(self, desk: str) -> bool:
         recent = self._desk_recent_trades(desk, limit=6)
@@ -173,11 +172,13 @@ class ExecutionAgent(BaseAgent):
         realized = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent)
         if realized > 0:
             return False
+        # Thresholds calibrated to new P&L scale: -2% stop (crypto/us), -2.5% (korea)
+        # "Loss pressure" fires when 3 losses OR cumulative P&L < 2 full stops
         if desk == "us":
-            return losses >= 3 or realized <= -2.0
+            return losses >= 3 or realized <= -4.0    # 2 × -2% stops
         if desk == "crypto":
-            return losses >= 3 or realized <= -1.0
-        return losses >= 3 or realized <= -1.2
+            return losses >= 3 or realized <= -4.0    # 2 × -2% stops
+        return losses >= 3 or realized <= -5.0        # 2 × -2.5% stops
 
     def _desk_chronic_drawdown(self, desk: str) -> bool:
         recent = self._desk_recent_trades(desk, limit=5)
@@ -191,11 +192,12 @@ class ExecutionAgent(BaseAgent):
             for item in recent
             if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}
         )
+        # Chronic drawdown: 3 full stops worth of loss with very low win rate
         if desk == "us":
-            return wins == 0 and losses >= 4 and realized <= -2.0
+            return wins == 0 and losses >= 4 and realized <= -6.0    # 3 × -2%
         if desk == "crypto":
-            return wins <= 1 and losses >= 4 and realized <= -1.6
-        return wins <= 1 and losses >= 4 and (realized <= -2.4 or stop_like >= 3)
+            return wins <= 1 and losses >= 4 and realized <= -6.0    # 3 × -2%
+        return wins <= 1 and losses >= 4 and (realized <= -7.5 or stop_like >= 3)  # 3 × -2.5%
 
     def _desk_performance_lock(self, desk: str) -> bool:
         desk_stats = (self.daily_summary.get("desk_stats", {}) or {}).get(desk, {}) or {}
@@ -206,11 +208,12 @@ class ExecutionAgent(BaseAgent):
         win_rate = float(desk_stats.get("win_rate", 0.0) or 0.0)
         if closed_positions < 4:
             return False
+        # Performance lock: daily P&L worse than 3 full stops with poor win rate
         if desk == "us":
-            return wins == 0 and losses >= 4 and realized <= -2.0
+            return wins == 0 and losses >= 4 and realized <= -6.0
         if desk == "crypto":
-            return win_rate < 25.0 and losses >= 4 and realized <= -1.5
-        return win_rate < 25.0 and losses >= 5 and realized <= -2.5
+            return win_rate < 25.0 and losses >= 4 and realized <= -6.0
+        return win_rate < 25.0 and losses >= 5 and realized <= -7.5
 
     def _desk_offense_state(self, desk: str) -> dict:
         desk_stats = (self.daily_summary.get("desk_stats", {}) or {}).get(desk, {}) or {}
@@ -246,9 +249,11 @@ class ExecutionAgent(BaseAgent):
             if reason in {"stop_hit", "early_failure"}:
                 stop_like_count += 1
                 stop_like_pnl += float(item.get("pnl_pct", 0.0) or 0.0)
-        if stop_like_count >= 3 or stop_like_pnl <= -3.0:
+        # Calibrated to new stops: -2% crypto/us, -2.5% korea
+        # "high" after 3 stop-like exits OR cumulative stop P&L < -6% (3 full stops)
+        if stop_like_count >= 3 or stop_like_pnl <= -6.0:
             return "high"
-        if stop_like_count >= 2 or stop_like_pnl <= -1.5:
+        if stop_like_count >= 2 or stop_like_pnl <= -3.0:
             return "medium"
         return "none"
 
@@ -269,9 +274,10 @@ class ExecutionAgent(BaseAgent):
             if reason in {"stop_hit", "early_failure"}:
                 stop_like_count += 1
                 stop_like_pnl += float(item.get("pnl_pct", 0.0) or 0.0)
-        if stop_like_count >= 2 or stop_like_pnl <= -1.8:
+        # Per-symbol: 2 stops OR cumulative -4% (2 full stops) = high pressure
+        if stop_like_count >= 2 or stop_like_pnl <= -4.0:
             return "high"
-        if stop_like_count >= 1 or stop_like_pnl <= -0.8:
+        if stop_like_count >= 1 or stop_like_pnl <= -2.0:
             return "medium"
         return "none"
 

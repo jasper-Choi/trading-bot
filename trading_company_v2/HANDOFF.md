@@ -268,15 +268,66 @@ Status:
 - US: stand_by 기준 완화 (quality 0.72→0.62, signal 0.62→0.52, count 3→2)
 - US: 2-leader fallback tier 추가 (0.10x probe)
 
+## 0.15 전략 전면 재설계 — 백테스트 검증 + 파라미터 이식 (2026-04-24)
+
+### 배경
+- 기존 타깃(0.65~0.9%)이 왕복 비용(0.13~0.20%) 대비 너무 작아 수익 구조 불가
+- `quick_win_floor = target × 0.45` 로직이 승자를 조기 청산 → R:R 파괴
+- 목적 재정의: **오토 트레이딩의 실시간 판단 및 대응을 통한 수익의 극대화**
+
+### 백테스트 결과 (Desktop/backtest/)
+
+| 파일 | 전략 | 주요 결과 |
+|---|---|---|
+| `coin_backtest_v5.py` | 60분봉 변동성 브레이크아웃 (20일 신고가 + 거래량 3x + RSI 55-78) | ✅ XRP: 52.9% 승률 / R:R 2.02 / 샤프 5.47 |
+| `stock_backtest_v3.py` | 일봉 모멘텀 브레이크아웃 (20일 신고가 + 거래량 2.5x + RSI 55-78) | ✅ 20종목 포트 합산: 59.4% 승률 / 샤프 12.68 / 연 +33.61% |
+
+### 파라미터 이식 (이번 세션 커밋)
+
+**`app/core/state_store.py`**
+- `_position_thresholds` 전면 개정:
+  - crypto: +**4.0%** 타깃 / -2.0% 손절 / max 720 사이클 (24h) — 모든 action 통일
+  - korea: +**4.0%** 타깃 / -2.5% 손절 / max 195 사이클 (1 KRX 세션) — attack/probe/selective 통일
+  - us: +**4.0%** probe_longs / -2.0% / 200 사이클
+- `quick_win_floor` 제거 (Codex가 이전 세션에 완료)
+- `early_failure_pct`: `stop × 0.6` → `stop × 0.7`
+- `stale_floor_pct`: `target × 0.25` → `target × 0.15`
+- `fast_fail_cycle`: 기존 1~2 → crypto 30 / korea 20~30 / us 20 사이클
+
+**`app/agents/execution_agent.py`**
+- `_desk_limits`: crypto (1, 0.6x) → **(2, 1.2x)** (동시 2 포지션 허용)
+- `_desk_recovery_ready`: `last_two_realized >= 0.35` → **1.5%** (4% 타깃 스케일)
+- `_desk_loss_pressure`: crypto `-1.0%` → **-4.0%** (2 × -2% 손절)
+- `_desk_chronic_drawdown`: crypto `-1.6%` → **-6.0%** (3 × -2% 손절)
+- `_desk_performance_lock`: crypto `-1.5%` → **-6.0%**
+- `_desk_stop_pressure` high: `-3.0%` → **-6.0%**, medium: `-1.5%` → **-3.0%**
+- `_symbol_stop_pressure` high: `-1.8%` → **-4.0%**, medium: `-0.8%` → **-2.0%**
+- `_extended_symbol_block`: `-2.0%` → **-5.0%**
+- `_expected_pnl_pct`: korea 2.2~3.0% → **4.0%** 통일
+
+**`app/services/recommendation_engine.py`** (Codex 완료)
+- crypto offense_threshold: 0.74/0.70 → **0.68/0.64**
+- crypto 사이즈: 0.50x → **0.65x** (BALANCED), 0.85x (OFFENSE)
+- korea: quality threshold 0.72 → **0.56**, avg_volume 20000 → **8000**
+- korea: attack_opening_drive 조건 active_gap_count 3 → **2**
+- korea: selective_probe 조건 대폭 완화
+
+### 다음 작업 우선순위
+
+1. **Oracle VM pull + 서비스 재시작** — 새 파라미터가 실전에서 작동하는지 확인
+2. **대시보드 모니터링** — 크립토 진입 빈도 증가 확인, Korea 데스크 활성화 확인
+3. **첫 swing 거래 체결 확인** — +4% 타깃까지 보유 vs 조기 청산 여부
+4. **KIS 실전 전환** — Oracle VM `.env` KIS 자격증명 등록
+
 ## 8. Suggested next work
 
 Priority order:
 
-1. **AI 판단 이력 확인** — Oracle VM에서 `agent_log`가 실제 사이클 데이터를 보여주는지 확인 (`:8080/` 대시보드 또는 `/dashboard-data` JSON에서 `dashboard.agent_log` 배열 확인)
-2. **Korea/US threshold 완화 효과 확인** — 새 single-gap 진입 tier가 실제로 작동하는지 대시보드에서 확인 (초록색/노란색 Korea/US 데스크 row 확인)
-3. **tiny-size 첫 주문 체결 확인** — signal이 trigger 돌파 시 ₩150,000 한도 단일 주문 정상 체결 확인 (arming/ready Telegram 알림으로 미리 감지)
-4. **자본 확대** — tiny-size 검증 완료 후 UPBIT_PILOT_MAX_KRW 상향 / SINGLE_ORDER_ONLY 해제
-5. **KIS 실전 전환** — Oracle VM `.env`에 KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO / KIS_PRODUCT_CODE 등록 후 KIS_ALLOW_LIVE=true → `/diagnostics/kis-live-pilot` 확인
+1. **Oracle VM pull** — `ssh ubuntu@134.185.118.144` → `cd /home/ubuntu/trading-bot && git pull` → `sudo systemctl restart trading-loop trading-dashboard`
+2. **대시보드 진입 빈도 확인** — 새 파라미터 배포 후 크립토/한국주식 데스크에서 `planned` 주문 증가 여부
+3. **첫 swing +4% 목표 거래 추적** — 기존 빠른 청산(`momentum_take`) 없이 타깃까지 홀딩하는지 확인
+4. **KIS 실전 전환** — Oracle VM `.env`에 KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO 등록 후 `KIS_ALLOW_LIVE=true`
+5. **signal_engine.py 브레이크아웃 신호 추가** — 한국주식 데스크에 갭업 전용 → 모멘텀 브레이크아웃 신호 병행 (20일 신고가 + RSI)
 
 ## 9. Useful commands
 

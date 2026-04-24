@@ -219,23 +219,24 @@ def _build_price_lookup(market_snapshot: dict) -> dict[tuple[str, str], float]:
 
 
 def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
+    # Returns (target_pct, stop_pct, max_cycles)
+    # Backtest-validated (2025-04):
+    #   coin_backtest_v5  → +4% TP / -2.0% stop / ≤48h  (60-min vol-breakout)
+    #   stock_backtest_v3 → +4% TP / -2.5% stop / ≤5 days (daily momentum breakout)
+    # @ 2 min/cycle: 720 = 24h, 360 = 12h, 195 = 6.5h (1 KRX session)
     if desk == "crypto":
-        if action == "probe_longs":
-            return 4.0, -2.0, 360
-        if action == "selective_probe":
-            return 3.2, -1.8, 240
-        return 3.8, -1.9, 300
+        # All crypto actions: +4% target, -2% stop, max 24h
+        return 4.0, -2.0, 720
     if desk == "us":
         if action == "probe_longs":
-            return 3.2, -1.6, 240
+            return 4.0, -2.0, 200   # ~6.5h regular session
         if action == "selective_probe":
-            return 2.4, -1.2, 180
-        return 2.8, -1.4, 210
-    if action == "attack_opening_drive":
-        return 3.0, -1.5, 120
-    if action == "probe_longs":
-        return 2.8, -1.4, 150
-    return 2.2, -1.1, 90
+            return 3.0, -1.5, 150
+        return 2.8, -1.4, 120
+    # korea — momentum breakout: +4% target, -2.5% stop, max 1 KRX session
+    if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
+        return 4.0, -2.5, 195
+    return 3.0, -2.0, 150
 
 
 def _ensure_schema() -> None:
@@ -471,14 +472,19 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
             position.cycles_open += 1
             target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action)
-            early_failure_pct = round(stop_pct * 0.6, 2)
-            stale_floor_pct = round(max(target_pct * 0.25, 0.2), 2)
+            # early_failure: exit if still deeply losing after fast_fail_cycle cycles
+            # stale_floor:   exit near max_cycles if barely profitable
+            early_failure_pct = round(stop_pct * 0.7, 2)   # 70% of full stop (e.g. -1.4% at -2% stop)
+            stale_floor_pct = round(max(target_pct * 0.15, 0.20), 2)   # 15% of target (e.g. +0.60% at +4% target)
+            # fast_fail_cycle: minimum cycles before early_failure triggers
+            # crypto 24/7: 30 cycles = 1h, gives position time to develop
+            # korea/us intraday: shorter session so smaller window
             if position.desk == "crypto":
-                fast_fail_cycle = 18 if position.action == "selective_probe" else 24
+                fast_fail_cycle = 30
             elif position.desk == "korea":
-                fast_fail_cycle = 10 if position.action == "attack_opening_drive" else 16
+                fast_fail_cycle = 20 if position.action == "attack_opening_drive" else 30
             else:
-                fast_fail_cycle = 14 if position.action == "attack_opening_drive" else 20
+                fast_fail_cycle = 20
             if position.pnl_pct >= target_pct:
                 _close_position(position, "target_hit")
             elif position.pnl_pct <= stop_pct:
