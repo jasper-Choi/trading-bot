@@ -223,13 +223,17 @@ def _get_kosdaq_snapshot_from_naver_html(top_n: int) -> list[dict[str, Any]]:
 
 def build_market_snapshot() -> MarketSnapshot:
     crypto_leaders = get_top_krw_coins(top_n=8)
-    stock_leaders = get_kosdaq_snapshot(top_n=12)
+    stock_leaders = get_kosdaq_snapshot(top_n=30)
     us_leaders = get_us_core_snapshot()
     return MarketSnapshot(
         crypto_leaders=crypto_leaders,
         crypto_watchlist=[item["market"] for item in crypto_leaders[:5]],
         stock_leaders=stock_leaders,
-        gap_candidates=[item for item in stock_leaders if item.get("gap_pct", 0) >= 2.0][:5],
+        gap_candidates=[
+            item
+            for item in stock_leaders
+            if 1.2 <= float(item.get("gap_pct", 0.0) or 0.0) <= 12.0
+        ][:8],
         us_leaders=us_leaders,
         us_watchlist=[item["ticker"] for item in us_leaders[:4]],
         as_of=_now_iso(),

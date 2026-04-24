@@ -358,8 +358,24 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
   - weak spot remains excessive stop-outs after breakout entry
 - Korea:
   - data collection now works with real `pykrx`
-  - current opening-drive rules still produce only `7` total trades over the tested universe
-  - conclusion: Korea strategy is not blocked by infra anymore; it needs wider universe / parameter redesign
+  - repository-local research script added:
+    - `research/korea_opening_drive_research.py`
+  - widened research universe: `30` curated KRX names
+  - strongest current daily-bar approximation band:
+    - `gap_min_pct=1.2%`
+    - `gap_max_pct=12.0%`
+    - `vol_mult=1.6`
+    - `drive_min_pct=1.0%`
+    - `tp1=3%`
+    - `tp2=5%`
+    - `stop=1.5%`
+  - important caution:
+    - this Korea result is based on daily OHLC approximation, so absolute return metrics are optimistic
+    - use it for trigger-band discovery, not for direct production expectancy
+  - live Korea scanner has been widened to better match the research band:
+    - `get_kosdaq_snapshot(top_n=30)`
+    - live gap window now favors `1.2% ~ 12.0%`
+    - Korea desk ranking/scoring thresholds eased accordingly
 
 ### Next recommended work
 

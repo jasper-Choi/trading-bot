@@ -121,7 +121,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     top_signal_bias = str(gap_candidates[0].get("signal_bias", "neutral") or "neutral") if gap_candidates else "neutral"
     opening_window = bool(session.get("korea_opening_window"))
     mid_session = bool(session.get("korea_mid_session"))
-    _qmeta = {"quality_score": quality_score, "avg_signal": avg_signal, "quality_threshold": 0.58}
+    _qmeta = {"quality_score": quality_score, "avg_signal": avg_signal, "quality_threshold": 0.54}
 
     if not session.get("korea_open"):
         return {
@@ -143,7 +143,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "notes": ["Risk committee blocked fresh Korea entries in stress mode."],
             **_qmeta,
         }
-    if gap_candidates and (top_signal < 0.52 or top_gap >= 18.0 or top_rsi >= 78.0 or top_burst >= 12.0 or avg_volume < 2500):
+    if gap_candidates and (top_signal < 0.5 or top_gap >= 12.0 or top_rsi >= 80.0 or top_burst >= 12.0 or avg_volume < 2200):
         return {
             "action": "stand_by",
             "size": "0.00x",
@@ -156,7 +156,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
-    if opening_window and active_gap_count >= 2 and quality_score >= 0.62 and avg_gap >= 2.2 and avg_volume >= 10000 and avg_signal >= 0.56 and top_candidate_score >= 0.64 and top_signal_bias != "neutral" and stance != "DEFENSE":
+    if opening_window and active_gap_count >= 2 and quality_score >= 0.56 and avg_gap >= 1.8 and avg_volume >= 8000 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and top_signal_bias != "neutral" and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",
             "size": "0.55x" if stance == "BALANCED" else "0.75x",
@@ -169,7 +169,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
-    if active_gap_count >= 1 and quality_score >= 0.54 and avg_signal >= 0.5 and avg_volume >= 5000 and top_candidate_score >= 0.56:
+    if active_gap_count >= 1 and quality_score >= 0.5 and avg_signal >= 0.48 and avg_volume >= 3500 and top_candidate_score >= 0.52:
         return {
             "action": "selective_probe",
             "size": "0.40x",
@@ -184,7 +184,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             **_qmeta,
         }
     # Single strong candidate — smaller size, tighter criteria
-    if active_gap_count >= 1 and quality_score >= 0.58 and avg_signal >= 0.54 and top_candidate_score >= 0.6 and not mid_session:
+    if active_gap_count >= 1 and quality_score >= 0.54 and avg_signal >= 0.5 and top_candidate_score >= 0.56 and not mid_session:
         return {
             "action": "selective_probe",
             "size": "0.25x",
@@ -197,7 +197,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
-    if mid_session and active_gap_count >= 1 and quality_score >= 0.64 and avg_signal >= 0.56 and top_candidate_score >= 0.62:
+    if mid_session and active_gap_count >= 1 and quality_score >= 0.58 and avg_signal >= 0.52 and top_candidate_score >= 0.58:
         return {
             "action": "selective_probe",
             "size": "0.18x",
