@@ -68,6 +68,28 @@ class ExecutionAgent(BaseAgent):
             return 2, 0.55
         return 2, 0.5
 
+    @staticmethod
+    def _expected_pnl_pct(desk: str, action: str) -> float:
+        if action in {"watchlist_only", "reduce_risk", "stand_by", "capital_preservation", "pre_market_watch"}:
+            return 0.0
+        if desk == "crypto":
+            if action == "probe_longs":
+                return 4.0
+            if action == "selective_probe":
+                return 3.2
+            return 3.8
+        if desk == "korea":
+            if action == "attack_opening_drive":
+                return 3.0
+            if action == "selective_probe":
+                return 2.2
+            return 2.8
+        if action == "probe_longs":
+            return 3.2
+        if action == "selective_probe":
+            return 2.4
+        return 2.8
+
     def _reference_price(self, desk: str, symbol: str) -> float:
         if desk == "crypto":
             for item in self.market_snapshot.get("crypto_leaders", []):
@@ -388,17 +410,7 @@ class ExecutionAgent(BaseAgent):
         size = f"{scaled_notional_pct:.2f}x"
         notional_pct = scaled_notional_pct
         reference_price = self._reference_price(desk, symbol)
-        pnl_map = {
-            "probe_longs": 0.45,
-            "attack_opening_drive": 0.6,
-            "selective_probe": 0.2,
-            "watchlist_only": 0.0,
-            "reduce_risk": 0.0,
-            "stand_by": 0.0,
-            "capital_preservation": 0.0,
-            "pre_market_watch": 0.0,
-        }
-        pnl_estimate_pct = pnl_map.get(action, 0.0)
+        pnl_estimate_pct = self._expected_pnl_pct(desk, action)
         actionable_entries = {"probe_longs", "attack_opening_drive", "selective_probe"}
         actionable_exits = {"reduce_risk", "capital_preservation"}
         existing_open = self._has_open_position(desk, symbol)

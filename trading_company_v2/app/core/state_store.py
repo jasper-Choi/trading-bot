@@ -221,17 +221,21 @@ def _build_price_lookup(market_snapshot: dict) -> dict[tuple[str, str], float]:
 def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
     if desk == "crypto":
         if action == "probe_longs":
-            return 0.9, -0.55, 5
-        return 0.65, -0.4, 4
+            return 4.0, -2.0, 360
+        if action == "selective_probe":
+            return 3.2, -1.8, 240
+        return 3.8, -1.9, 300
     if desk == "us":
         if action == "probe_longs":
-            return 1.25, -0.7, 5
-        return 0.8, -0.45, 4
+            return 3.2, -1.6, 240
+        if action == "selective_probe":
+            return 2.4, -1.2, 180
+        return 2.8, -1.4, 210
     if action == "attack_opening_drive":
-        return 1.3, -0.65, 3
+        return 3.0, -1.5, 120
     if action == "probe_longs":
-        return 1.0, -0.55, 4
-    return 0.65, -0.4, 3
+        return 2.8, -1.4, 150
+    return 2.2, -1.1, 90
 
 
 def _ensure_schema() -> None:
@@ -469,16 +473,18 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action)
             early_failure_pct = round(stop_pct * 0.6, 2)
             stale_floor_pct = round(max(target_pct * 0.25, 0.2), 2)
-            fast_fail_cycle = 1 if position.action in {"attack_opening_drive", "selective_probe"} else 2
-            quick_win_floor = round(max(target_pct * 0.45, 0.35), 2)
+            if position.desk == "crypto":
+                fast_fail_cycle = 18 if position.action == "selective_probe" else 24
+            elif position.desk == "korea":
+                fast_fail_cycle = 10 if position.action == "attack_opening_drive" else 16
+            else:
+                fast_fail_cycle = 14 if position.action == "attack_opening_drive" else 20
             if position.pnl_pct >= target_pct:
                 _close_position(position, "target_hit")
             elif position.pnl_pct <= stop_pct:
                 _close_position(position, "stop_hit")
             elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
                 _close_position(position, "early_failure")
-            elif position.cycles_open >= 2 and position.pnl_pct >= quick_win_floor:
-                _close_position(position, "momentum_take")
             elif position.cycles_open >= max(2, max_cycles - 1) and position.pnl_pct < stale_floor_pct:
                 _close_position(position, "stale_exit")
             elif position.cycles_open >= max_cycles:

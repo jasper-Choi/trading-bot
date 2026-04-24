@@ -324,3 +324,39 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
 - Frontend policy remains source-first:
   - commit `frontend/src/*`
   - do not rely on checked-in `frontend/dist/*` unless a deployment path explicitly requires it
+
+## 12. Strategy Redesign Status (2026-04-24)
+
+- Direction remains unchanged from Claude handoff:
+  - maximize profit, not minimize activity
+  - define alpha first, then validate, then execute, then risk-manage
+  - crypto + Korea first, with volatile short-term swing priority
+- Immediate profit-limiting logic has now been corrected in code:
+  - removed `quick_win_floor` early winner cut from `app/core/state_store.py`
+  - expanded paper target / stop / hold windows to match swing-style trades
+  - aligned execution expected PnL with backtest-scale targets:
+    - crypto `probe_longs`: `4.0%`
+    - korea `attack_opening_drive`: `3.0%`
+- Recommendation thresholds were shifted away from over-defensive gating:
+  - crypto breakout entry thresholds lowered toward validated DOGE/XRP regime
+  - Korea opening-drive thresholds relaxed so the desk can actually express candidates
+- Backtest environment update:
+  - `pykrx` is usable on current Python 3.14 environment
+  - actual blocker was console encoding, not `pkg_resources`
+  - both backtest scripts now force UTF-8 stdout to avoid cp949 crashes
+
+### Current backtest readout
+
+- Crypto:
+  - validated leaders remain `KRW-DOGE` and `KRW-XRP`
+  - weak spot remains excessive stop-outs after breakout entry
+- Korea:
+  - data collection now works with real `pykrx`
+  - current opening-drive rules still produce only `7` total trades over the tested universe
+  - conclusion: Korea strategy is not blocked by infra anymore; it needs wider universe / parameter redesign
+
+### Next recommended work
+
+1. Rework Korea stock backtest universe and trigger definition until trade count is statistically usable.
+2. Refine crypto breakout entry to reduce stop-hit frequency without killing DOGE/XRP expectancy.
+3. After both are validated, transplant the winning rules into `recommendation_engine.py` and `execution_agent.py` more completely.
