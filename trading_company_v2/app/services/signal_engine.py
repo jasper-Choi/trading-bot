@@ -30,6 +30,105 @@ def rsi(values: list[float], period: int = 14) -> float | None:
     return 100 - (100 / (1 + rs))
 
 
+def summarize_breakout_signal(
+    candles: list[dict[str, Any]],
+    breakout_period: int = 20,
+    vol_surge_mult: float = 2.5,
+    rsi_min: float = 55.0,
+    rsi_max: float = 78.0,
+) -> dict[str, Any]:
+    """
+    Detects momentum breakout entry conditions — matches coin_backtest_v5 / stock_backtest_v3:
+      1. Price breaks N-period high  (close > max of prior N closes)
+      2. Volume surge  (current vol >= vol_surge_mult × N-period avg)
+      3. RSI in momentum zone  [rsi_min, rsi_max]
+      4. Price above EMA(breakout_period)
+    Works on any timeframe: 15m candles (crypto) or daily candles (Korea stocks).
+    """
+    _empty = {
+        "breakout": False, "vol_surge": False, "rsi_in_zone": False,
+        "above_ema20": False, "all_confirmed": False, "partial_confirmed": False,
+        "confirmed_count": 0, "breakout_score": 0.0, "vol_ratio": 0.0,
+        "period_high": 0.0, "last_rsi": None,
+        "reasons": ["not enough candles for breakout check"],
+    }
+    if len(candles) < breakout_period + 2:
+        return _empty
+
+    closes = [float(c["close"]) for c in candles]
+    volumes = [float(c.get("volume") or 0) for c in candles]
+
+    last_close = closes[-1]
+    last_vol = volumes[-1]
+
+    # 1. N-period high breakout: close > max(prior N closes), excluding current
+    prior_closes = closes[-(breakout_period + 1):-1]
+    period_high = max(prior_closes) if prior_closes else last_close
+    breakout = last_close > period_high
+
+    # 2. Volume surge vs N-period average (excluding current candle)
+    vol_window = volumes[-(breakout_period + 1):-1]
+    avg_vol = sum(vol_window) / len(vol_window) if vol_window else 0.0
+    vol_ratio = round(last_vol / avg_vol, 2) if avg_vol > 0 else 0.0
+    vol_surge = vol_ratio >= vol_surge_mult
+
+    # 3. RSI in momentum zone
+    last_rsi = rsi(closes, 14)
+    rsi_in_zone = last_rsi is not None and rsi_min <= last_rsi <= rsi_max
+
+    # 4. Price above EMA(breakout_period)
+    ema_vals = ema(closes, breakout_period)
+    above_ema20 = last_close > ema_vals[-1] if ema_vals else False
+
+    confirmed_count = sum([breakout, vol_surge, rsi_in_zone, above_ema20])
+    all_confirmed = confirmed_count == 4
+    partial_confirmed = confirmed_count >= 3
+
+    if all_confirmed:
+        breakout_score = 0.90
+    elif partial_confirmed:
+        breakout_score = 0.70
+    elif confirmed_count == 2:
+        breakout_score = 0.45
+    elif confirmed_count == 1:
+        breakout_score = 0.20
+    else:
+        breakout_score = 0.0
+
+    reasons: list[str] = []
+    if breakout:
+        reasons.append(f"{breakout_period}-period high breakout ({last_close:.4f} > {period_high:.4f})")
+    else:
+        reasons.append(f"no breakout ({last_close:.4f} vs {period_high:.4f} high)")
+    if vol_surge:
+        reasons.append(f"vol surge {vol_ratio:.1f}x (threshold {vol_surge_mult}x)")
+    else:
+        reasons.append(f"vol {vol_ratio:.1f}x below {vol_surge_mult}x threshold")
+    if rsi_in_zone:
+        reasons.append(f"rsi {last_rsi:.1f} in momentum zone [{rsi_min:.0f}-{rsi_max:.0f}]")
+    elif last_rsi is not None:
+        reasons.append(f"rsi {last_rsi:.1f} outside zone [{rsi_min:.0f}-{rsi_max:.0f}]")
+    if above_ema20:
+        reasons.append(f"price above EMA{breakout_period}")
+    else:
+        reasons.append(f"price below EMA{breakout_period}")
+
+    return {
+        "breakout": breakout,
+        "vol_surge": vol_surge,
+        "vol_ratio": vol_ratio,
+        "rsi_in_zone": rsi_in_zone,
+        "above_ema20": above_ema20,
+        "all_confirmed": all_confirmed,
+        "partial_confirmed": partial_confirmed,
+        "confirmed_count": confirmed_count,
+        "breakout_score": round(breakout_score, 2),
+        "period_high": round(period_high, 6),
+        "last_rsi": round(last_rsi, 1) if last_rsi is not None else None,
+        "reasons": reasons,
+    }
+
+
 def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(item["close"]) for item in candles]
     if len(closes) < 30:
@@ -83,6 +182,21 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         score -= 0.06
         reasons.append(f"4-candle range too wide {last_range:.2f}%")
 
+    # --- Breakout signal overlay (matches coin_backtest_v5 entry logic) ---
+    # On 15m candles: 20-candle high = ~5h momentum window; RSI zone relaxed to 45-74
+    bk = summarize_breakout_signal(candles, breakout_period=20, vol_surge_mult=2.5,
+                                   rsi_min=45.0, rsi_max=74.0)
+    bk_count = int(bk.get("confirmed_count", 0) or 0)
+    if bk_count == 4:
+        score += 0.15
+        reasons.append(f"breakout FULL confirmed vol {bk.get('vol_ratio', 0):.1f}x")
+    elif bk_count == 3:
+        score += 0.08
+        reasons.append(f"breakout partial ({bk_count}/4) vol {bk.get('vol_ratio', 0):.1f}x")
+    elif bk_count == 2:
+        score += 0.03
+        reasons.append(f"breakout weak ({bk_count}/4)")
+
     score = max(0.0, min(1.0, round(score, 2)))
     if score >= 0.62:
         bias = "offense"
@@ -100,6 +214,11 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "pullback_gap_pct": round(pullback_gap, 2),
         "range_4_pct": round(last_range, 2),
         "rsi": round(last_rsi, 1) if last_rsi is not None else None,
+        "breakout_confirmed": bool(bk.get("all_confirmed")),
+        "breakout_partial": bool(bk.get("partial_confirmed")),
+        "breakout_count": bk_count,
+        "vol_ratio": float(bk.get("vol_ratio", 0.0) or 0.0),
+        "breakout_score": float(bk.get("breakout_score", 0.0) or 0.0),
     }
 
 

@@ -114,6 +114,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
 def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
     active_gap_count = int(payload.get("active_gap_count", 0) or 0)
+    breakout_confirmed_count = int(payload.get("breakout_confirmed_count", 0) or 0)
+    breakout_partial_count = int(payload.get("breakout_partial_count", 0) or 0)
     quality_score = float(payload.get("quality_score", 0.0) or 0.0)
     avg_gap = float(payload.get("avg_gap_pct_top3", 0.0) or 0.0)
     avg_volume = float(payload.get("avg_volume_top3", 0.0) or 0.0)
@@ -129,6 +131,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     top_penalty = float(gap_candidates[0].get("overheat_penalty", 0.0) or 0.0) if gap_candidates else 0.0
     top_candidate_score = float(gap_candidates[0].get("candidate_score", 0.0) or 0.0) if gap_candidates else 0.0
     top_signal_bias = str(gap_candidates[0].get("signal_bias", "neutral") or "neutral") if gap_candidates else "neutral"
+    # Best breakout candidate among merged gap_candidates
+    bk_leader = next((c for c in gap_candidates if int(c.get("breakout_count", 0) or 0) >= 3), None)
     opening_window = bool(session.get("korea_opening_window"))
     mid_session = bool(session.get("korea_mid_session"))
     _qmeta = {"quality_score": quality_score, "avg_signal": avg_signal, "quality_threshold": 0.54}
@@ -154,6 +158,23 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             **_qmeta,
         }
     if gap_candidates and (top_signal < 0.5 or top_gap >= 12.0 or top_rsi >= 80.0 or top_burst >= 12.0 or avg_volume < 2200):
+        # Even if gap leader is overheated, a clean breakout candidate can still fire
+        if bk_leader and breakout_confirmed_count >= 1 and stance != "DEFENSE":
+            bk_ticker = str(bk_leader.get("ticker", ""))
+            bk_name = str(bk_leader.get("name", bk_ticker))
+            bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
+            return {
+                "action": "probe_longs",
+                "size": "0.35x",
+                "focus": f"Breakout confirmed: {bk_name} (gap leader overheated, using breakout path).",
+                "symbol": bk_ticker,
+                "candidate_symbols": [bk_ticker],
+                "notes": [
+                    f"gap leader overheated but breakout candidate {bk_name} all-4 confirmed",
+                    f"breakout score {bk_score:.2f} / vol_ratio {bk_leader.get('vol_ratio', 0):.1f}x",
+                ] + list(bk_leader.get("breakout_reasons", []))[:3],
+                **_qmeta,
+            }
         return {
             "action": "stand_by",
             "size": "0.00x",
@@ -166,6 +187,44 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
+
+    # ── Momentum breakout path (stock_backtest_v3 validated strategy) ──────
+    # Fires independently of gap-up conditions; works in any session window
+    if breakout_confirmed_count >= 1 and stance != "DEFENSE" and bk_leader:
+        bk_ticker = str(bk_leader.get("ticker", ""))
+        bk_name = str(bk_leader.get("name", bk_ticker))
+        bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
+        return {
+            "action": "probe_longs",
+            "size": "0.55x" if stance == "OFFENSE" else "0.40x",
+            "focus": f"Momentum breakout: {bk_name} — all 4 signals confirmed.",
+            "symbol": bk_ticker,
+            "candidate_symbols": [bk_ticker] + [
+                str(c.get("ticker", "")) for c in gap_candidates
+                if str(c.get("ticker", "")) != bk_ticker
+            ][:2],
+            "notes": [
+                f"breakout confirmed {breakout_confirmed_count} stock(s) / partial {breakout_partial_count}",
+                f"candidate score {bk_score:.2f} / vol_ratio {bk_leader.get('vol_ratio', 0):.1f}x",
+            ] + list(bk_leader.get("breakout_reasons", []))[:3],
+            **_qmeta,
+        }
+    if breakout_partial_count >= 1 and stance != "DEFENSE" and bk_leader:
+        bk_ticker = str(bk_leader.get("ticker", ""))
+        bk_name = str(bk_leader.get("name", bk_ticker))
+        bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
+        return {
+            "action": "selective_probe",
+            "size": "0.30x",
+            "focus": f"Breakout partial ({bk_name}) — 3/4 signals confirmed.",
+            "symbol": bk_ticker,
+            "candidate_symbols": [bk_ticker],
+            "notes": [
+                f"partial breakout {breakout_partial_count} stock(s) / candidate score {bk_score:.2f}",
+            ] + list(bk_leader.get("breakout_reasons", []))[:3],
+            **_qmeta,
+        }
+
     if opening_window and active_gap_count >= 2 and quality_score >= 0.56 and avg_gap >= 1.8 and avg_volume >= 8000 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and top_signal_bias != "neutral" and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",

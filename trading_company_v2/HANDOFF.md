@@ -1,6 +1,6 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-04-23
+Last updated: 2026-04-24
 Maintained for: Claude / Codex continuation
 
 ## 1. Workspace
@@ -319,6 +319,51 @@ Status:
 3. **첫 swing 거래 체결 확인** — +4% 타깃까지 보유 vs 조기 청산 여부
 4. **KIS 실전 전환** — Oracle VM `.env` KIS 자격증명 등록
 
+## 0.16 브레이크아웃 신호 엔진 + Korea 데스크 이중 경로 (2026-04-24)
+
+### 완료
+
+**`app/services/signal_engine.py`**
+- `summarize_breakout_signal()` 신규 함수 추가:
+  - 20-period 신고가 돌파 (`close > max(prior N closes)`)
+  - 거래량 서지 (`current_vol / avg_vol >= 2.5x`)
+  - RSI 모멘텀 구간 체크 (`rsi_min <= RSI <= rsi_max`)
+  - EMA(N) 위 필터 (`close > ema20`)
+  - `confirmed_count` 0-4, `breakout_score`: 4=0.90 / 3=0.70 / 2=0.45 / 1=0.20
+  - 어느 타임프레임에나 작동 (15분봉 크립토 / 일봉 한국주식)
+- `summarize_crypto_signal()` 브레이크아웃 오버레이 추가:
+  - 기존 EMA10/30 + RSI 스코어링에 브레이크아웃 신호 가산 (+0.15 / +0.08 / +0.03)
+  - 반환값에 `breakout_confirmed`, `breakout_partial`, `breakout_count`, `vol_ratio`, `breakout_score` 추가
+
+**`app/agents/korea_stock_desk_agent.py`**
+- `KOREA_BREAKOUT_WATCHLIST` (20종목) 추가: stock_backtest_v3 동일 유니버스
+  - 코스닥: 에코프로비엠, 알테오젠, HLB, 리가켐바이오, 삼천당제약, 클래시스, 레인보우로보틱스, 에코프로, 셀트리온, 카카오게임즈
+  - 코스피: 삼성전자, SK하이닉스, 현대차, 카카오, POSCO홀딩스, LG에너지솔루션, 삼성SDI, 크래프톤, 네이버, 두산에너빌리티
+- **Path A** (기존): KOSDAQ 모버 갭업 스캔 (gap_pct 1.2-12%)
+- **Path B** (신규): 워치리스트 전종목 일봉 42개 로드 → `summarize_breakout_signal()` → confirmed_count ≥ 2인 경우 후보 추가
+- 두 경로 결과 병합 → `candidate_score` 기준 정렬
+- payload에 `breakout_confirmed_count`, `breakout_partial_count` 추가
+
+**`app/services/recommendation_engine.py`**
+- `build_korea_plan()` 브레이크아웃 경로 추가:
+  - 갭리더 과열 상태에서도 breakout_confirmed ≥1이면 `probe_longs 0.35x`
+  - **브레이크아웃 전용 경로** (갭없이도 진입):
+    - `breakout_confirmed_count >= 1` → `probe_longs 0.55x/0.40x`
+    - `breakout_partial_count >= 1` → `selective_probe 0.30x`
+  - 이 경로는 opening_window/mid_session 무관하게 트리거 (24시간 모멘텀)
+
+### 검증
+- `python -c "from app.services.signal_engine import summarize_breakout_signal"` → OK
+- `python -c "from app.agents.korea_stock_desk_agent import KoreaStockDeskAgent"` → OK (20 tickers)
+- 단위 테스트: breakout+vol_surge 케이스 → confirmed 3/4, score 0.70 ✓
+
+### 다음 작업 우선순위
+
+1. **Oracle VM auto_pull** — 5분 내 자동 반영 (수동 확인 불필요)
+2. **대시보드에서 Korea 브레이크아웃 후보 확인** — `gap_candidates` 항목 중 `is_breakout: true` 등장 여부
+3. **크립토 브레이크아웃 신호 강도 확인** — `breakout_confirmed` / `breakout_count` 값 대시보드 로그
+4. **KIS 실전 전환** — Oracle VM `.env` KIS 자격증명 등록 후 `KIS_ALLOW_LIVE=true`
+
 ## 8. Suggested next work
 
 Priority order:
@@ -327,7 +372,7 @@ Priority order:
 2. **대시보드 진입 빈도 확인** — 새 파라미터 배포 후 크립토/한국주식 데스크에서 `planned` 주문 증가 여부
 3. **첫 swing +4% 목표 거래 추적** — 기존 빠른 청산(`momentum_take`) 없이 타깃까지 홀딩하는지 확인
 4. **KIS 실전 전환** — Oracle VM `.env`에 KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO 등록 후 `KIS_ALLOW_LIVE=true`
-5. **signal_engine.py 브레이크아웃 신호 추가** — 한국주식 데스크에 갭업 전용 → 모멘텀 브레이크아웃 신호 병행 (20일 신고가 + RSI)
+5. ~~**signal_engine.py 브레이크아웃 신호 추가**~~ ✅ 완료 (0.16 참고)
 
 ## 9. Useful commands
 
