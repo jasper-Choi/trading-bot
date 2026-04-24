@@ -1,14 +1,26 @@
-# Trading Company V2
+# Coin & Korea Profit Maximization Project
 
-Personal-PC-first auto trading bot stack.
+Crypto + Korea auto-trading stack built around one goal:
+maximize profit through real-time, rules-based execution.
 
 ## Goals
 
-- Free to run at home with no monthly server bill
-- Portable from this work PC to your personal PC
-- Mobile-friendly monitoring through a local web app
-- Strategy and risk handled by agents, not manual babysitting
-- Built around well-known trader principles, adapted to your style
+- Maximize profit, not merely avoid losses
+- Define alpha first, validate it, then execute it
+- Keep agent decisions cold, objective, and fast in volatile conditions
+- Run from low-cost personal / Oracle infrastructure without bloated overhead
+- Stay portable between work PC, home PC, and Oracle VM
+
+## Strategy Priority
+
+The operating order for this project is:
+
+1. Alpha definition
+2. Backtest validation with real costs
+3. Execution quality and response speed
+4. Risk management when the strategy is wrong
+
+Risk matters, but it is not the product. The product is profit-making edge.
 
 ## Operating Model
 

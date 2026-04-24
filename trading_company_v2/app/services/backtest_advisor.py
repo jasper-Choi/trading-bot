@@ -4,63 +4,112 @@ import json
 import math
 import re
 from pathlib import Path
+from typing import Any
 
 
 _SEARCH_PATHS = [
+    Path.home() / "Desktop" / "backtest" / "coin_result_v5.json",
     Path.home() / "Desktop" / "backtest" / "coin_result_v4.json",
-    Path(__file__).parents[3] / "Desktop" / "backtest" / "coin_result_v4.json",
 ]
 
 _NEUTRAL_WEIGHTS: dict[str, float] = {
-    "KRW-BTC": 0.34,
-    "KRW-ETH": 0.33,
-    "KRW-XRP": 0.33,
+    "KRW-DOGE": 0.5,
+    "KRW-XRP": 0.5,
 }
 
 
-def _score(stats: dict) -> float:
-    sharpe = float(stats.get("샤프비율", 0) or 0)
-    win_rate = float(stats.get("승률(%)", 0) or 0) / 100
-    mdd = abs(float(stats.get("최대DD(%)", stats.get("최대드로우다운(%)", -10)) or -10))
-    if math.isnan(sharpe):
-        sharpe = 0.0
-    sharpe_norm = max(0.0, min(sharpe / 3.0, 1.0))
-    mdd_norm = max(0.0, 1.0 - mdd / 20.0)
-    return sharpe_norm * 0.5 + win_rate * 0.3 + mdd_norm * 0.2
+def _load_results() -> dict[str, Any] | None:
+    for path in _SEARCH_PATHS:
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            text = re.sub(r"\bNaN\b", "null", text)
+            data = json.loads(text)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            continue
+    return None
+
+
+def _metric(stats: dict[str, Any], key: str, default: float = 0.0) -> float:
+    value = stats.get(key, default)
+    try:
+        parsed = float(value or 0.0)
+    except (TypeError, ValueError):
+        parsed = default
+    if math.isnan(parsed):
+        return default
+    return parsed
+
+
+def _passes(stats: dict[str, Any]) -> bool:
+    return (
+        _metric(stats, "승률(%)") >= 45.0
+        and _metric(stats, "손익비") >= 2.0
+        and _metric(stats, "샤프비율") >= 1.0
+        and _metric(stats, "최대DD(%)", -999.0) >= -20.0
+        and _metric(stats, "총수익률(%)") > 0.0
+        and _metric(stats, "총거래수") >= 20.0
+    )
+
+
+def _score(stats: dict[str, Any]) -> float:
+    win_rate = _metric(stats, "승률(%)") / 100.0
+    rr = _metric(stats, "손익비")
+    sharpe = _metric(stats, "샤프비율")
+    total_return = _metric(stats, "총수익률(%)")
+    max_dd = abs(_metric(stats, "최대DD(%)"))
+    trade_count = _metric(stats, "총거래수")
+
+    rr_norm = max(0.0, min(rr / 3.0, 1.0))
+    sharpe_norm = max(0.0, min(sharpe / 6.0, 1.0))
+    return_norm = max(0.0, min(total_return / 5.0, 1.0))
+    drawdown_norm = max(0.0, 1.0 - (max_dd / 12.0))
+    trade_norm = max(0.0, min(trade_count / 40.0, 1.0))
+
+    return (
+        (win_rate * 0.18)
+        + (rr_norm * 0.26)
+        + (sharpe_norm * 0.26)
+        + (return_norm * 0.18)
+        + (drawdown_norm * 0.07)
+        + (trade_norm * 0.05)
+    )
 
 
 def get_crypto_weights() -> dict[str, float]:
     """
-    Returns normalized allocation weights for KRW crypto symbols based on
-    backtest Sharpe / win-rate / MDD. Symbols with negative Sharpe are excluded.
-    Falls back to equal weights if the backtest file is not found.
+    Return normalized allocation weights for KRW crypto symbols based on the
+    latest validated backtest results. Only symbols that pass the current
+    swing-style criteria are eligible for live emphasis.
     """
-    data: dict | None = None
-    for path in _SEARCH_PATHS:
-        if path.exists():
-            try:
-                text = path.read_text(encoding="utf-8")
-                text = re.sub(r"\bNaN\b", "null", text)
-                data = json.loads(text)
-                break
-            except Exception:
-                continue
-
-    if data is None:
+    data = _load_results()
+    if not data:
         return dict(_NEUTRAL_WEIGHTS)
 
-    scores: dict[str, float] = {}
+    passing_scores: dict[str, float] = {}
+    fallback_scores: dict[str, float] = {}
+
     for symbol, stats in data.items():
-        sharpe = float(stats.get("샤프비율", 0) or 0)
-        if math.isnan(sharpe) or sharpe < 0:
+        if not isinstance(stats, dict):
             continue
-        scores[symbol] = _score(stats)
+        score = _score(stats)
+        if _passes(stats):
+            passing_scores[symbol] = score
+        elif _metric(stats, "총수익률(%)") > 0 and _metric(stats, "샤프비율") > 1.0:
+            fallback_scores[symbol] = score
 
-    if not scores:
+    source = passing_scores or fallback_scores
+    if not source:
         return dict(_NEUTRAL_WEIGHTS)
 
-    total = sum(scores.values())
+    total = sum(source.values())
+    if total <= 0:
+        return dict(_NEUTRAL_WEIGHTS)
+
     return {
         symbol: round(score / total, 4)
-        for symbol, score in sorted(scores.items(), key=lambda x: -x[1])
+        for symbol, score in sorted(source.items(), key=lambda item: item[1], reverse=True)
     }

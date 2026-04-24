@@ -327,6 +327,8 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
 
 ## 12. Strategy Redesign Status (2026-04-24)
 
+- Project name:
+  - `Coin & Korea Profit Maximization Project`
 - Direction remains unchanged from Claude handoff:
   - maximize profit, not minimize activity
   - define alpha first, then validate, then execute, then risk-manage
@@ -349,6 +351,10 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
 
 - Crypto:
   - validated leaders remain `KRW-DOGE` and `KRW-XRP`
+  - `app/services/backtest_advisor.py` now reads `coin_result_v5.json` first
+  - live emphasis weights now resolve to:
+    - `KRW-DOGE: 0.5181`
+    - `KRW-XRP: 0.4819`
   - weak spot remains excessive stop-outs after breakout entry
 - Korea:
   - data collection now works with real `pykrx`
