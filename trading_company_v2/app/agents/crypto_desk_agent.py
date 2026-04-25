@@ -39,6 +39,11 @@ class CryptoDeskAgent(BaseAgent):
                     "range_4_pct": float(signal.get("range_4_pct", 0.0) or 0.0),
                     "rsi": signal.get("rsi"),
                     "reasons": list(signal.get("reasons", [])),
+                    "breakout_confirmed": bool(signal.get("breakout_confirmed", False)),
+                    "breakout_partial": bool(signal.get("breakout_partial", False)),
+                    "breakout_count": int(signal.get("breakout_count", 0) or 0),
+                    "vol_ratio": float(signal.get("vol_ratio", 0.0) or 0.0),
+                    "breakout_score": float(signal.get("breakout_score", 0.0) or 0.0),
                 }
             )
 
@@ -89,5 +94,10 @@ class CryptoDeskAgent(BaseAgent):
                 "candidate_markets": ranked_candidates[:4],
                 "direction_bias": direction_signal.get("bias", "balanced"),
                 "direction_score": float(direction_signal.get("score", 0.5) or 0.5),
+                "breakout_confirmed": bool(leader.get("breakout_confirmed", False)),
+                "breakout_partial": bool(leader.get("breakout_partial", False)),
+                "breakout_count": int(leader.get("breakout_count", 0) or 0),
+                "vol_ratio": float(leader.get("vol_ratio", 0.0) or 0.0),
+                "breakout_score": float(leader.get("breakout_score", 0.0) or 0.0),
             },
         )

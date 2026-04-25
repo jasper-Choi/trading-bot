@@ -45,24 +45,31 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% triggered protection."],
         }
 
-    offense_threshold = 0.68 if regime == "RANGING" else 0.64
-    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 2.3 and lead_weight >= 0.26:
+    breakout_confirmed = bool(payload.get("breakout_confirmed", False))
+    breakout_partial = bool(payload.get("breakout_partial", False))
+    breakout_count = int(payload.get("breakout_count", 0) or 0)
+    vol_ratio = float(payload.get("vol_ratio", 0.0) or 0.0)
+
+    # probe_longs requires full breakout confirmation (4/4) to avoid marginal stop-outs
+    offense_threshold = 0.72 if regime == "RANGING" else 0.70
+    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 2.3 and lead_weight >= 0.26 and breakout_confirmed:
         return {
             "action": "probe_longs",
             "size": "0.65x" if stance == "BALANCED" else "0.85x",
             "focus": f"{lead_market or 'KRW-BTC'} volatility breakout probe.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"signal {signal_score:.2f} / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / breakout mode"],
+            "notes": reasons + [f"signal {signal_score:.2f} / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / breakout 4/4"],
         }
-    if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.6) and stance != "DEFENSE" and lead_weight >= 0.18:
+    # selective_probe requires at least partial confirmation (≥3/4) to filter noise
+    if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.62) and stance != "DEFENSE" and lead_weight >= 0.18 and breakout_partial:
         return {
             "action": "selective_probe",
             "size": "0.40x",
             "focus": f"{lead_market or 'KRW-BTC'} selective breakout watch.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"offense bias supported but still below full breakout confidence / weight {lead_weight:.2f}"],
+            "notes": reasons + [f"offense bias with partial breakout ({breakout_count}/4) / weight {lead_weight:.2f}"],
         }
 
     mild_defense = (
@@ -92,8 +99,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + ["Wait for momentum recovery before new crypto entries."],
         }
 
-    pilot_probe_threshold = 0.54 if lead_weight >= 0.30 and recent_change >= -0.4 else 0.57
-    if bias == "balanced" and signal_score >= pilot_probe_threshold and stance != "DEFENSE" and ema_gap <= 1.5 and recent_change > -1.0:
+    # balanced pilot also requires partial breakout to prevent false positives
+    pilot_probe_threshold = 0.60 if lead_weight >= 0.30 and recent_change >= -0.4 else 0.63
+    if bias == "balanced" and signal_score >= pilot_probe_threshold and stance != "DEFENSE" and ema_gap <= 1.5 and recent_change > -1.0 and breakout_partial:
         return {
             "action": "probe_longs",
             "size": "0.30x",

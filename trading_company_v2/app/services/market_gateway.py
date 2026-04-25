@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import unescape
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ import requests
 from requests import RequestException
 
 from app.config import settings
+
+_log = logging.getLogger(__name__)
 
 
 UPBIT_MARKETS_URL = "https://api.upbit.com/v1/market/all"
@@ -139,7 +142,8 @@ def get_kosdaq_snapshot(top_n: int = 20) -> list[dict[str, Any]]:
         resp.raise_for_status()
         payload = resp.json()
         rows = payload if isinstance(payload, list) else payload.get("stocks") or payload.get("stockList") or []
-    except (RequestException, ValueError):
+    except (RequestException, ValueError) as exc:
+        _log.warning("kosdaq_snapshot API failed (%s), falling back to HTML scrape", exc)
         return _get_kosdaq_snapshot_from_naver_html(top_n)
 
     snapshots: list[dict[str, Any]] = []
@@ -188,7 +192,8 @@ def _get_kosdaq_snapshot_from_naver_html(top_n: int) -> list[dict[str, Any]]:
             resp = requests.get(NAVER_KOSDAQ_FALLBACK_URL.format(page=page), headers=NAVER_HEADERS, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             html = resp.content.decode("euc-kr", errors="ignore")
-        except RequestException:
+        except RequestException as exc:
+            _log.warning("kosdaq_snapshot HTML fallback page=%d failed: %s", page, exc)
             continue
 
         rows = re.findall(r'<tr[^>]*onMouseOver="mouseOver\(this\)"[^>]*>(.*?)</tr>', html, flags=re.S | re.I)
@@ -250,7 +255,8 @@ def get_naver_daily_prices(ticker: str, count: int = 20) -> list[dict[str, Any]]
             resp = requests.get(NAVER_STOCK_DAY_URL.format(ticker=ticker, page=page), headers=NAVER_HEADERS, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
             html = resp.content.decode("euc-kr", errors="ignore")
-        except RequestException:
+        except RequestException as exc:
+            _log.warning("naver_daily_prices ticker=%s page=%d failed: %s", ticker, page, exc)
             continue
 
         rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.S | re.I)

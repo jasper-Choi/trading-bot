@@ -184,8 +184,8 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
 
     # --- Breakout signal overlay (matches coin_backtest_v5 entry logic) ---
     # On 15m candles: 20-candle high = ~5h momentum window; RSI zone relaxed to 45-74
-    bk = summarize_breakout_signal(candles, breakout_period=20, vol_surge_mult=2.5,
-                                   rsi_min=45.0, rsi_max=74.0)
+    bk = summarize_breakout_signal(candles, breakout_period=20, vol_surge_mult=3.0,
+                                   rsi_min=50.0, rsi_max=72.0)
     bk_count = int(bk.get("confirmed_count", 0) or 0)
     if bk_count == 4:
         score += 0.15
