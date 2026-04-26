@@ -1,5 +1,7 @@
 # Trading Company V2 — 신호 엔진 & 알고리즘 상세
 
+> 최종 업데이트: 2026-04-26 (단타 스윙 기준)
+
 ---
 
 ## 1. 공통 기술지표
@@ -22,16 +24,14 @@ RSI = 100 - (100 / (1 + avg_gain/avg_loss))
 
 ## 2. 브레이크아웃 신호 (summarize_breakout_signal)
 
-전 데스크 공통으로 사용하는 핵심 진입 필터.
-
-### 입력 파라미터
+### 입력 파라미터 (단타 스윙 기준)
 | 파라미터 | 크립토 | 한국주식 |
 |---------|--------|---------|
 | 봉 단위 | 15분봉 | 일봉 |
-| breakout_period | 20봉 (=5시간) | 20봉 (=20거래일) |
-| vol_surge_mult | 3.0x | 2.5x |
-| rsi_min | 50.0 | 55.0 |
-| rsi_max | 72.0 | 78.0 |
+| breakout_period | **15봉** (3.75시간) | 20봉 (20거래일) |
+| vol_surge_mult | **2.0x** | 2.5x |
+| rsi_min | **45.0** | 55.0 |
+| rsi_max | **78.0** | 78.0 |
 
 ### 4가지 조건
 ```
@@ -49,13 +49,13 @@ RSI = 100 - (100 / (1 + avg_gain/avg_loss))
   "rsi_in_zone": bool,        # RSI 모멘텀 구간 여부
   "above_ema20": bool,        # EMA 위 여부
   "all_confirmed": bool,      # 4/4 모두 충족
-  "partial_confirmed": bool,  # 3/4 이상 충족
+  "partial_confirmed": bool,  # 3/4 이상 충족 → 진입 가능
   "confirmed_count": int,     # 충족 조건 수 (0~4)
   "breakout_score": float,    # 0.0/0.20/0.45/0.70/0.90
   "vol_ratio": float,         # 거래량 배율
   "period_high": float,       # N기간 최고가
-  "last_rsi": float,          # 현재 RSI
-  "reasons": list[str]        # 각 조건별 설명
+  "last_rsi": float,
+  "reasons": list[str]
 }
 ```
 
@@ -75,10 +75,8 @@ EMA 크로스:
 
 RSI 구간:
   +0.10  45 ≤ RSI ≤ 68     → 균형 모멘텀
-  (없음) RSI < 35           → 약세
-  (없음) RSI > 68           → 과열
 
-5봉 모멘텀 (recent_change):
+5봉 모멘텀:
   +0.10  recent_change > +1.0%
   -0.10  recent_change < -1.0%
 
@@ -90,38 +88,25 @@ RSI 구간:
   -0.08  3봉 버스트 < -2.5%
   -0.06  4봉 변동폭 > 4.8%
 
-브레이크아웃 오버레이:
-  +0.15  4/4 confirmed (breakout_confirmed)
-  +0.08  3/4 confirmed (breakout_partial)
+브레이크아웃 오버레이 (15봉, 2.0x, RSI 45-78):
+  +0.15  4/4 confirmed
+  +0.08  3/4 confirmed  ← 단타 스윙 진입 기준
   +0.03  2/4 confirmed
 ```
 
 ### 바이어스 분류
 ```
-score ≥ 0.62 → offense
+score ≥ 0.62 → offense  → probe_longs 1.0x~1.3x
 score ≤ 0.40 → defense
-그 외        → balanced
+그 외        → balanced → probe_longs 0.60x (signal ≥ 0.52)
 ```
 
-### 출력 필드
-```python
-{
-  "bias": str,                  # offense / balanced / defense
-  "score": float,               # 0.0~1.0
-  "reasons": list[str],
-  "recent_change_pct": float,   # 5봉 변화율
-  "burst_change_pct": float,    # 3봉 변화율
-  "ema_gap_pct": float,         # EMA10 vs EMA30 갭
-  "pullback_gap_pct": float,    # 종가 vs EMA10 갭
-  "range_4_pct": float,         # 4봉 변동폭
-  "rsi": float,
-  "breakout_confirmed": bool,   # 4/4
-  "breakout_partial": bool,     # ≥3/4
-  "breakout_count": int,        # 충족 수
-  "vol_ratio": float,           # 거래량 배율
-  "breakout_score": float       # 0.0~0.90
-}
-```
+### 진입 임계값 (단타 스윙)
+| 조건 | 임계값 | 기존 |
+|------|--------|------|
+| offense → probe_longs | **0.60** | 0.72 |
+| offense → selective_probe | **0.55** | 0.67 |
+| balanced → probe_longs | **0.52** | 0.60 |
 
 ---
 
@@ -138,23 +123,16 @@ EMA 크로스:
   -0.16  EMA(8) < EMA(21)
 
 RSI 구간:
-  +0.08  48 ≤ RSI ≤ 67   → 건설적 모멘텀
-  -0.06  RSI < 38         → 약세
+  +0.08  48 ≤ RSI ≤ 67
+  -0.06  RSI < 38
 
-6일 모멘텀 (recent_change):
+6일 모멘텀:
   +0.12  recent_change > +2.0%
   -0.12  recent_change < -2.0%
 
 단기 버스트 패널티:
-  -0.06  3일 버스트 > +8.0%  (과열)
-  -0.06  3일 버스트 < -6.0%  (급락)
-```
-
-### 바이어스 분류
-```
-score ≥ 0.64 → offense
-score ≤ 0.40 → defense
-그 외        → balanced
+  -0.06  3일 버스트 > +8.0%
+  -0.06  3일 버스트 < -6.0%
 ```
 
 ---
@@ -162,57 +140,38 @@ score ≤ 0.40 → defense
 ## 5. 갭업 후보 스코어링 (Korea Path A)
 
 ```python
-# 유동성 점수
-liquidity_bonus = 0.0
-if volume > 20000:    liquidity_bonus = 0.10
-elif volume > 8000:   liquidity_bonus = 0.07
-elif volume > 3500:   liquidity_bonus = 0.04
-elif volume > 1500:   liquidity_bonus = 0.01
+liquidity_bonus = 0.10 if volume > 20000
+               elif 0.07 if volume > 8000
+               elif 0.04 if volume > 3500
+               elif 0.01 if volume > 1500
 
-# 과열 패널티
-overheat_penalty = 0.0
-if gap_pct >= 10.0:          overheat_penalty += 0.08
-if rsi >= 78.0:              overheat_penalty += 0.12
-if burst_change_pct >= 12.0: overheat_penalty += 0.08
-if ema_gap_pct >= 12.0:      overheat_penalty += 0.06
+overheat_penalty = 0
+  +0.08 if gap_pct >= 10.0
+  +0.12 if rsi >= 78.0
+  +0.08 if burst_change_pct >= 12.0
+  +0.06 if ema_gap_pct >= 12.0
 
-# 최종 후보 스코어
-candidate_score = (
-    gap_pct × 0.022
-    + liquidity_bonus
-    + signal_score × 0.68
-    - overheat_penalty
-)
+candidate_score = gap_pct×0.022 + liquidity_bonus + signal_score×0.68 - overheat_penalty
 ```
 
-갭 필터 범위: **1.2% ≤ gap_pct < 12.0%**
+갭 필터: **1.2% ≤ gap_pct < 12.0%**
 
 ---
 
-## 6. 크립토 라이브 파일럿 신호 (KIS 준용)
+## 6. 크립토 라이브 파일럿 신호
 
 ```python
-# 트리거 임계값
-if lead_weight >= 0.30 and recent_change >= -0.4:
-    crypto_trigger = 0.56
-else:
-    crypto_trigger = 0.58
+crypto_trigger = 0.56 if lead_weight >= 0.30 and recent_change >= -0.4 else 0.58
 
-# 신호 상태
 distance = crypto_trigger - signal_score
 if distance > 0.08:  → "waiting"
-elif distance > 0:   → "arming"  (트리거 근접)
-else:                → "ready"   (진입 가능)
-
-# probe_longs 조건 (추가)
-korea_signal_ready = plan["action"] in ("probe_longs", "selective_probe")
+elif distance > 0:   → "arming"
+else:                → "ready"  ← 진입 가능
 ```
 
 ---
 
-## 7. 백테스트 검증 기준 (_passes 함수)
-
-신호 파라미터가 실전 적용 전 만족해야 하는 최소 기준:
+## 7. 백테스트 검증 기준
 
 | 지표 | 최소값 |
 |------|--------|
@@ -224,14 +183,21 @@ korea_signal_ready = plan["action"] in ("probe_longs", "selective_probe")
 | 거래 수 | ≥ 20회 |
 
 ### 실제 백테스트 결과
-**크립토 (coin_backtest_v5, KRW-XRP 기준):**
-- 승률: 52.9%
-- R/R: 2.02
-- 샤프: 5.47
-- 검증 결과: PASS
+| 데스크 | 승률 | R/R | 샤프 | 결과 |
+|--------|------|-----|------|------|
+| 크립토 (KRW-XRP) | 52.9% | 2.02 | 5.47 | PASS |
+| 한국주식 (20종목) | 59.4% | 2.4+ | 12.68 | PASS |
 
-**한국주식 (stock_backtest_v3, 20종목 포트폴리오):**
-- 승률: 59.4%
-- 연간 수익률: +33.61%
-- 샤프: 12.68
-- 검증 결과: PASS
+---
+
+## 8. 파라미터 변경 이력
+
+| 파라미터 | v1 (보수) | v2 (단타스윙) |
+|---------|-----------|--------------|
+| breakout_period (크립토) | 20봉 | **15봉** |
+| vol_surge_mult (크립토) | 3.0x | **2.0x** |
+| RSI zone (크립토) | 50~72 | **45~78** |
+| offense_threshold | 0.72 | **0.60** |
+| probe_longs 사이즈 | 0.65x/0.85x | **1.0x/1.3x** |
+| selective_probe 사이즈 | 0.40x | **0.70x** |
+| balanced pilot 사이즈 | 0.30x | **0.60x** |
