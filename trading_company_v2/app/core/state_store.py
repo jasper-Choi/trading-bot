@@ -225,18 +225,18 @@ def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
     #   stock_backtest_v3 → +4% TP / -2.5% stop / ≤5 days (daily momentum breakout)
     # @ 2 min/cycle: 720 = 24h, 360 = 12h, 195 = 6.5h (1 KRX session)
     if desk == "crypto":
-        # All crypto actions: +4% target, -2% stop, max 24h
-        return 4.0, -2.0, 720
+        # 단타 스윙: +7% target, -3.5% stop, max 12h (빠른 사이클)
+        return 7.0, -3.5, 360
     if desk == "us":
         if action == "probe_longs":
-            return 4.0, -2.0, 200   # ~6.5h regular session
+            return 6.0, -3.0, 200
         if action == "selective_probe":
-            return 3.0, -1.5, 150
-        return 2.8, -1.4, 120
-    # korea — momentum breakout: +4% target, -2.5% stop, max 1 KRX session
+            return 4.0, -2.0, 150
+        return 3.0, -1.5, 120
+    # korea — 단타 스윙: +6% target, -3.0% stop, max 1 KRX session
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
-        return 4.0, -2.5, 195
-    return 3.0, -2.0, 150
+        return 6.0, -3.0, 195
+    return 4.0, -2.0, 150
 
 
 def _ensure_schema() -> None:

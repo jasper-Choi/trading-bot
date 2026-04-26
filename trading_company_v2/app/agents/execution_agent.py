@@ -66,10 +66,10 @@ class ExecutionAgent(BaseAgent):
         # Crypto: 2 positions allowed to build portfolio; cap at 1.2x (2 × 0.6x)
         # Korea/US: 2 positions, 1.0x cap
         if desk == "crypto":
-            return 2, 1.2
+            return 3, 2.0
         if desk == "us":
-            return 2, 0.8
-        return 2, 0.8
+            return 3, 1.5
+        return 3, 1.5
 
     @staticmethod
     def _expected_pnl_pct(desk: str, action: str) -> float:
