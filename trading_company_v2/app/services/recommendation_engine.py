@@ -50,16 +50,39 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     breakout_count = int(payload.get("breakout_count", 0) or 0)
     vol_ratio = float(payload.get("vol_ratio", 0.0) or 0.0)
 
+    ict_score = float(payload.get("ict_score", 0.0) or 0.0)
+    kill_zone_active = bool(payload.get("kill_zone_active", False))
+    ssl_sweep_confirmed = bool(payload.get("ssl_sweep_confirmed", False))
+    choch_bullish = bool(payload.get("choch_bullish", False))
+    choch_bearish = bool(payload.get("choch_bearish", False))
+    bos_bearish = bool(payload.get("bos_bearish", False))
+    ict_bullish_count = int(payload.get("ict_bullish_count", 0) or 0)
+    ict_structure = str(payload.get("ict_structure", "undecided") or "undecided")
+
+    # ICT CHoCH bearish: 추세 반전 하락 — 신규 진입 차단
+    if choch_bearish and signal_score < 0.58:
+        return {
+            "action": "capital_preservation",
+            "size": "0.00x",
+            "focus": "ICT CHoCH bearish — trend reversing down. No new entries.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"ict_structure: {ict_structure} / signal {signal_score:.2f}"],
+        }
+
+    # ICT 컨플루언스 진입: breakout_partial 없어도 ICT 3개 이상이면 허용
+    ict_entry_ok = ict_bullish_count >= 3 or (ssl_sweep_confirmed and kill_zone_active) or (choch_bullish and ict_bullish_count >= 2)
+
     # 단타 스윙: 3/4 이상이면 풀사이즈 진입, 임계값 대폭 완화
     offense_threshold = 0.60 if regime == "RANGING" else 0.58
-    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 3.0 and lead_weight >= 0.20 and breakout_partial:
+    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 3.0 and lead_weight >= 0.20 and (breakout_partial or ict_entry_ok):
         return {
             "action": "probe_longs",
             "size": "1.0x" if stance == "BALANCED" else "1.3x",
             "focus": f"{lead_market or 'KRW-BTC'} 단타 스윙 진입.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"signal {signal_score:.2f} / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / breakout {breakout_count}/4"],
+            "notes": reasons + [f"signal {signal_score:.2f} / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
         }
     # 신호 점수만 충분하면 선택적 진입
     if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.52) and stance != "DEFENSE" and lead_weight >= 0.15:

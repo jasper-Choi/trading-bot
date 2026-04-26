@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -28,6 +29,350 @@ def rsi(values: list[float], period: int = 14) -> float | None:
         return 100.0
     rs = avg_gain / avg_loss
     return 100 - (100 / (1 + rs))
+
+
+# ─── ICT (Inner Circle Trader) Detection Functions ──────────────────────────
+
+def detect_fvg(candles: list[dict[str, Any]], lookback: int = 30) -> dict[str, Any]:
+    """
+    Fair Value Gap: 3-candle imbalance pattern.
+    Bullish FVG: candle[i].low > candle[i-2].high  (price gapped up — discount support zone)
+    Bearish FVG: candle[i].high < candle[i-2].low  (price gapped down — premium resistance zone)
+    """
+    _empty: dict[str, Any] = {
+        "fvg_type": None, "fvg_active": False, "price_in_fvg": False,
+        "fvg_top": 0.0, "fvg_bottom": 0.0,
+        "bullish_fvg_count": 0, "bearish_fvg_count": 0,
+    }
+    if len(candles) < 3:
+        return _empty
+
+    recent = candles[-min(lookback + 2, len(candles)):]
+    last_close = float(candles[-1]["close"])
+
+    bullish_fvgs: list[dict] = []
+    bearish_fvgs: list[dict] = []
+
+    for i in range(2, len(recent)):
+        h0 = float(recent[i - 2]["high"])
+        l0 = float(recent[i - 2]["low"])
+        h2 = float(recent[i]["high"])
+        l2 = float(recent[i]["low"])
+        if l2 > h0:
+            bullish_fvgs.append({"top": l2, "bottom": h0, "mid": (l2 + h0) / 2})
+        if h2 < l0:
+            bearish_fvgs.append({"top": l0, "bottom": h2, "mid": (l0 + h2) / 2})
+
+    active_bull = [f for f in bullish_fvgs if last_close >= f["bottom"]]
+    active_bear = [f for f in bearish_fvgs if last_close <= f["top"]]
+    nearest_bull = min(active_bull, key=lambda f: abs(last_close - f["mid"])) if active_bull else None
+    nearest_bear = min(active_bear, key=lambda f: abs(last_close - f["mid"])) if active_bear else None
+
+    fvg_type: str | None = None
+    fvg_top = fvg_bottom = 0.0
+    fvg_active = price_in_fvg = False
+
+    candidates = []
+    if nearest_bull:
+        candidates.append(("bullish", nearest_bull, abs(last_close - nearest_bull["mid"])))
+    if nearest_bear:
+        candidates.append(("bearish", nearest_bear, abs(last_close - nearest_bear["mid"])))
+    if candidates:
+        fvg_type, best, _ = min(candidates, key=lambda x: x[2])
+        fvg_top, fvg_bottom = best["top"], best["bottom"]
+        fvg_active = True
+        price_in_fvg = fvg_bottom <= last_close <= fvg_top
+
+    return {
+        "fvg_type": fvg_type, "fvg_active": fvg_active, "price_in_fvg": price_in_fvg,
+        "fvg_top": round(fvg_top, 6), "fvg_bottom": round(fvg_bottom, 6),
+        "bullish_fvg_count": len(bullish_fvgs), "bearish_fvg_count": len(bearish_fvgs),
+    }
+
+
+def detect_order_block(
+    candles: list[dict[str, Any]],
+    lookback: int = 30,
+    min_move_pct: float = 1.5,
+) -> dict[str, Any]:
+    """
+    Order Block: last opposing candle before a significant directional move.
+    Bullish OB: last bearish candle before >= min_move_pct rally  (institutional demand zone)
+    Bearish OB: last bullish candle before >= min_move_pct drop   (institutional supply zone)
+    """
+    _empty: dict[str, Any] = {
+        "ob_type": None, "ob_active": False,
+        "ob_high": 0.0, "ob_low": 0.0, "price_at_ob": False,
+        "bullish_ob_count": 0, "bearish_ob_count": 0,
+    }
+    if len(candles) < 6:
+        return _empty
+
+    recent = candles[-min(lookback + 5, len(candles)):]
+    last_close = float(candles[-1]["close"])
+
+    bullish_obs: list[dict] = []
+    bearish_obs: list[dict] = []
+
+    for i in range(len(recent) - 4):
+        c = recent[i]
+        c_open, c_close = float(c["open"]), float(c["close"])
+        c_high, c_low = float(c["high"]), float(c["low"])
+        fwd = range(i + 1, min(i + 5, len(recent)))
+
+        if c_close < c_open:  # bearish candle → bullish OB candidate
+            future_high = max(float(recent[j]["high"]) for j in fwd)
+            move = ((future_high - c_high) / c_high * 100) if c_high > 0 else 0.0
+            if move >= min_move_pct:
+                bullish_obs.append({"high": c_high, "low": c_low, "idx": i, "move_pct": round(move, 2)})
+        elif c_close > c_open:  # bullish candle → bearish OB candidate
+            future_low = min(float(recent[j]["low"]) for j in fwd)
+            move = ((c_low - future_low) / c_low * 100) if c_low > 0 else 0.0
+            if move >= min_move_pct:
+                bearish_obs.append({"high": c_high, "low": c_low, "idx": i, "move_pct": round(move, 2)})
+
+    nearest_bull = next((ob for ob in reversed(bullish_obs) if last_close >= ob["low"] * 0.99), None)
+    nearest_bear = next((ob for ob in reversed(bearish_obs) if last_close <= ob["high"] * 1.01), None)
+
+    ob_type: str | None = None
+    ob_high = ob_low = 0.0
+    ob_active = price_at_ob = False
+
+    if nearest_bull and (not nearest_bear or nearest_bull["idx"] > nearest_bear["idx"]):
+        ob_type, ob_high, ob_low, ob_active = "bullish", nearest_bull["high"], nearest_bull["low"], True
+        price_at_ob = ob_low <= last_close <= ob_high * 1.015
+    elif nearest_bear:
+        ob_type, ob_high, ob_low, ob_active = "bearish", nearest_bear["high"], nearest_bear["low"], True
+        price_at_ob = ob_low * 0.985 <= last_close <= ob_high
+
+    return {
+        "ob_type": ob_type, "ob_active": ob_active,
+        "ob_high": round(ob_high, 6), "ob_low": round(ob_low, 6), "price_at_ob": price_at_ob,
+        "bullish_ob_count": len(bullish_obs), "bearish_ob_count": len(bearish_obs),
+    }
+
+
+def detect_liquidity_sweep(
+    candles: list[dict[str, Any]],
+    swing_period: int = 12,
+    reversal_candles: int = 3,
+    min_reversal_pct: float = 0.4,
+) -> dict[str, Any]:
+    """
+    Liquidity Sweep detection.
+    SSL sweep: price dips below recent swing low then reverses up  (bullish — smart money accumulated)
+    BSL sweep: price spikes above recent swing high then reverses down (bearish — smart money distributed)
+    """
+    _empty: dict[str, Any] = {
+        "sweep_type": None, "sweep_active": False,
+        "sweep_level": 0.0, "reversal_confirmed": False,
+        "swing_high": 0.0, "swing_low": 0.0,
+    }
+    if len(candles) < swing_period + reversal_candles + 2:
+        return _empty
+
+    recent = candles[-(swing_period + reversal_candles + 2):]
+    swing_window = recent[:-reversal_candles]
+    check_candles = recent[-reversal_candles:]
+    last_close = float(candles[-1]["close"])
+
+    swing_high = max(float(c["high"]) for c in swing_window)
+    swing_low = min(float(c["low"]) for c in swing_window)
+
+    ssl_sweep = bsl_sweep = False
+    sweep_level = 0.0
+
+    for c in check_candles[:-1]:
+        if float(c["low"]) < swing_low and last_close > swing_low:
+            ssl_sweep, sweep_level = True, swing_low
+            break
+    if not ssl_sweep:
+        for c in check_candles[:-1]:
+            if float(c["high"]) > swing_high and last_close < swing_high:
+                bsl_sweep, sweep_level = True, swing_high
+                break
+
+    reversal_confirmed = False
+    if sweep_level > 0:
+        rev_pct = (
+            ((last_close - sweep_level) / sweep_level * 100) if ssl_sweep
+            else ((sweep_level - last_close) / sweep_level * 100)
+        )
+        reversal_confirmed = rev_pct >= min_reversal_pct
+
+    return {
+        "sweep_type": "ssl" if ssl_sweep else ("bsl" if bsl_sweep else None),
+        "sweep_active": ssl_sweep or bsl_sweep,
+        "sweep_level": round(sweep_level, 6),
+        "reversal_confirmed": reversal_confirmed,
+        "swing_high": round(swing_high, 6),
+        "swing_low": round(swing_low, 6),
+    }
+
+
+def ict_kill_zone(dt: datetime | None = None) -> dict[str, Any]:
+    """
+    ICT Kill Zone filter (UTC clock).
+    London KZ: 09:00~12:00 UTC  (18:00~21:00 KST)
+    New York KZ: 13:30~16:30 UTC (22:30~01:30 KST)
+    """
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    total_min = dt.hour * 60 + dt.minute
+    in_london = 540 <= total_min < 720
+    in_ny = 810 <= total_min < 990
+    return {
+        "in_kill_zone": in_london or in_ny,
+        "kill_zone_name": "london" if in_london else ("ny" if in_ny else None),
+    }
+
+
+def detect_bos_choch(candles: list[dict[str, Any]], swing_n: int = 3) -> dict[str, Any]:
+    """
+    Break of Structure (BOS) / Change of Character (CHoCH).
+    BOS: price continues past the last swing point in the trend direction (continuation).
+    CHoCH: price breaks past the last swing point AGAINST the prior trend (reversal — entry signal).
+    """
+    _empty: dict[str, Any] = {
+        "structure": "undecided", "bos": False, "choch": False,
+        "choch_bullish": False, "choch_bearish": False,
+        "bos_bullish": False, "bos_bearish": False,
+        "swing_high": 0.0, "swing_low": 0.0, "prior_trend": "undecided",
+    }
+    if len(candles) < swing_n * 2 + 4:
+        return _empty
+
+    analysis = candles[:-2]
+    last_close = float(candles[-1]["close"])
+
+    swing_highs: list[tuple[int, float]] = []
+    swing_lows: list[tuple[int, float]] = []
+    for i in range(swing_n, len(analysis) - swing_n):
+        hi = float(analysis[i]["high"])
+        lo = float(analysis[i]["low"])
+        if all(hi >= float(analysis[i + j]["high"]) for j in range(-swing_n, swing_n + 1) if j != 0):
+            swing_highs.append((i, hi))
+        if all(lo <= float(analysis[i + j]["low"]) for j in range(-swing_n, swing_n + 1) if j != 0):
+            swing_lows.append((i, lo))
+
+    if not swing_highs or not swing_lows:
+        return _empty
+
+    sh_idx, sh_val = swing_highs[-1]
+    sl_idx, sl_val = swing_lows[-1]
+    prior_trend = "up" if sh_idx > sl_idx else "down"
+
+    bos_bull = prior_trend == "up" and last_close > sh_val
+    bos_bear = prior_trend == "down" and last_close < sl_val
+    choch_bull = prior_trend == "down" and last_close > sh_val
+    choch_bear = prior_trend == "up" and last_close < sl_val
+
+    if choch_bull:
+        structure = "choch_bullish"
+    elif bos_bull:
+        structure = "bos_bullish"
+    elif choch_bear:
+        structure = "choch_bearish"
+    elif bos_bear:
+        structure = "bos_bearish"
+    else:
+        structure = "ranging"
+
+    return {
+        "structure": structure, "bos": bos_bull or bos_bear, "choch": choch_bull or choch_bear,
+        "choch_bullish": choch_bull, "choch_bearish": choch_bear,
+        "bos_bullish": bos_bull, "bos_bearish": bos_bear,
+        "swing_high": round(sh_val, 6), "swing_low": round(sl_val, 6),
+        "prior_trend": prior_trend,
+    }
+
+
+def summarize_ict_signal(
+    candles: list[dict[str, Any]],
+    dt: datetime | None = None,
+) -> dict[str, Any]:
+    """
+    Aggregate all ICT signals into a single score overlay.
+    Returns ict_score in [-0.30, +0.30] to adjust the base signal score.
+    """
+    fvg = detect_fvg(candles)
+    ob = detect_order_block(candles)
+    sweep = detect_liquidity_sweep(candles)
+    kz = ict_kill_zone(dt)
+    structure = detect_bos_choch(candles)
+
+    ict_score = 0.0
+    reasons: list[str] = []
+
+    if kz["in_kill_zone"]:
+        ict_score += 0.08
+        reasons.append(f"ICT kill zone: {kz['kill_zone_name']}")
+
+    ssl_ok = sweep.get("sweep_type") == "ssl" and bool(sweep.get("reversal_confirmed"))
+    bsl_ok = sweep.get("sweep_type") == "bsl" and bool(sweep.get("reversal_confirmed"))
+    if ssl_ok:
+        ict_score += 0.12
+        reasons.append(f"SSL sweep+reversal @ {sweep['sweep_level']:.4f}")
+    elif bsl_ok:
+        ict_score -= 0.08
+        reasons.append(f"BSL sweep bearish @ {sweep['sweep_level']:.4f}")
+
+    choch_bull = bool(structure.get("choch_bullish"))
+    choch_bear = bool(structure.get("choch_bearish"))
+    bos_bull = bool(structure.get("bos_bullish"))
+    bos_bear = bool(structure.get("bos_bearish"))
+    if choch_bull:
+        ict_score += 0.10
+        reasons.append(f"CHoCH bullish > {structure['swing_high']:.4f}")
+    elif bos_bull:
+        ict_score += 0.05
+        reasons.append("BOS bullish continuation")
+    elif choch_bear:
+        ict_score -= 0.12
+        reasons.append("CHoCH bearish — trend reversing down")
+    elif bos_bear:
+        ict_score -= 0.06
+        reasons.append("BOS bearish continuation")
+
+    at_bull_ob = bool(ob.get("ob_active") and ob.get("ob_type") == "bullish" and ob.get("price_at_ob"))
+    at_bear_ob = bool(ob.get("ob_active") and ob.get("ob_type") == "bearish" and ob.get("price_at_ob"))
+    if at_bull_ob:
+        ict_score += 0.08
+        reasons.append(f"price at bullish OB [{ob['ob_low']:.4f}~{ob['ob_high']:.4f}]")
+    elif at_bear_ob:
+        ict_score -= 0.06
+        reasons.append(f"price at bearish OB [{ob['ob_low']:.4f}~{ob['ob_high']:.4f}]")
+
+    in_bull_fvg = bool(fvg.get("fvg_active") and fvg.get("fvg_type") == "bullish" and fvg.get("price_in_fvg"))
+    in_bear_fvg = bool(fvg.get("fvg_active") and fvg.get("fvg_type") == "bearish" and fvg.get("price_in_fvg"))
+    if in_bull_fvg:
+        ict_score += 0.06
+        reasons.append(f"price in bullish FVG [{fvg['fvg_bottom']:.4f}~{fvg['fvg_top']:.4f}]")
+    elif in_bear_fvg:
+        ict_score -= 0.05
+        reasons.append(f"price in bearish FVG [{fvg['fvg_bottom']:.4f}~{fvg['fvg_top']:.4f}]")
+
+    bullish_count = sum([ssl_ok, choch_bull or bos_bull, at_bull_ob, in_bull_fvg, kz["in_kill_zone"]])
+    if bullish_count >= 3:
+        ict_score += 0.05
+        reasons.append(f"ICT full confluence ({bullish_count}/5)")
+
+    return {
+        "ict_score": round(max(-0.30, min(0.30, ict_score)), 3),
+        "ict_reasons": reasons,
+        "kill_zone_active": kz["in_kill_zone"],
+        "kill_zone_name": kz.get("kill_zone_name"),
+        "ssl_sweep_confirmed": ssl_ok,
+        "bsl_sweep_confirmed": bsl_ok,
+        "choch_bullish": choch_bull,
+        "choch_bearish": choch_bear,
+        "bos_bullish": bos_bull,
+        "bos_bearish": bos_bear,
+        "price_at_bull_ob": at_bull_ob,
+        "price_in_bull_fvg": in_bull_fvg,
+        "ict_bullish_count": bullish_count,
+        "ict_structure": str(structure.get("structure", "undecided")),
+    }
 
 
 def summarize_breakout_signal(
@@ -197,6 +542,11 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         score += 0.03
         reasons.append(f"breakout weak ({bk_count}/4)")
 
+    # --- ICT overlay (FVG / OB / Liquidity Sweep / Kill Zone / BOS/CHoCH) ---
+    ict = summarize_ict_signal(candles)
+    score += float(ict.get("ict_score", 0.0) or 0.0)
+    reasons.extend(ict.get("ict_reasons", []))
+
     score = max(0.0, min(1.0, round(score, 2)))
     if score >= 0.62:
         bias = "offense"
@@ -219,6 +569,19 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "breakout_count": bk_count,
         "vol_ratio": float(bk.get("vol_ratio", 0.0) or 0.0),
         "breakout_score": float(bk.get("breakout_score", 0.0) or 0.0),
+        "ict_score": float(ict.get("ict_score", 0.0) or 0.0),
+        "kill_zone_active": bool(ict.get("kill_zone_active")),
+        "kill_zone_name": ict.get("kill_zone_name"),
+        "ssl_sweep_confirmed": bool(ict.get("ssl_sweep_confirmed")),
+        "bsl_sweep_confirmed": bool(ict.get("bsl_sweep_confirmed")),
+        "choch_bullish": bool(ict.get("choch_bullish")),
+        "choch_bearish": bool(ict.get("choch_bearish")),
+        "bos_bullish": bool(ict.get("bos_bullish")),
+        "bos_bearish": bool(ict.get("bos_bearish")),
+        "price_at_bull_ob": bool(ict.get("price_at_bull_ob")),
+        "price_in_bull_fvg": bool(ict.get("price_in_bull_fvg")),
+        "ict_bullish_count": int(ict.get("ict_bullish_count", 0) or 0),
+        "ict_structure": str(ict.get("ict_structure", "undecided")),
     }
 
 
