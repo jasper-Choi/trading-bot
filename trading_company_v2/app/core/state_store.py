@@ -9,7 +9,6 @@ import requests
 from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, event, inspect, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
-from sqlalchemy.pool import NullPool
 
 from app.config import settings
 from app.core.models import AgentSnapshot, ClosedPosition, CompanyState, CycleJournalEntry, PaperOrder, Position, utcnow_iso
@@ -141,7 +140,8 @@ db_path.parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(
     f"sqlite:///{db_path}",
     connect_args={"check_same_thread": False, "timeout": 30},
-    poolclass=NullPool,
+    pool_size=2,
+    max_overflow=3,
 )
 
 
@@ -351,9 +351,16 @@ def _close_position(position: PaperPositionRecord, reason: str) -> None:
     position.closed_reason = reason
 
 
+_db_initialized = False
+
+
 def init_db() -> None:
+    global _db_initialized
+    if _db_initialized:
+        return
     Base.metadata.create_all(bind=engine)
     _ensure_schema()
+    _db_initialized = True
 
 
 def rebuild_db() -> None:
