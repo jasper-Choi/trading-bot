@@ -735,6 +735,7 @@ def load_daily_summary() -> dict:
                     current_cycle_planned_orders += 1
                     current_cycle_active_desks.add(row["desk"])
                     current_cycle_estimated_pnl += float(meta.get("pnl_estimate_pct", 0.0) or 0.0)
+            all_closed = [row for row in positions if row.status == "closed"]
             wins = sum(1 for row in closed_today if row.pnl_pct > 0)
             losses = sum(1 for row in closed_today if row.pnl_pct <= 0)
             closed_count = len(closed_today)
@@ -742,12 +743,20 @@ def load_daily_summary() -> dict:
             realized_pnl = round(sum(row.pnl_pct for row in closed_today), 2)
             unrealized_pnl = round(sum(row.pnl_pct for row in open_positions), 2)
             expectancy_pct = round(realized_pnl / closed_count, 2) if closed_count else 0.0
+            # Cumulative (all-time) — compounding base
+            cumulative_realized_pnl = round(sum(row.pnl_pct for row in all_closed), 2)
+            cumulative_wins = sum(1 for row in all_closed if row.pnl_pct > 0)
+            cumulative_losses = sum(1 for row in all_closed if row.pnl_pct <= 0)
+            cumulative_closed = len(all_closed)
+            cumulative_win_rate = round((cumulative_wins / cumulative_closed) * 100, 1) if cumulative_closed else 0.0
             desk_stats = _build_desk_stats(positions)
             gross_open_notional = round(sum(_size_to_notional(row.size) for row in open_positions), 2)
             base_capital = float(settings.paper_capital_krw)
-            realized_pnl_krw = round(base_capital * realized_pnl / 100)
-            unrealized_pnl_krw = round(base_capital * unrealized_pnl / 100)
-            expectancy_krw = round(base_capital * expectancy_pct / 100)
+            # Effective capital grows with cumulative P&L (compounding)
+            effective_capital = round(base_capital * (1 + cumulative_realized_pnl / 100))
+            realized_pnl_krw = round(effective_capital * realized_pnl / 100)
+            unrealized_pnl_krw = round(effective_capital * unrealized_pnl / 100)
+            expectancy_krw = round(effective_capital * expectancy_pct / 100)
             return {
                 "date": today,
                 "cycles_run": len(journal),
@@ -775,6 +784,12 @@ def load_daily_summary() -> dict:
                 "desk_close_reason_stats": _desk_close_reason_stats(closed_today),
                 "symbol_performance_stats": _symbol_performance_stats(positions),
                 "desk_stats": desk_stats,
+                "cumulative_realized_pnl_pct": cumulative_realized_pnl,
+                "cumulative_closed_positions": cumulative_closed,
+                "cumulative_wins": cumulative_wins,
+                "cumulative_losses": cumulative_losses,
+                "cumulative_win_rate": cumulative_win_rate,
+                "effective_capital_krw": effective_capital,
             }
     except OperationalError:
         rebuild_db()

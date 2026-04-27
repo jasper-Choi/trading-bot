@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
 from app.services.backtest_advisor import get_crypto_weights
@@ -9,6 +11,8 @@ from app.services.signal_engine import (
     summarize_crypto_signal,
     summarize_orderbook_pressure,
 )
+
+_FETCH_WORKERS = 6
 
 
 class CryptoDeskAgent(BaseAgent):
@@ -20,16 +24,26 @@ class CryptoDeskAgent(BaseAgent):
         direction_symbol = "KRW-BTC"
         direction_signal = summarize_crypto_signal(get_upbit_15m_candles(direction_symbol, count=40))
 
-        ranked_candidates: list[dict] = []
-        for market, weight in list(weights.items())[:4]:
+        all_markets = list(weights.items())
+
+        def _fetch_market(market_weight: tuple[str, float]) -> tuple[str, float, dict, dict, dict]:
+            market, weight = market_weight
             signal = summarize_crypto_signal(get_upbit_15m_candles(market, count=40))
             micro = summarize_crypto_micro_momentum_signal(get_upbit_1m_candles(market, count=80))
             orderbook = summarize_orderbook_pressure(get_upbit_orderbook(market))
+            return market, weight, signal, micro, orderbook
+
+        with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
+            fetch_results = list(executor.map(_fetch_market, all_markets))
+
+        direction_score = float(direction_signal.get("score", 0.5) or 0.5)
+        ranked_candidates: list[dict] = []
+        for market, weight, signal, micro, orderbook in fetch_results:
             combined_score = round(
                 (float(signal.get("score", 0.5) or 0.5) * 0.50)
                 + (float(micro.get("micro_score", 0.0) or 0.0) * 0.21)
                 + (float(orderbook.get("orderbook_score", 0.0) or 0.0) * 0.08)
-                + (float(direction_signal.get("score", 0.5) or 0.5) * 0.15)
+                + (direction_score * 0.15)
                 + (float(weight or 0.0) * 0.06),
                 3,
             )
@@ -149,8 +163,8 @@ class CryptoDeskAgent(BaseAgent):
                 "orderbook_imbalance": float(leader.get("orderbook_imbalance", 0.0) or 0.0),
                 "orderbook_reasons": list(leader.get("orderbook_reasons", [])),
                 "backtest_weights": weights,
-                "candidate_symbols": candidate_markets[:4],
-                "candidate_markets": ranked_candidates[:4],
+                "candidate_symbols": candidate_markets[:6],
+                "candidate_markets": ranked_candidates[:6],
                 "direction_bias": direction_signal.get("bias", "balanced"),
                 "direction_score": float(direction_signal.get("score", 0.5) or 0.5),
                 "breakout_confirmed": bool(leader.get("breakout_confirmed", False)),

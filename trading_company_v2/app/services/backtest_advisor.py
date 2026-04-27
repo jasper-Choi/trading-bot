@@ -13,8 +13,15 @@ _SEARCH_PATHS = [
 ]
 
 _NEUTRAL_WEIGHTS: dict[str, float] = {
-    "KRW-DOGE": 0.5,
-    "KRW-XRP": 0.5,
+    "KRW-BTC":  0.14,
+    "KRW-ETH":  0.13,
+    "KRW-XRP":  0.13,
+    "KRW-SOL":  0.12,
+    "KRW-DOGE": 0.12,
+    "KRW-ADA":  0.10,
+    "KRW-AVAX": 0.09,
+    "KRW-TRX":  0.09,
+    "KRW-LINK": 0.08,
 }
 
 
