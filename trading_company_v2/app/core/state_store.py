@@ -5,6 +5,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytz
+import requests
 from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, event, inspect, select, text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -457,6 +458,37 @@ def save_cycle_journal(entry: CycleJournalEntry) -> None:
         db.commit()
 
 
+def _fetch_zombie_prices(open_positions: list, price_lookup: dict[tuple[str, str], float]) -> None:
+    """Fetch live prices for positions whose symbol fell out of market_snapshot."""
+    from app.services.market_gateway import UPBIT_TICKER_URL, get_naver_daily_prices
+
+    zombie_korea = [p for p in open_positions if p.desk == "korea" and ("korea", p.symbol) not in price_lookup]
+    zombie_crypto = [p for p in open_positions if p.desk == "crypto" and ("crypto", p.symbol) not in price_lookup]
+
+    for pos in zombie_korea:
+        try:
+            candles = get_naver_daily_prices(pos.symbol, count=2)
+            if candles:
+                price = float(candles[-1].get("close") or 0)
+                if price > 0:
+                    price_lookup[("korea", pos.symbol)] = price
+        except Exception:
+            pass
+
+    if zombie_crypto:
+        try:
+            markets = ",".join(pos.symbol for pos in zombie_crypto)
+            resp = requests.get(UPBIT_TICKER_URL, params={"markets": markets}, timeout=8)
+            resp.raise_for_status()
+            for item in resp.json():
+                market = str(item.get("market") or "")
+                price = float(item.get("trade_price") or 0)
+                if market and price > 0:
+                    price_lookup[("crypto", market)] = price
+        except Exception:
+            pass
+
+
 def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> None:
     init_db()
     price_lookup = _build_price_lookup(market_snapshot)
@@ -464,6 +496,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
         open_positions = db.execute(
             select(PaperPositionRecord).where(PaperPositionRecord.status == "open").order_by(PaperPositionRecord.id.asc())
         ).scalars().all()
+
+        _fetch_zombie_prices(open_positions, price_lookup)
 
         for position in open_positions:
             current_price = price_lookup.get((position.desk, position.symbol), position.current_price)

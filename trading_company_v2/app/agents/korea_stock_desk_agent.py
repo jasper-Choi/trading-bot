@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
 from app.services.market_gateway import get_kosdaq_snapshot, get_naver_daily_prices
 from app.services.signal_engine import summarize_equity_signal, summarize_breakout_signal
+
+_FETCH_WORKERS = 8
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -43,13 +47,23 @@ class KoreaStockDeskAgent(BaseAgent):
     def run(self) -> AgentResult:
         # ── Path A: Gap-up candidates (existing KOSDAQ movers) ─────────────
         leaders = get_kosdaq_snapshot(top_n=30)
-        enriched_candidates: list[dict] = []
-        for item in leaders:
-            gap_pct = float(item.get("gap_pct", 0.0) or 0.0)
-            if gap_pct < 1.2 or gap_pct > 12.0:
-                continue
+
+        gap_items = [
+            item for item in leaders
+            if 1.2 <= float(item.get("gap_pct", 0.0) or 0.0) <= 12.0
+            and str(item.get("ticker", "")).strip()
+        ]
+
+        def _fetch_a(item: dict) -> tuple[dict, list[dict]]:
             ticker = str(item.get("ticker", "")).strip()
-            candles = get_naver_daily_prices(ticker, count=42) if ticker else []
+            return item, get_naver_daily_prices(ticker, count=42)
+
+        with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
+            path_a_results = list(executor.map(_fetch_a, gap_items))
+
+        enriched_candidates: list[dict] = []
+        for item, candles in path_a_results:
+            gap_pct = float(item.get("gap_pct", 0.0) or 0.0)
             signal = summarize_equity_signal(candles)
             signal_score = float(signal.get("score", 0.5) or 0.5)
             volume = float(item.get("volume", 0.0) or 0.0)
@@ -93,12 +107,21 @@ class KoreaStockDeskAgent(BaseAgent):
         # Scans fixed universe for: 20-day high breakout + vol surge 2.5x + RSI 55-78 + EMA20
         # These do NOT require a gap-up today — catches intraday breakouts
         already_tickers = {str(c.get("ticker", "")).strip() for c in enriched_candidates}
-        breakout_candidates: list[dict] = []
 
-        for ticker, name in KOREA_BREAKOUT_WATCHLIST.items():
-            if ticker in already_tickers:
-                continue  # already captured via gap-up path
-            candles = get_naver_daily_prices(ticker, count=42)
+        watchlist_items = [
+            (ticker, name) for ticker, name in KOREA_BREAKOUT_WATCHLIST.items()
+            if ticker not in already_tickers
+        ]
+
+        def _fetch_b(ticker_name: tuple[str, str]) -> tuple[str, str, list[dict]]:
+            ticker, name = ticker_name
+            return ticker, name, get_naver_daily_prices(ticker, count=42)
+
+        with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
+            path_b_results = list(executor.map(_fetch_b, watchlist_items))
+
+        breakout_candidates: list[dict] = []
+        for ticker, name, candles in path_b_results:
             if len(candles) < 22:
                 continue
             bk = summarize_breakout_signal(candles, breakout_period=20, vol_surge_mult=2.5,
