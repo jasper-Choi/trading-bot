@@ -1285,6 +1285,8 @@ def state() -> dict:
 @app.get("/dashboard-data")
 def dashboard_data() -> dict:
     state = load_company_state()
+    broker_health = _broker_live_health(state)
+    readiness = _live_readiness_checklist(state, broker_health)
     return {
         "company_name": settings.company_name,
         "operator_name": settings.operator_name,
@@ -1292,9 +1294,10 @@ def dashboard_data() -> dict:
         "deployment_profile": _deployment_profile(state),
         "state": state.model_dump(),
         "dashboard": _build_dashboard_payload(state),
-        "broker_live_health": broker_live_health(),
-        "live_readiness_checklist": live_readiness_checklist(),
-        "upbit_live_pilot": upbit_live_pilot(),
+        "broker_live_health": broker_health,
+        "live_readiness_checklist": readiness,
+        "upbit_live_pilot": _upbit_live_pilot(state, broker_health, readiness),
+        "kis_live_pilot": _kis_live_pilot(state, broker_health, readiness),
     }
 
 
@@ -1601,9 +1604,7 @@ def live_execution_health() -> dict:
     }
 
 
-@app.get("/diagnostics/broker-live-health")
-def broker_live_health() -> dict:
-    state = load_company_state()
+def _broker_live_health(state: CompanyState) -> dict:
     execution_summary = _build_execution_summary(state)
     configured_mode = normalize_execution_mode(settings.execution_mode)
 
@@ -1698,7 +1699,6 @@ def broker_live_health() -> dict:
                 snapshot["latest_order_error"] = f"order_failed: {exc}"
         return snapshot
 
-    configured_mode = normalize_execution_mode(settings.execution_mode)
     return {
         "updated_at": state.updated_at,
         "execution_mode": configured_mode,
@@ -1712,11 +1712,15 @@ def broker_live_health() -> dict:
     }
 
 
-@app.get("/diagnostics/live-readiness-checklist")
-def live_readiness_checklist() -> dict:
+@app.get("/diagnostics/broker-live-health")
+def broker_live_health() -> dict:
     state = load_company_state()
+    return _broker_live_health(state)
+
+
+def _live_readiness_checklist(state: CompanyState, broker_health: dict | None = None) -> dict:
     execution_summary = _build_execution_summary(state)
-    broker_health = broker_live_health()
+    broker_health = broker_health or _broker_live_health(state)
     checklist: list[dict] = []
 
     checklist.append(
@@ -1865,11 +1869,15 @@ def live_readiness_checklist() -> dict:
     }
 
 
-@app.get("/diagnostics/upbit-live-pilot")
-def upbit_live_pilot() -> dict:
+@app.get("/diagnostics/live-readiness-checklist")
+def live_readiness_checklist() -> dict:
     state = load_company_state()
-    broker_health = broker_live_health()
-    readiness = live_readiness_checklist()
+    return _live_readiness_checklist(state)
+
+
+def _upbit_live_pilot(state: CompanyState, broker_health: dict | None = None, readiness: dict | None = None) -> dict:
+    broker_health = broker_health or _broker_live_health(state)
+    readiness = readiness or _live_readiness_checklist(state, broker_health)
     upbit = broker_health.get("upbit", {}) or {}
     execution_summary = broker_health.get("execution_summary", {}) or {}
     configured_mode = normalize_execution_mode(settings.execution_mode)
@@ -1966,11 +1974,15 @@ def upbit_live_pilot() -> dict:
     }
 
 
-@app.get("/diagnostics/kis-live-pilot")
-def kis_live_pilot() -> dict:
+@app.get("/diagnostics/upbit-live-pilot")
+def upbit_live_pilot() -> dict:
     state = load_company_state()
-    broker_health = broker_live_health()
-    readiness = live_readiness_checklist()
+    return _upbit_live_pilot(state)
+
+
+def _kis_live_pilot(state: CompanyState, broker_health: dict | None = None, readiness: dict | None = None) -> dict:
+    broker_health = broker_health or _broker_live_health(state)
+    readiness = readiness or _live_readiness_checklist(state, broker_health)
     kis = broker_health.get("kis", {}) or {}
     execution_summary = broker_health.get("execution_summary", {}) or {}
     configured_mode = normalize_execution_mode(settings.execution_mode)
@@ -2045,6 +2057,12 @@ def kis_live_pilot() -> dict:
         "entry_block_summary": _entry_block_summary(state),
         "readiness_overall": readiness.get("overall", "blocked"),
     }
+
+
+@app.get("/diagnostics/kis-live-pilot")
+def kis_live_pilot() -> dict:
+    state = load_company_state()
+    return _kis_live_pilot(state)
 
 
 @app.post("/cycle")
