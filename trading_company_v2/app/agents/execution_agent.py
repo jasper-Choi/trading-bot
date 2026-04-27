@@ -224,6 +224,11 @@ class ExecutionAgent(BaseAgent):
         closed_positions = int(desk_stats.get("closed_positions", 0) or 0)
         open_notional = float(desk_stats.get("open_notional_pct", 0.0) or 0.0)
 
+        # No history → fresh start, allow entries at base size
+        if closed_positions == 0:
+            score = round(50.0 + (desk_multiplier - 1.0) * 50.0, 1)
+            return {"score": score, "tone": "balanced", "size_multiplier": 1.0, "entry_allowed": True}
+
         score = 50.0
         score += max(min(realized * 7.5, 18.0), -22.0)
         score += max(min((win_rate - 50.0) * 0.35, 12.0), -14.0)
@@ -234,9 +239,10 @@ class ExecutionAgent(BaseAgent):
 
         if score >= 67:
             return {"score": score, "tone": "press", "size_multiplier": 1.1, "entry_allowed": True}
-        if score >= 52:
+        if score >= 48:
             return {"score": score, "tone": "balanced", "size_multiplier": 1.0, "entry_allowed": True}
-        return {"score": score, "tone": "cooldown", "size_multiplier": 0.75, "entry_allowed": desk == "crypto" and realized > 0}
+        # Cooldown: throttle size but don't block entries — losing runs still get smaller, not zero
+        return {"score": score, "tone": "cooldown", "size_multiplier": 0.75, "entry_allowed": True}
 
     def _desk_stop_pressure(self, desk: str) -> str:
         recent = self._desk_recent_trades(desk, limit=6)
