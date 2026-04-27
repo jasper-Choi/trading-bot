@@ -177,43 +177,9 @@ def get_upbit_orderbook(market: str) -> dict[str, Any]:
 
 
 def get_kosdaq_snapshot(top_n: int = 20) -> list[dict[str, Any]]:
-    try:
-        resp = requests.get(NAVER_KOSDAQ_URL, headers=NAVER_HEADERS, timeout=REQUEST_TIMEOUT)
-        resp.raise_for_status()
-        payload = resp.json()
-        rows = payload if isinstance(payload, list) else payload.get("stocks") or payload.get("stockList") or []
-    except (RequestException, ValueError) as exc:
-        _log.warning("kosdaq_snapshot API failed (%s), falling back to HTML scrape", exc)
-        return _get_kosdaq_snapshot_from_naver_html(top_n)
-
-    snapshots: list[dict[str, Any]] = []
-    for item in rows[: top_n * 2]:
-        try:
-            current_price = float(str(item.get("closePrice") or item.get("currentPrice") or 0).replace(",", ""))
-            change_value = float(str(item.get("compareToPreviousClosePrice") or item.get("change") or 0).replace(",", ""))
-            volume = int(float(str(item.get("accumulatedTradingVolume") or item.get("volume") or 0).replace(",", "")))
-            name = str(item.get("stockName") or item.get("name") or "").strip()
-            ticker = str(item.get("itemCode") or item.get("code") or "").strip()
-            if not ticker or not name or current_price <= 0:
-                continue
-            prev_close = current_price - change_value
-            if prev_close <= 0:
-                prev_close = current_price
-            gap_pct = round(((current_price - prev_close) / prev_close) * 100, 2) if prev_close else 0.0
-            snapshots.append(
-                {
-                    "ticker": ticker,
-                    "name": name,
-                    "current_price": current_price,
-                    "gap_pct": gap_pct,
-                    "volume": volume,
-                }
-            )
-        except (TypeError, ValueError):
-            continue
-
-    snapshots.sort(key=lambda item: item["gap_pct"], reverse=True)
-    return snapshots[:top_n]
+    # The previous mobile API endpoint now returns 404 on Oracle; use the
+    # stable HTML fallback directly to keep the loop quiet and predictable.
+    return _get_kosdaq_snapshot_from_naver_html(top_n)
 
 
 def _strip_html(value: str) -> str:
