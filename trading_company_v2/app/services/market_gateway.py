@@ -112,10 +112,10 @@ def get_top_krw_coins(top_n: int = 10) -> list[dict[str, Any]]:
         return []
 
 
-def get_upbit_15m_candles(market: str, count: int = 40) -> list[dict[str, Any]]:
+def get_upbit_minute_candles(market: str, unit: int = 15, count: int = 40) -> list[dict[str, Any]]:
     try:
         resp = requests.get(
-            UPBIT_CANDLES_URL.format(unit=15),
+            UPBIT_CANDLES_URL.format(unit=unit),
             params={"market": market, "count": min(count, 200)},
             timeout=REQUEST_TIMEOUT,
         )
@@ -134,6 +134,14 @@ def get_upbit_15m_candles(market: str, count: int = 40) -> list[dict[str, Any]]:
         ]
     except RequestException:
         return []
+
+
+def get_upbit_15m_candles(market: str, count: int = 40) -> list[dict[str, Any]]:
+    return get_upbit_minute_candles(market, unit=15, count=count)
+
+
+def get_upbit_1m_candles(market: str, count: int = 80) -> list[dict[str, Any]]:
+    return get_upbit_minute_candles(market, unit=1, count=count)
 
 
 def get_kosdaq_snapshot(top_n: int = 20) -> list[dict[str, Any]]:

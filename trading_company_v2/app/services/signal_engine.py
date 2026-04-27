@@ -695,6 +695,102 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def summarize_crypto_micro_momentum_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    1-minute crypto momentum layer.
+
+    This is intentionally faster than the 15m swing signal: it looks for a
+    fresh VWAP reclaim / high-of-window break with volume expansion, while
+    blocking exhausted vertical candles.
+    """
+    if len(candles) < 35:
+        return {
+            "micro_ready": False,
+            "micro_score": 0.0,
+            "micro_bias": "neutral",
+            "micro_reasons": ["not enough 1m candles"],
+        }
+
+    closes = [float(item["close"]) for item in candles]
+    highs = [float(item.get("high") or item["close"]) for item in candles]
+    lows = [float(item.get("low") or item["close"]) for item in candles]
+    volumes = [float(item.get("volume") or 0.0) for item in candles]
+    typical = [(highs[idx] + lows[idx] + closes[idx]) / 3 for idx in range(len(closes))]
+    vwap_len = min(60, len(closes))
+    recent_typical = typical[-vwap_len:]
+    recent_volumes = volumes[-vwap_len:]
+    vol_sum = sum(recent_volumes) or 1.0
+    vwap = sum(recent_typical[idx] * recent_volumes[idx] for idx in range(vwap_len)) / vol_sum
+
+    last_close = closes[-1]
+    ema5 = ema(closes, 5)
+    ema20 = ema(closes, 20)
+    last_rsi = rsi(closes, 14)
+    prior_high_20 = max(highs[-21:-1])
+    vol_avg_20 = sum(volumes[-21:-1]) / 20 if sum(volumes[-21:-1]) > 0 else 0.0
+    vol_ratio = round(volumes[-1] / vol_avg_20, 2) if vol_avg_20 > 0 else 0.0
+    move_3 = ((last_close - closes[-4]) / closes[-4]) * 100 if closes[-4] else 0.0
+    move_10 = ((last_close - closes[-11]) / closes[-11]) * 100 if closes[-11] else 0.0
+    range_5 = ((max(highs[-5:]) - min(lows[-5:])) / min(lows[-5:])) * 100 if min(lows[-5:]) else 0.0
+    vwap_gap = ((last_close - vwap) / vwap) * 100 if vwap else 0.0
+
+    breaks_high = last_close > prior_high_20
+    above_vwap = last_close > vwap
+    ema_stack = ema5[-1] > ema20[-1]
+    vol_expansion = vol_ratio >= 1.8
+    rsi_momentum = last_rsi is not None and 52.0 <= last_rsi <= 82.0
+    exhausted = move_3 >= 2.2 or move_10 >= 4.5 or range_5 >= 4.0 or vwap_gap >= 2.8
+
+    score = 0.20
+    reasons: list[str] = []
+    if breaks_high:
+        score += 0.22
+        reasons.append("1m 20-bar high break")
+    if above_vwap:
+        score += 0.16
+        reasons.append(f"above 1m VWAP ({vwap_gap:.2f}%)")
+    if ema_stack:
+        score += 0.14
+        reasons.append("1m EMA5 above EMA20")
+    if vol_expansion:
+        score += 0.18
+        reasons.append(f"1m volume expansion {vol_ratio:.1f}x")
+    if rsi_momentum:
+        score += 0.10
+        reasons.append(f"1m RSI momentum {last_rsi:.1f}")
+    if exhausted:
+        score -= 0.25
+        reasons.append(f"1m exhaustion risk move3 {move_3:.2f}% / range5 {range_5:.2f}%")
+    if move_3 < -1.2:
+        score -= 0.12
+        reasons.append(f"1m momentum fading {move_3:.2f}%")
+
+    score = round(max(0.0, min(1.0, score)), 2)
+    micro_ready = score >= 0.68 and breaks_high and above_vwap and vol_expansion and not exhausted
+    if score >= 0.68:
+        bias = "offense"
+    elif score <= 0.38:
+        bias = "defense"
+    else:
+        bias = "balanced"
+
+    if not reasons:
+        reasons.append("1m momentum neutral")
+
+    return {
+        "micro_ready": micro_ready,
+        "micro_score": score,
+        "micro_bias": bias,
+        "micro_reasons": reasons,
+        "micro_vol_ratio": vol_ratio,
+        "micro_move_3_pct": round(move_3, 2),
+        "micro_move_10_pct": round(move_10, 2),
+        "micro_vwap_gap_pct": round(vwap_gap, 2),
+        "micro_range_5_pct": round(range_5, 2),
+        "micro_rsi": round(last_rsi, 1) if last_rsi is not None else None,
+    }
+
+
 def summarize_equity_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(item["close"]) for item in candles]
     if len(closes) < 30:

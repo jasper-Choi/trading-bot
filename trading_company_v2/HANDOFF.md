@@ -14,6 +14,11 @@ Maintained for: Claude / Codex continuation
   - RSI extreme zone blocks overheated entries.
   - Crypto overheat block was relaxed from RSI >= 74 to RSI >= 82, while divergence/extreme quality filter now handles late-chase risk.
 - A `gross exposure cap breached (1.30x)` dashboard message means total open notional exposure is about 1.30x account capital and new entries are blocked by the gross exposure gate. On the Oracle check immediately after this update, current state showed `allow_new_entries=True`, `open_positions=0`, and no current gross exposure value, so the warning was not active at that moment.
+- Added high-return crypto phase 1: a 1-minute micro momentum layer now runs beside the existing 15-minute swing breakout layer.
+  - `get_upbit_1m_candles()` fetches 1m candles through the shared Upbit minute candle helper.
+  - `summarize_crypto_micro_momentum_signal()` scores 1m high-of-window breaks, VWAP reclaim, EMA5/EMA20 stack, volume expansion, RSI momentum, and exhaustion risk.
+  - `CryptoDeskAgent` blends 15m swing score, 1m micro score, BTC backdrop, and backtest weights.
+  - `build_crypto_plan()` can allow a smaller `selective_probe` when 1m momentum is ready while the 15m swing setup is still forming.
 
 ## 1. Workspace
 

@@ -3,8 +3,8 @@ from __future__ import annotations
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
 from app.services.backtest_advisor import get_crypto_weights
-from app.services.market_gateway import get_upbit_15m_candles
-from app.services.signal_engine import summarize_crypto_signal
+from app.services.market_gateway import get_upbit_15m_candles, get_upbit_1m_candles
+from app.services.signal_engine import summarize_crypto_micro_momentum_signal, summarize_crypto_signal
 
 
 class CryptoDeskAgent(BaseAgent):
@@ -19,17 +19,28 @@ class CryptoDeskAgent(BaseAgent):
         ranked_candidates: list[dict] = []
         for market, weight in list(weights.items())[:4]:
             signal = summarize_crypto_signal(get_upbit_15m_candles(market, count=40))
+            micro = summarize_crypto_micro_momentum_signal(get_upbit_1m_candles(market, count=80))
             combined_score = round(
-                (float(signal.get("score", 0.5) or 0.5) * 0.72)
-                + (float(direction_signal.get("score", 0.5) or 0.5) * 0.18)
-                + (float(weight or 0.0) * 0.10),
+                (float(signal.get("score", 0.5) or 0.5) * 0.55)
+                + (float(micro.get("micro_score", 0.0) or 0.0) * 0.22)
+                + (float(direction_signal.get("score", 0.5) or 0.5) * 0.15)
+                + (float(weight or 0.0) * 0.08),
                 3,
             )
+            if bool(micro.get("micro_ready", False)) and bool(signal.get("rsi_quality_ok", True)):
+                combined_score = min(1.0, round(combined_score + 0.06, 3))
             ranked_candidates.append(
                 {
                     "market": market,
                     "weight": round(float(weight or 0.0), 4),
                     "signal_score": float(signal.get("score", 0.5) or 0.5),
+                    "micro_score": float(micro.get("micro_score", 0.0) or 0.0),
+                    "micro_ready": bool(micro.get("micro_ready", False)),
+                    "micro_bias": str(micro.get("micro_bias", "neutral") or "neutral"),
+                    "micro_reasons": list(micro.get("micro_reasons", [])),
+                    "micro_vol_ratio": float(micro.get("micro_vol_ratio", 0.0) or 0.0),
+                    "micro_move_3_pct": float(micro.get("micro_move_3_pct", 0.0) or 0.0),
+                    "micro_vwap_gap_pct": float(micro.get("micro_vwap_gap_pct", 0.0) or 0.0),
                     "combined_score": combined_score,
                     "bias": str(signal.get("bias", "balanced") or "balanced"),
                     "recent_change_pct": float(signal.get("recent_change_pct", 0.0) or 0.0),
@@ -77,6 +88,10 @@ class CryptoDeskAgent(BaseAgent):
             "range_4_pct": float(direction_signal.get("range_4_pct", 0.0) or 0.0),
             "rsi": direction_signal.get("rsi"),
             "reasons": list(direction_signal.get("reasons", [])),
+            "micro_score": 0.0,
+            "micro_ready": False,
+            "micro_bias": "neutral",
+            "micro_reasons": [],
         }
 
         lead_market = str(leader.get("market", "") or next(iter(weights), "KRW-BTC"))
@@ -105,6 +120,13 @@ class CryptoDeskAgent(BaseAgent):
                 "pullback_gap_pct": float(leader.get("pullback_gap_pct", 0.0) or 0.0),
                 "range_4_pct": float(leader.get("range_4_pct", 0.0) or 0.0),
                 "rsi": leader.get("rsi"),
+                "micro_score": float(leader.get("micro_score", 0.0) or 0.0),
+                "micro_ready": bool(leader.get("micro_ready", False)),
+                "micro_bias": str(leader.get("micro_bias", "neutral") or "neutral"),
+                "micro_reasons": list(leader.get("micro_reasons", [])),
+                "micro_vol_ratio": float(leader.get("micro_vol_ratio", 0.0) or 0.0),
+                "micro_move_3_pct": float(leader.get("micro_move_3_pct", 0.0) or 0.0),
+                "micro_vwap_gap_pct": float(leader.get("micro_vwap_gap_pct", 0.0) or 0.0),
                 "backtest_weights": weights,
                 "candidate_symbols": candidate_markets[:4],
                 "candidate_markets": ranked_candidates[:4],
