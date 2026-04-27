@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import secrets
 from base64 import b64decode
 from datetime import datetime, timedelta, timezone
+
+_SESSION_COOKIE = "tcsession"
+_SESSION_DURATION = 86400  # 24h
+_SESSION_SECRET = secrets.token_hex(16)  # rotates on restart — acceptable for a dashboard
+
+
+def _session_token(username: str) -> str:
+    return hashlib.sha256(f"{username}:{_SESSION_SECRET}".encode()).hexdigest()
 
 _KST = timezone(timedelta(hours=9))
 
@@ -97,6 +106,13 @@ async def require_basic_auth(request: Request, call_next):
     if request.url.path == "/health" or not _auth_enabled():
         return await call_next(request)
 
+    # 1. Session cookie — set after first Basic Auth success, used by all subsequent
+    #    JavaScript fetch() calls (mobile Safari / Chrome don't auto-forward Basic Auth to JS)
+    cookie = request.cookies.get(_SESSION_COOKIE, "")
+    if cookie and secrets.compare_digest(cookie, _session_token(settings.app_username)):
+        return await call_next(request)
+
+    # 2. Basic Auth header — browser sends this on first page load / explicit prompt
     header = request.headers.get("Authorization", "")
     if not header.startswith("Basic "):
         return _unauthorized_response()
@@ -114,7 +130,15 @@ async def require_basic_auth(request: Request, call_next):
     ):
         return _unauthorized_response()
 
-    return await call_next(request)
+    response = await call_next(request)
+    response.set_cookie(
+        _SESSION_COOKIE,
+        _session_token(username),
+        max_age=_SESSION_DURATION,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 def _compute_insight_score(state: CompanyState) -> int:
