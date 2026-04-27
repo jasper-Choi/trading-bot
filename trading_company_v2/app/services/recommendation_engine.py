@@ -23,6 +23,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     micro_score = float(payload.get("micro_score", 0.0) or 0.0)
     micro_vol_ratio = float(payload.get("micro_vol_ratio", 0.0) or 0.0)
     micro_move_3 = float(payload.get("micro_move_3_pct", 0.0) or 0.0)
+    orderbook_ready = bool(payload.get("orderbook_ready", False))
+    orderbook_score = float(payload.get("orderbook_score", 0.0) or 0.0)
+    orderbook_bid_ask = float(payload.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
 
     if regime == "STRESSED":
         return {
@@ -89,7 +92,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # ICT 컨플루언스 진입: breakout_partial 없어도 ICT 3개 이상이면 허용
     ict_entry_ok = ict_bullish_count >= 3 or (ssl_sweep_confirmed and kill_zone_active) or (choch_bullish and ict_bullish_count >= 2)
-    micro_entry_ok = micro_ready and micro_score >= 0.68 and micro_vol_ratio >= 1.8 and -0.2 <= micro_move_3 <= 2.2
+    micro_entry_ok = (
+        micro_ready
+        and micro_score >= 0.68
+        and micro_vol_ratio >= 1.8
+        and -0.2 <= micro_move_3 <= 2.2
+        and (orderbook_ready or orderbook_score >= 0.58)
+    )
 
     # 단타 스윙: 3/4 이상이면 풀사이즈 진입, 임계값 대폭 완화
     offense_threshold = 0.60 if regime == "RANGING" else 0.58
@@ -100,7 +109,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} 단타 스윙 진입.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"signal {signal_score:.2f} / micro {micro_score:.2f} / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
+            "notes": reasons + [f"signal {signal_score:.2f} / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
         }
     # 신호 점수만 충분하면 선택적 진입
     if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.52) and stance != "DEFENSE" and lead_weight >= 0.15:
@@ -120,7 +129,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} 1m momentum entry while swing setup is forming.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"1m micro ready / micro {micro_score:.2f} / 1m vol {micro_vol_ratio:.1f}x / move3 {micro_move_3:.2f}% / swing {signal_score:.2f}"],
+            "notes": reasons + [f"1m micro ready / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / 1m vol {micro_vol_ratio:.1f}x / move3 {micro_move_3:.2f}% / swing {signal_score:.2f}"],
         }
 
     mild_defense = (

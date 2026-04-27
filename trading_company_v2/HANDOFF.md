@@ -19,6 +19,11 @@ Maintained for: Claude / Codex continuation
   - `summarize_crypto_micro_momentum_signal()` scores 1m high-of-window breaks, VWAP reclaim, EMA5/EMA20 stack, volume expansion, RSI momentum, and exhaustion risk.
   - `CryptoDeskAgent` blends 15m swing score, 1m micro score, BTC backdrop, and backtest weights.
   - `build_crypto_plan()` can allow a smaller `selective_probe` when 1m momentum is ready while the 15m swing setup is still forming.
+- Added high-return crypto phase 2: orderbook pressure layer.
+  - `get_upbit_orderbook()` fetches current Upbit depth snapshots.
+  - `summarize_orderbook_pressure()` scores bid/ask depth ratio, top-5 stack, spread, and imbalance.
+  - Crypto candidate ranking now blends swing, 1m momentum, orderbook pressure, BTC backdrop, and backtest weights.
+  - 1m early entries now require either orderbook-ready pressure or a near-ready orderbook score, reducing false breakouts with weak depth.
 
 ## 1. Workspace
 

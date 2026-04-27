@@ -3,8 +3,12 @@ from __future__ import annotations
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
 from app.services.backtest_advisor import get_crypto_weights
-from app.services.market_gateway import get_upbit_15m_candles, get_upbit_1m_candles
-from app.services.signal_engine import summarize_crypto_micro_momentum_signal, summarize_crypto_signal
+from app.services.market_gateway import get_upbit_15m_candles, get_upbit_1m_candles, get_upbit_orderbook
+from app.services.signal_engine import (
+    summarize_crypto_micro_momentum_signal,
+    summarize_crypto_signal,
+    summarize_orderbook_pressure,
+)
 
 
 class CryptoDeskAgent(BaseAgent):
@@ -20,14 +24,16 @@ class CryptoDeskAgent(BaseAgent):
         for market, weight in list(weights.items())[:4]:
             signal = summarize_crypto_signal(get_upbit_15m_candles(market, count=40))
             micro = summarize_crypto_micro_momentum_signal(get_upbit_1m_candles(market, count=80))
+            orderbook = summarize_orderbook_pressure(get_upbit_orderbook(market))
             combined_score = round(
-                (float(signal.get("score", 0.5) or 0.5) * 0.55)
-                + (float(micro.get("micro_score", 0.0) or 0.0) * 0.22)
+                (float(signal.get("score", 0.5) or 0.5) * 0.50)
+                + (float(micro.get("micro_score", 0.0) or 0.0) * 0.21)
+                + (float(orderbook.get("orderbook_score", 0.0) or 0.0) * 0.08)
                 + (float(direction_signal.get("score", 0.5) or 0.5) * 0.15)
-                + (float(weight or 0.0) * 0.08),
+                + (float(weight or 0.0) * 0.06),
                 3,
             )
-            if bool(micro.get("micro_ready", False)) and bool(signal.get("rsi_quality_ok", True)):
+            if bool(micro.get("micro_ready", False)) and bool(orderbook.get("orderbook_ready", False)) and bool(signal.get("rsi_quality_ok", True)):
                 combined_score = min(1.0, round(combined_score + 0.06, 3))
             ranked_candidates.append(
                 {
@@ -41,6 +47,12 @@ class CryptoDeskAgent(BaseAgent):
                     "micro_vol_ratio": float(micro.get("micro_vol_ratio", 0.0) or 0.0),
                     "micro_move_3_pct": float(micro.get("micro_move_3_pct", 0.0) or 0.0),
                     "micro_vwap_gap_pct": float(micro.get("micro_vwap_gap_pct", 0.0) or 0.0),
+                    "orderbook_score": float(orderbook.get("orderbook_score", 0.0) or 0.0),
+                    "orderbook_ready": bool(orderbook.get("orderbook_ready", False)),
+                    "orderbook_bid_ask_ratio": float(orderbook.get("orderbook_bid_ask_ratio", 0.0) or 0.0),
+                    "orderbook_spread_pct": float(orderbook.get("orderbook_spread_pct", 0.0) or 0.0),
+                    "orderbook_imbalance": float(orderbook.get("orderbook_imbalance", 0.0) or 0.0),
+                    "orderbook_reasons": list(orderbook.get("orderbook_reasons", [])),
                     "combined_score": combined_score,
                     "bias": str(signal.get("bias", "balanced") or "balanced"),
                     "recent_change_pct": float(signal.get("recent_change_pct", 0.0) or 0.0),
@@ -92,6 +104,9 @@ class CryptoDeskAgent(BaseAgent):
             "micro_ready": False,
             "micro_bias": "neutral",
             "micro_reasons": [],
+            "orderbook_score": 0.0,
+            "orderbook_ready": False,
+            "orderbook_reasons": [],
         }
 
         lead_market = str(leader.get("market", "") or next(iter(weights), "KRW-BTC"))
@@ -127,6 +142,12 @@ class CryptoDeskAgent(BaseAgent):
                 "micro_vol_ratio": float(leader.get("micro_vol_ratio", 0.0) or 0.0),
                 "micro_move_3_pct": float(leader.get("micro_move_3_pct", 0.0) or 0.0),
                 "micro_vwap_gap_pct": float(leader.get("micro_vwap_gap_pct", 0.0) or 0.0),
+                "orderbook_score": float(leader.get("orderbook_score", 0.0) or 0.0),
+                "orderbook_ready": bool(leader.get("orderbook_ready", False)),
+                "orderbook_bid_ask_ratio": float(leader.get("orderbook_bid_ask_ratio", 0.0) or 0.0),
+                "orderbook_spread_pct": float(leader.get("orderbook_spread_pct", 0.0) or 0.0),
+                "orderbook_imbalance": float(leader.get("orderbook_imbalance", 0.0) or 0.0),
+                "orderbook_reasons": list(leader.get("orderbook_reasons", [])),
                 "backtest_weights": weights,
                 "candidate_symbols": candidate_markets[:4],
                 "candidate_markets": ranked_candidates[:4],

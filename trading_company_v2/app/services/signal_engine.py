@@ -791,6 +791,89 @@ def summarize_crypto_micro_momentum_signal(candles: list[dict[str, Any]]) -> dic
     }
 
 
+def summarize_orderbook_pressure(orderbook: dict[str, Any]) -> dict[str, Any]:
+    """
+    Fast orderbook pressure layer.
+
+    This is a lightweight proxy for tick/order-flow strength until a persistent
+    WebSocket collector is added. It rewards clean bid support and penalizes
+    wide spreads or heavy ask walls that can turn a breakout into a trap.
+    """
+    units = orderbook.get("orderbook_units") or []
+    if not units:
+        return {
+            "orderbook_ready": False,
+            "orderbook_score": 0.0,
+            "orderbook_bias": "neutral",
+            "orderbook_reasons": ["no orderbook snapshot"],
+        }
+
+    best = units[0]
+    best_ask = float(best.get("ask_price") or 0.0)
+    best_bid = float(best.get("bid_price") or 0.0)
+    mid = (best_ask + best_bid) / 2 if best_ask and best_bid else 0.0
+    spread_pct = ((best_ask - best_bid) / mid) * 100 if mid else 99.0
+
+    bid_total = float(orderbook.get("total_bid_size") or 0.0)
+    ask_total = float(orderbook.get("total_ask_size") or 0.0)
+    bid_ask_ratio = bid_total / ask_total if ask_total > 0 else 0.0
+    imbalance = (bid_total - ask_total) / (bid_total + ask_total) if (bid_total + ask_total) > 0 else 0.0
+
+    top_units = units[:5]
+    top_bid = sum(float(unit.get("bid_size") or 0.0) for unit in top_units)
+    top_ask = sum(float(unit.get("ask_size") or 0.0) for unit in top_units)
+    top_ratio = top_bid / top_ask if top_ask > 0 else 0.0
+
+    score = 0.45
+    reasons: list[str] = []
+    if bid_ask_ratio >= 1.2:
+        score += 0.14
+        reasons.append(f"bid depth leads {bid_ask_ratio:.2f}x")
+    elif bid_ask_ratio <= 0.75:
+        score -= 0.14
+        reasons.append(f"ask depth dominates {bid_ask_ratio:.2f}x")
+    if top_ratio >= 1.15:
+        score += 0.12
+        reasons.append(f"top-5 bid stack {top_ratio:.2f}x")
+    elif top_ratio <= 0.7:
+        score -= 0.12
+        reasons.append(f"top-5 ask wall {top_ratio:.2f}x")
+    if spread_pct <= 0.12:
+        score += 0.08
+        reasons.append(f"spread tight {spread_pct:.3f}%")
+    elif spread_pct >= 0.35:
+        score -= 0.16
+        reasons.append(f"spread wide {spread_pct:.3f}%")
+    if imbalance >= 0.15:
+        score += 0.06
+        reasons.append(f"positive depth imbalance {imbalance:.2f}")
+    elif imbalance <= -0.18:
+        score -= 0.08
+        reasons.append(f"negative depth imbalance {imbalance:.2f}")
+
+    score = round(max(0.0, min(1.0, score)), 2)
+    ready = score >= 0.64 and bid_ask_ratio >= 1.05 and spread_pct <= 0.25
+    if score >= 0.64:
+        bias = "offense"
+    elif score <= 0.36:
+        bias = "defense"
+    else:
+        bias = "balanced"
+    if not reasons:
+        reasons.append("orderbook neutral")
+
+    return {
+        "orderbook_ready": ready,
+        "orderbook_score": score,
+        "orderbook_bias": bias,
+        "orderbook_reasons": reasons,
+        "orderbook_bid_ask_ratio": round(bid_ask_ratio, 3),
+        "orderbook_top_ratio": round(top_ratio, 3),
+        "orderbook_spread_pct": round(spread_pct, 4),
+        "orderbook_imbalance": round(imbalance, 3),
+    }
+
+
 def summarize_equity_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(item["close"]) for item in candles]
     if len(closes) < 30:

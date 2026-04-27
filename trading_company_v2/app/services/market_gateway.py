@@ -19,6 +19,7 @@ _log = logging.getLogger(__name__)
 
 UPBIT_MARKETS_URL = "https://api.upbit.com/v1/market/all"
 UPBIT_TICKER_URL = "https://api.upbit.com/v1/ticker"
+UPBIT_ORDERBOOK_URL = "https://api.upbit.com/v1/orderbook"
 UPBIT_CANDLES_URL = "https://api.upbit.com/v1/candles/minutes/{unit}"
 NAVER_KOSDAQ_URL = "https://m.stock.naver.com/api/stock/exchange/KOSDAQ"
 NAVER_KOSDAQ_FALLBACK_URL = "https://finance.naver.com/sise/sise_market_sum.naver?sosok=1&page={page}"
@@ -142,6 +143,37 @@ def get_upbit_15m_candles(market: str, count: int = 40) -> list[dict[str, Any]]:
 
 def get_upbit_1m_candles(market: str, count: int = 80) -> list[dict[str, Any]]:
     return get_upbit_minute_candles(market, unit=1, count=count)
+
+
+def get_upbit_orderbook(market: str) -> dict[str, Any]:
+    try:
+        resp = requests.get(
+            UPBIT_ORDERBOOK_URL,
+            params={"markets": market},
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        rows = resp.json()
+        if not rows:
+            return {}
+        row = rows[0]
+        return {
+            "market": row.get("market") or market,
+            "timestamp": row.get("timestamp"),
+            "total_ask_size": float(row.get("total_ask_size") or 0.0),
+            "total_bid_size": float(row.get("total_bid_size") or 0.0),
+            "orderbook_units": [
+                {
+                    "ask_price": float(unit.get("ask_price") or 0.0),
+                    "bid_price": float(unit.get("bid_price") or 0.0),
+                    "ask_size": float(unit.get("ask_size") or 0.0),
+                    "bid_size": float(unit.get("bid_size") or 0.0),
+                }
+                for unit in row.get("orderbook_units", [])[:15]
+            ],
+        }
+    except (RequestException, ValueError, TypeError):
+        return {}
 
 
 def get_kosdaq_snapshot(top_n: int = 20) -> list[dict[str, Any]]:
