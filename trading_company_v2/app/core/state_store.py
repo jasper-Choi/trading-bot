@@ -140,8 +140,8 @@ db_path.parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(
     f"sqlite:///{db_path}",
     connect_args={"check_same_thread": False, "timeout": 30},
-    pool_size=2,
-    max_overflow=3,
+    pool_size=8,
+    max_overflow=4,
 )
 
 
@@ -467,27 +467,27 @@ def save_cycle_journal(entry: CycleJournalEntry) -> None:
         db.commit()
 
 
-def _fetch_zombie_prices(open_positions: list, price_lookup: dict[tuple[str, str], float]) -> None:
-    """Fetch live prices for positions whose symbol fell out of market_snapshot."""
+def _fetch_zombie_prices(pos_pairs: list[tuple[str, str]], price_lookup: dict[tuple[str, str], float]) -> None:
+    """Fetch live prices for (desk, symbol) pairs missing from market_snapshot.
+    Called OUTSIDE any DB session to avoid holding write locks during HTTP calls."""
     from app.services.market_gateway import UPBIT_TICKER_URL, get_naver_daily_prices
 
-    zombie_korea = [p for p in open_positions if p.desk == "korea" and ("korea", p.symbol) not in price_lookup]
-    zombie_crypto = [p for p in open_positions if p.desk == "crypto" and ("crypto", p.symbol) not in price_lookup]
+    zombie_korea = [sym for desk, sym in pos_pairs if desk == "korea" and ("korea", sym) not in price_lookup]
+    zombie_crypto = [sym for desk, sym in pos_pairs if desk == "crypto" and ("crypto", sym) not in price_lookup]
 
-    for pos in zombie_korea:
+    for sym in zombie_korea:
         try:
-            candles = get_naver_daily_prices(pos.symbol, count=2)
+            candles = get_naver_daily_prices(sym, count=2)
             if candles:
                 price = float(candles[-1].get("close") or 0)
                 if price > 0:
-                    price_lookup[("korea", pos.symbol)] = price
+                    price_lookup[("korea", sym)] = price
         except Exception:
             pass
 
     if zombie_crypto:
         try:
-            markets = ",".join(pos.symbol for pos in zombie_crypto)
-            resp = requests.get(UPBIT_TICKER_URL, params={"markets": markets}, timeout=8)
+            resp = requests.get(UPBIT_TICKER_URL, params={"markets": ",".join(zombie_crypto)}, timeout=8)
             resp.raise_for_status()
             for item in resp.json():
                 market = str(item.get("market") or "")
@@ -501,12 +501,19 @@ def _fetch_zombie_prices(open_positions: list, price_lookup: dict[tuple[str, str
 def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> None:
     init_db()
     price_lookup = _build_price_lookup(market_snapshot)
+
+    # Read (desk, symbol) pairs first, close session, THEN do HTTP calls outside any DB lock
+    with SessionLocal() as _rdb:
+        _pairs = [(p.desk, p.symbol) for p in _rdb.execute(
+            select(PaperPositionRecord).where(PaperPositionRecord.status == "open")
+        ).scalars().all()]
+
+    _fetch_zombie_prices(_pairs, price_lookup)
+
     with SessionLocal() as db:
         open_positions = db.execute(
             select(PaperPositionRecord).where(PaperPositionRecord.status == "open").order_by(PaperPositionRecord.id.asc())
         ).scalars().all()
-
-        _fetch_zombie_prices(open_positions, price_lookup)
 
         for position in open_positions:
             current_price = price_lookup.get((position.desk, position.symbol), position.current_price)
