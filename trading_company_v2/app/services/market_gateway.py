@@ -226,8 +226,27 @@ def _get_kosdaq_snapshot_from_naver_html(top_n: int) -> list[dict[str, Any]]:
     return candidates[:top_n]
 
 
+_PINNED_CRYPTO = ["KRW-DOGE", "KRW-XRP", "KRW-SOL", "KRW-BTC", "KRW-ETH"]
+
+
 def build_market_snapshot() -> MarketSnapshot:
-    crypto_leaders = get_top_krw_coins(top_n=8)
+    crypto_leaders = get_top_krw_coins(top_n=20)
+    # Ensure backtest-validated symbols are always present with a live price
+    leader_markets = {item["market"] for item in crypto_leaders}
+    missing = [m for m in _PINNED_CRYPTO if m not in leader_markets]
+    if missing:
+        try:
+            resp = requests.get(UPBIT_TICKER_URL, params={"markets": ",".join(missing)}, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            for item in resp.json():
+                market = str(item.get("market") or "")
+                price = float(item.get("trade_price") or 0)
+                change_rate = round(float(item.get("signed_change_rate") or 0) * 100, 2)
+                volume_24h = int(float(item.get("acc_trade_price_24h") or 0))
+                if market and price > 0:
+                    crypto_leaders.append({"market": market, "trade_price": price, "change_rate": change_rate, "volume_24h_krw": volume_24h})
+        except Exception:
+            pass
     stock_leaders = get_kosdaq_snapshot(top_n=30)
     us_leaders = get_us_core_snapshot()
     return MarketSnapshot(
