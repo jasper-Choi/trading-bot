@@ -31,6 +31,90 @@ def rsi(values: list[float], period: int = 14) -> float | None:
     return 100 - (100 / (1 + rs))
 
 
+def rsi_series(values: list[float], period: int = 14) -> list[float | None]:
+    """Return a simple rolling RSI series aligned with the input values."""
+    result: list[float | None] = [None] * len(values)
+    if len(values) < period + 1:
+        return result
+    for idx in range(period, len(values)):
+        window = values[idx - period: idx + 1]
+        result[idx] = rsi(window, period)
+    return result
+
+
+def summarize_rsi_momentum_overlay(
+    candles: list[dict[str, Any]],
+    period: int = 14,
+    lookback: int = 18,
+) -> dict[str, Any]:
+    """
+    RSI quality overlay for momentum breakouts.
+
+    Ross Cameron / Warrior-style usage treats RSI as confirmation and warning:
+    strong momentum is acceptable, but late overextension and bearish RSI
+    divergence are reasons to avoid chasing a breakout.
+    """
+    _empty: dict[str, Any] = {
+        "rsi_quality_ok": True,
+        "rsi_reset_confirmed": False,
+        "rsi_bearish_divergence": False,
+        "rsi_extreme": False,
+        "rsi_score_adjustment": 0.0,
+        "rsi_overlay_reasons": ["not enough candles for RSI overlay"],
+    }
+    if len(candles) < period + 6:
+        return _empty
+
+    closes = [float(item["close"]) for item in candles]
+    series = rsi_series(closes, period)
+    last_rsi = series[-1]
+    if last_rsi is None:
+        return _empty
+
+    recent_rs = [float(v) for v in series[-lookback:] if v is not None]
+    recent_closes = closes[-lookback:]
+    if len(recent_rs) < 6 or len(recent_closes) < 6:
+        return _empty
+
+    rsi_reset_confirmed = min(recent_rs[:-1]) <= 52.0 and last_rsi >= 55.0
+    rsi_extreme = last_rsi >= 82.0 or last_rsi <= 25.0
+
+    compare_closes = closes[-(lookback + 1):-1]
+    compare_rs = series[-(lookback + 1):-1]
+    bearish_divergence = False
+    if compare_closes and any(v is not None for v in compare_rs):
+        prev_high_idx = max(range(len(compare_closes)), key=lambda idx: compare_closes[idx])
+        prev_high = compare_closes[prev_high_idx]
+        prev_high_rsi = compare_rs[prev_high_idx]
+        if prev_high_rsi is not None:
+            price_made_high = closes[-1] >= prev_high * 0.998
+            rsi_lagged = last_rsi <= float(prev_high_rsi) - 3.0
+            bearish_divergence = bool(price_made_high and rsi_lagged and last_rsi >= 58.0)
+
+    adjustment = 0.0
+    reasons: list[str] = []
+    if rsi_reset_confirmed:
+        adjustment += 0.04
+        reasons.append(f"rsi reset/reclaim confirmed ({last_rsi:.1f})")
+    if bearish_divergence:
+        adjustment -= 0.12
+        reasons.append(f"bearish RSI divergence warning ({last_rsi:.1f})")
+    if rsi_extreme:
+        adjustment -= 0.07
+        reasons.append(f"RSI extreme zone ({last_rsi:.1f})")
+    if not reasons:
+        reasons.append(f"rsi quality neutral ({last_rsi:.1f})")
+
+    return {
+        "rsi_quality_ok": not bearish_divergence and not rsi_extreme,
+        "rsi_reset_confirmed": rsi_reset_confirmed,
+        "rsi_bearish_divergence": bearish_divergence,
+        "rsi_extreme": rsi_extreme,
+        "rsi_score_adjustment": round(adjustment, 3),
+        "rsi_overlay_reasons": reasons,
+    }
+
+
 # ─── ICT (Inner Circle Trader) Detection Functions ──────────────────────────
 
 def detect_fvg(candles: list[dict[str, Any]], lookback: int = 30) -> dict[str, Any]:
@@ -420,6 +504,8 @@ def summarize_breakout_signal(
     # 3. RSI in momentum zone
     last_rsi = rsi(closes, 14)
     rsi_in_zone = last_rsi is not None and rsi_min <= last_rsi <= rsi_max
+    rsi_overlay = summarize_rsi_momentum_overlay(candles)
+    rsi_quality_ok = bool(rsi_overlay.get("rsi_quality_ok", True))
 
     # 4. Price above EMA(breakout_period)
     ema_vals = ema(closes, breakout_period)
@@ -429,7 +515,7 @@ def summarize_breakout_signal(
     all_confirmed = confirmed_count == 4
     partial_confirmed = confirmed_count >= 3
 
-    if all_confirmed:
+    if all_confirmed and rsi_quality_ok:
         breakout_score = 0.90
     elif partial_confirmed:
         breakout_score = 0.70
@@ -439,6 +525,8 @@ def summarize_breakout_signal(
         breakout_score = 0.20
     else:
         breakout_score = 0.0
+    breakout_score += float(rsi_overlay.get("rsi_score_adjustment", 0.0) or 0.0)
+    breakout_score = max(0.0, min(0.95, breakout_score))
 
     reasons: list[str] = []
     if breakout:
@@ -457,15 +545,20 @@ def summarize_breakout_signal(
         reasons.append(f"price above EMA{breakout_period}")
     else:
         reasons.append(f"price below EMA{breakout_period}")
+    reasons.extend(list(rsi_overlay.get("rsi_overlay_reasons", []))[:2])
 
     return {
         "breakout": breakout,
         "vol_surge": vol_surge,
         "vol_ratio": vol_ratio,
         "rsi_in_zone": rsi_in_zone,
+        "rsi_quality_ok": rsi_quality_ok,
+        "rsi_reset_confirmed": bool(rsi_overlay.get("rsi_reset_confirmed", False)),
+        "rsi_bearish_divergence": bool(rsi_overlay.get("rsi_bearish_divergence", False)),
+        "rsi_extreme": bool(rsi_overlay.get("rsi_extreme", False)),
         "above_ema20": above_ema20,
-        "all_confirmed": all_confirmed,
-        "partial_confirmed": partial_confirmed,
+        "all_confirmed": all_confirmed and rsi_quality_ok,
+        "partial_confirmed": partial_confirmed and rsi_quality_ok,
         "confirmed_count": confirmed_count,
         "breakout_score": round(breakout_score, 2),
         "period_high": round(period_high, 6),
@@ -498,6 +591,9 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         if 45 <= last_rsi <= 68:
             score += 0.1
             reasons.append(f"rsi balanced at {last_rsi:.1f}")
+        elif 68 < last_rsi <= 78:
+            score += 0.04
+            reasons.append(f"rsi momentum at {last_rsi:.1f}")
         elif last_rsi < 35:
             reasons.append(f"rsi weak at {last_rsi:.1f}")
         else:
@@ -532,10 +628,20 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     bk = summarize_breakout_signal(candles, breakout_period=15, vol_surge_mult=2.0,
                                    rsi_min=45.0, rsi_max=78.0)
     bk_count = int(bk.get("confirmed_count", 0) or 0)
-    if bk_count == 4:
+    rsi_quality_ok = bool(bk.get("rsi_quality_ok", True))
+    if not rsi_quality_ok:
+        score -= 0.12
+        if bk.get("rsi_bearish_divergence"):
+            reasons.append("RSI divergence blocks late breakout chase")
+        if bk.get("rsi_extreme"):
+            reasons.append("RSI extreme blocks late breakout chase")
+    elif bk.get("rsi_reset_confirmed"):
+        score += 0.04
+        reasons.append("RSI reset supports momentum continuation")
+    if bk_count == 4 and rsi_quality_ok:
         score += 0.15
         reasons.append(f"breakout FULL confirmed vol {bk.get('vol_ratio', 0):.1f}x")
-    elif bk_count == 3:
+    elif bk_count == 3 and rsi_quality_ok:
         score += 0.08
         reasons.append(f"breakout partial ({bk_count}/4) vol {bk.get('vol_ratio', 0):.1f}x")
     elif bk_count == 2:
@@ -569,6 +675,10 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "breakout_count": bk_count,
         "vol_ratio": float(bk.get("vol_ratio", 0.0) or 0.0),
         "breakout_score": float(bk.get("breakout_score", 0.0) or 0.0),
+        "rsi_quality_ok": rsi_quality_ok,
+        "rsi_reset_confirmed": bool(bk.get("rsi_reset_confirmed", False)),
+        "rsi_bearish_divergence": bool(bk.get("rsi_bearish_divergence", False)),
+        "rsi_extreme": bool(bk.get("rsi_extreme", False)),
         "ict_score": float(ict.get("ict_score", 0.0) or 0.0),
         "kill_zone_active": bool(ict.get("kill_zone_active")),
         "kill_zone_name": ict.get("kill_zone_name"),

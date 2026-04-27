@@ -260,6 +260,10 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
                         "breakout_count": int(mdata.get("breakout_count", 0) or 0),
                         "vol_ratio": float(mdata.get("vol_ratio", 0.0) or 0.0),
                         "breakout_confirmed": bool(mdata.get("breakout_confirmed", False)),
+                        "rsi_quality_ok": bool(mdata.get("rsi_quality_ok", True)),
+                        "rsi_reset_confirmed": bool(mdata.get("rsi_reset_confirmed", False)),
+                        "rsi_bearish_divergence": bool(mdata.get("rsi_bearish_divergence", False)),
+                        "rsi_extreme": bool(mdata.get("rsi_extreme", False)),
                         "is_primary": symbol == lead_market,
                     }
                 )

@@ -16,6 +16,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     candidate_symbols = [str(item).strip() for item in (payload.get("candidate_symbols", []) or []) if str(item).strip()]
     lead_weight = float(backtest_weights.get(lead_market, 0.0) or 0.0)
     weight_support = lead_weight >= 0.28
+    rsi_quality_ok = bool(payload.get("rsi_quality_ok", True))
+    rsi_bearish_divergence = bool(payload.get("rsi_bearish_divergence", False))
+    rsi_extreme = bool(payload.get("rsi_extreme", False))
 
     if regime == "STRESSED":
         return {
@@ -26,7 +29,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + ["Stress regime blocks aggressive crypto entries."],
         }
-    if recent_change >= 3.4 or burst_change >= 3.8 or ema_gap >= 2.8 or (rsi_value is not None and float(rsi_value) >= 74.0):
+    if recent_change >= 3.4 or burst_change >= 3.8 or ema_gap >= 2.8 or (rsi_value is not None and float(rsi_value) >= 82.0):
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -34,6 +37,16 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% / ema gap {ema_gap:.2f}% / rsi {rsi_value}"],
+        }
+    if not rsi_quality_ok:
+        reason = "bearish RSI divergence" if rsi_bearish_divergence else "RSI extreme zone" if rsi_extreme else "RSI quality failed"
+        return {
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": f"{lead_market or 'KRW-BTC'} RSI quality filter blocked late chase.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"{reason}; wait for RSI reset before new entry."],
         }
     if recent_change <= -2.8 or burst_change <= -3.2:
         return {
