@@ -442,12 +442,30 @@ def _build_market_charts_payload(state: CompanyState) -> dict:
             "volume": volume,
         }
 
+    from concurrent.futures import ThreadPoolExecutor
+
     crypto_symbol = str(state.strategy_book.get("crypto_plan", {}).get("symbol") or "KRW-BTC")
     korea_symbol = str(state.strategy_book.get("korea_plan", {}).get("symbol") or "")
     us_symbol = str(state.strategy_book.get("us_plan", {}).get("symbol") or "")
-    crypto_candles = get_upbit_15m_candles(crypto_symbol, count=24)
-    stock_candles = get_naver_daily_prices(korea_symbol, count=20) if korea_symbol else []
-    us_candles = get_us_daily_prices(us_symbol, count=30) if us_symbol else []
+
+    with ThreadPoolExecutor(max_workers=3) as _ex:
+        _fc = _ex.submit(get_upbit_15m_candles, crypto_symbol, 24)
+        _fk = _ex.submit(get_naver_daily_prices, korea_symbol, 20) if korea_symbol else None
+        _fu = _ex.submit(get_us_daily_prices, us_symbol, 30) if us_symbol else None
+
+    try:
+        crypto_candles = _fc.result(timeout=10)
+    except Exception:
+        crypto_candles = []
+    try:
+        stock_candles = _fk.result(timeout=10) if _fk else []
+    except Exception:
+        stock_candles = []
+    try:
+        us_candles = _fu.result(timeout=10) if _fu else []
+    except Exception:
+        us_candles = []
+
     return {
         "crypto": {"symbol": crypto_symbol, "candles": crypto_candles, "summary": summarize(crypto_candles)},
         "korea": {"symbol": korea_symbol, "candles": stock_candles, "summary": summarize(stock_candles)},
