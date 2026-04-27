@@ -1,7 +1,19 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-04-24
+Last updated: 2026-04-27
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Codex Notes - 2026-04-27
+
+- Project name/direction: "코인, 한국 주식 수익 극대화 프로젝트"; keep aligned with profit-maximizing, short-swing, volatility-event strategy.
+- Latest pushed commit: `5509394 feat: add RSI quality overlay to crypto breakouts`.
+- Deployed on Oracle VM and restarted `trading-loop` / `trading-dashboard`; both services were active after deploy.
+- Added Ross Cameron / Warrior-style RSI usage as a crypto breakout quality overlay, not a standalone buy signal:
+  - RSI reset/reclaim adds score for continuation after cooling.
+  - Bearish RSI divergence blocks late breakout chasing.
+  - RSI extreme zone blocks overheated entries.
+  - Crypto overheat block was relaxed from RSI >= 74 to RSI >= 82, while divergence/extreme quality filter now handles late-chase risk.
+- A `gross exposure cap breached (1.30x)` dashboard message means total open notional exposure is about 1.30x account capital and new entries are blocked by the gross exposure gate. On the Oracle check immediately after this update, current state showed `allow_new_entries=True`, `open_positions=0`, and no current gross exposure value, so the warning was not active at that moment.
 
 ## 1. Workspace
 
