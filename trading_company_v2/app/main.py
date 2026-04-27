@@ -1605,6 +1605,19 @@ def live_execution_health() -> dict:
 def broker_live_health() -> dict:
     state = load_company_state()
     execution_summary = _build_execution_summary(state)
+    configured_mode = normalize_execution_mode(settings.execution_mode)
+
+    # In paper mode skip all live broker API calls entirely
+    if configured_mode == "paper":
+        return {
+            "updated_at": state.updated_at,
+            "execution_mode": configured_mode,
+            "execution_summary": execution_summary,
+            "upbit": {"enabled": False, "configured": bool(settings.upbit_access_key and settings.upbit_secret_key), "balances_ok": False, "note": "paper_mode"},
+            "kis": {"enabled": False, "configured": bool(settings.kis_app_key and settings.kis_app_secret), "balances_ok": False, "note": "paper_mode"},
+            "latest_live_orders": {"upbit_live": None, "kis_live": None},
+        }
+
     upbit_latest = _latest_live_order_for_mode(state, "upbit_live")
     kis_latest = _latest_live_order_for_mode(state, "kis_live")
 
