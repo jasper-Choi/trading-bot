@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -191,6 +191,20 @@ def _today_local_date() -> str:
     return datetime.now(_local_timezone()).date().isoformat()
 
 
+def _local_day_utc_bounds_iso(day: str) -> tuple[str, str]:
+    tz = _local_timezone()
+    local_start = datetime.combine(datetime.fromisoformat(day).date(), time.min)
+    if hasattr(tz, "localize"):
+        local_start = tz.localize(local_start)
+    else:
+        local_start = local_start.replace(tzinfo=tz)
+    local_end = local_start + timedelta(days=1)
+    return (
+        local_start.astimezone(timezone.utc).isoformat(),
+        local_end.astimezone(timezone.utc).isoformat(),
+    )
+
+
 def _extract_order_meta(action: str, rationale: list) -> dict:
     meta = rationale[0] if rationale and isinstance(rationale[0], dict) else {}
     normalized = {
@@ -265,6 +279,10 @@ def _ensure_schema() -> None:
         with engine.begin() as connection:
             for ddl in missing_live:
                 connection.execute(text(ddl))
+    with engine.begin() as connection:
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_orders_created_at ON paper_orders(created_at)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_cycle_journal_run_at ON cycle_journal(run_at)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_positions_status ON paper_positions(status)"))
 
 
 def _build_desk_stats(positions: list[PaperPositionRecord]) -> dict[str, dict]:
@@ -668,13 +686,22 @@ def load_closed_positions(limit: int = 10) -> list[dict]:
 def load_daily_summary() -> dict:
     init_db()
     today = _today_local_date()
+    start_iso, end_iso = _local_day_utc_bounds_iso(today)
     try:
         with SessionLocal() as db:
-            orders = db.execute(select(PaperOrderRecord)).scalars().all()
-            journal = db.execute(select(CycleJournalRecord)).scalars().all()
+            orders = db.execute(
+                select(PaperOrderRecord).where(
+                    PaperOrderRecord.created_at >= start_iso,
+                    PaperOrderRecord.created_at < end_iso,
+                )
+            ).scalars().all()
+            journal = db.execute(
+                select(CycleJournalRecord).where(
+                    CycleJournalRecord.run_at >= start_iso,
+                    CycleJournalRecord.run_at < end_iso,
+                )
+            ).scalars().all()
             positions = db.execute(select(PaperPositionRecord)).scalars().all()
-            orders = [row for row in orders if _local_date_from_iso(row.created_at) == today]
-            journal = [row for row in journal if _local_date_from_iso(row.run_at) == today]
             opened_today = [row for row in positions if _local_date_from_iso(row.opened_at) == today]
             closed_today = [row for row in positions if row.closed_at and _local_date_from_iso(row.closed_at) == today]
             open_positions = [row for row in positions if row.status == "open"]
