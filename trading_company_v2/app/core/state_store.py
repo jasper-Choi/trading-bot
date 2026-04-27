@@ -376,31 +376,39 @@ def rebuild_db() -> None:
 def load_company_state() -> CompanyState:
     init_db()
     try:
+        # Read StateRecord and extract all scalar data FIRST, then close session
+        # before calling nested load_* functions. Prevents 6 concurrent sessions
+        # from stacking up inside the same with-block (Python evaluates all
+        # constructor args before the with-block exits).
         with SessionLocal() as db:
             rec = db.get(StateRecord, "primary")
             if rec is None:
                 return CompanyState()
-            return CompanyState(
-                stance=rec.stance,
-                regime=rec.regime,
-                risk_budget=rec.risk_budget,
-                allow_new_entries=rec.allow_new_entries,
-                execution_mode=rec.execution_mode,
-                notes=rec.notes or [],
-                trader_principles=rec.trader_principles or [],
-                latest_signals=rec.latest_signals or [],
-                market_snapshot=rec.market_snapshot or {},
-                session_state=rec.session_state or {},
-                desk_views=rec.desk_views or {},
-                strategy_book=rec.strategy_book or {},
-                daily_summary=load_daily_summary(),
-                performance_stats=load_performance_quick_stats(),
-                execution_log=load_recent_execution_log(limit=10),
-                open_positions=[p.model_dump() for p in load_open_positions()],
-                recent_journal=load_recent_journal(limit=8),
-                agent_runs=[AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
-                updated_at=rec.updated_at or utcnow_iso(),
-            )
+            _rec = {
+                "stance": rec.stance,
+                "regime": rec.regime,
+                "risk_budget": rec.risk_budget,
+                "allow_new_entries": rec.allow_new_entries,
+                "execution_mode": rec.execution_mode,
+                "notes": list(rec.notes or []),
+                "trader_principles": list(rec.trader_principles or []),
+                "latest_signals": list(rec.latest_signals or []),
+                "market_snapshot": dict(rec.market_snapshot or {}),
+                "session_state": dict(rec.session_state or {}),
+                "desk_views": dict(rec.desk_views or {}),
+                "strategy_book": dict(rec.strategy_book or {}),
+                "agent_runs": [AgentSnapshot.model_validate(item) for item in (rec.agent_runs or [])],
+                "updated_at": rec.updated_at or utcnow_iso(),
+            }
+        # Session is now closed — nested sessions open one at a time
+        return CompanyState(
+            **_rec,
+            daily_summary=load_daily_summary(),
+            performance_stats=load_performance_quick_stats(),
+            execution_log=load_recent_execution_log(limit=10),
+            open_positions=[p.model_dump() for p in load_open_positions()],
+            recent_journal=load_recent_journal(limit=8),
+        )
     except OperationalError:
         rebuild_db()
         return CompanyState()
