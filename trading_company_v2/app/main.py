@@ -1267,7 +1267,6 @@ def state() -> dict:
 @app.get("/dashboard-data")
 def dashboard_data() -> dict:
     state = load_company_state()
-    broker_health = broker_live_health()
     return {
         "company_name": settings.company_name,
         "operator_name": settings.operator_name,
@@ -1275,9 +1274,9 @@ def dashboard_data() -> dict:
         "deployment_profile": _deployment_profile(state),
         "state": state.model_dump(),
         "dashboard": _build_dashboard_payload(state),
-        "broker_live_health": broker_health,
-        "live_readiness_checklist": live_readiness_checklist(_broker_health=broker_health),
-        "upbit_live_pilot": upbit_live_pilot(_broker_health=broker_health),
+        "broker_live_health": broker_live_health(),
+        "live_readiness_checklist": live_readiness_checklist(),
+        "upbit_live_pilot": upbit_live_pilot(),
     }
 
 
@@ -1683,10 +1682,10 @@ def broker_live_health() -> dict:
 
 
 @app.get("/diagnostics/live-readiness-checklist")
-def live_readiness_checklist(_broker_health: dict | None = None) -> dict:
+def live_readiness_checklist() -> dict:
     state = load_company_state()
     execution_summary = _build_execution_summary(state)
-    broker_health = _broker_health if _broker_health is not None else broker_live_health()
+    broker_health = broker_live_health()
     checklist: list[dict] = []
 
     checklist.append(
@@ -1836,10 +1835,10 @@ def live_readiness_checklist(_broker_health: dict | None = None) -> dict:
 
 
 @app.get("/diagnostics/upbit-live-pilot")
-def upbit_live_pilot(_broker_health: dict | None = None, _readiness: dict | None = None) -> dict:
+def upbit_live_pilot() -> dict:
     state = load_company_state()
-    broker_health = _broker_health if _broker_health is not None else broker_live_health()
-    readiness = _readiness if _readiness is not None else live_readiness_checklist(_broker_health=broker_health)
+    broker_health = broker_live_health()
+    readiness = live_readiness_checklist()
     upbit = broker_health.get("upbit", {}) or {}
     execution_summary = broker_health.get("execution_summary", {}) or {}
     configured_mode = normalize_execution_mode(settings.execution_mode)
