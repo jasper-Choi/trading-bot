@@ -228,11 +228,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and micro_move_3 >= -1.5
         and orderbook_bid_ask >= 1.0
     )
-    # discovery_entry_ok: removed research_support gate — backtest history shouldn't block fresh opportunities
+    # discovery_entry_ok: removed research_support gate — backtest history shouldn't block fresh opportunities.
+    # 2026-04-29: signal 0.52 → 0.56, micro 0.44 → 0.46, ob 0.98 → 1.0 after data showed
+    # all selective_probe entries at 0.48~0.55 hit -0.7~-0.9% within minutes (failed_ignition).
     discovery_entry_ok = (
-        signal_score >= 0.52
-        and micro_score >= 0.44
-        and orderbook_bid_ask >= 0.98
+        signal_score >= 0.56
+        and micro_score >= 0.46
+        and orderbook_bid_ask >= 1.0
         and not late_chase_risk
         and not hard_overheat
     )
@@ -295,7 +297,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             ],
         }
 
-    if stream_entry_ok and stance != "DEFENSE" and signal_score >= 0.52:
+    if stream_entry_ok and stance != "DEFENSE" and signal_score >= 0.58:
         return {
             "action": "selective_probe",
             "size": "0.48x",
@@ -350,7 +352,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [ignition_note, f"signal {signal_score:.2f} / micro {micro_score:.2f} / stream {stream_score:.2f} ({stream_move_15:.2f}%/15s) / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
         }
     # 신호 점수만 충분하면 선택적 진입 (research_support 게이트 제거 — 새로운 모멘텀 코인도 포착)
-    if bias == "offense" and signal_score >= max(offense_threshold - 0.06, 0.48) and stance != "DEFENSE":
+    # 2026-04-29: threshold 0.48 → 0.54 — selective_probe entries below 0.55 dominated failed_ignition list.
+    if bias == "offense" and signal_score >= max(offense_threshold - 0.04, 0.54) and stance != "DEFENSE":
         return {
             "action": "selective_probe",
             "size": "0.55x" if discovery_support and not validated_support else "0.70x",
@@ -360,7 +363,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [ignition_note, f"offense bias / signal {signal_score:.2f} / breakout {breakout_count}/4 / weight {lead_weight:.2f}", support_note],
         }
 
-    if micro_entry_ok and stance != "DEFENSE" and signal_score >= 0.48:
+    # micro_entry_ok 단독 진입: signal_score >= 0.48 → 0.55 (failed_ignition 데이터 기반 상향)
+    if micro_entry_ok and stance != "DEFENSE" and signal_score >= 0.55:
         return {
             "action": "selective_probe",
             "size": "0.45x" if discovery_support and not validated_support else "0.55x",
@@ -398,7 +402,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
 
     # balanced 바이어스: research_support 게이트 제거 — 신호가 있으면 진입
-    pilot_probe_threshold = 0.48 if recent_change >= -0.3 else 0.52
+    # 2026-04-29: threshold 0.48/0.52 → 0.54/0.58 (failed_ignition 패턴 차단)
+    pilot_probe_threshold = 0.54 if recent_change >= -0.3 else 0.58
     if bias == "balanced" and signal_score >= pilot_probe_threshold and stance != "DEFENSE" and ema_gap <= 5.0 and recent_change > -1.5:
         return {
             "action": "probe_longs",

@@ -598,11 +598,25 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             # stale_floor:   exit near max_cycles if barely profitable
             early_failure_pct = round(stop_pct * 0.7, 2)   # 70% of full stop (e.g. -1.4% at -2% stop)
             stale_floor_pct = round(max(target_pct * 0.15, 0.20), 2)   # 15% of target (e.g. +0.60% at +4% target)
-            # fast_fail_cycle: minimum cycles before early_failure triggers
-            # crypto trend ignition: fail fast, protect winners with trailing
-            # korea/us intraday: shorter session so smaller window
+            # Time-based fast_fail (cycle-length agnostic). With fast cycle (8s) + rapid guard,
+            # cycle counts are no longer a reliable proxy for elapsed time. Use opened_at directly.
+            minutes_open = 0.0
+            try:
+                opened_dt = datetime.fromisoformat(str(position.opened_at).replace("Z", "+00:00"))
+                if opened_dt.tzinfo is None:
+                    opened_dt = opened_dt.replace(tzinfo=timezone.utc)
+                minutes_open = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
+            except (ValueError, TypeError):
+                minutes_open = float(position.cycles_open) * 0.75  # fallback ~45s/cycle assumption
             if position.desk == "crypto":
-                fast_fail_cycle = 12  # 24 min — avoid noise-based exits (was 8 = 16 min)
+                fast_fail_minutes = 24.0  # was 12 cycles × 2min — restore intended 24min hold-through window
+            elif position.desk == "korea":
+                fast_fail_minutes = 30.0 if position.action == "attack_opening_drive" else 45.0
+            else:
+                fast_fail_minutes = 30.0
+            # Cycles fallback for non-crypto desks (korea/us still use cycle-based check below)
+            if position.desk == "crypto":
+                fast_fail_cycle = 12
             elif position.desk == "korea":
                 fast_fail_cycle = 20 if position.action == "attack_opening_drive" else 30
             else:
@@ -623,7 +637,10 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     _close_position(position, "target_hit")
                 elif position.pnl_pct <= stop_pct:
                     _close_position(position, "stop_hit")
-                elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= -0.80:
+                # Time-based failed_ignition: only fire after the intended 24-min window AND
+                # only when the position never showed life (peak <= 0.10%). This protects
+                # against fast-cycle noise and ensures "failed ignition" really means failed.
+                elif minutes_open >= fast_fail_minutes and position.pnl_pct <= -0.80 and peak_pnl <= 0.10:
                     _close_position(position, "failed_ignition")
                 elif peak_pnl >= 1.0 and position.pnl_pct <= 0.1:
                     _close_position(position, "breakeven_trail")
