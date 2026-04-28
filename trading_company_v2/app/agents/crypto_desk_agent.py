@@ -20,6 +20,7 @@ from app.services.signal_engine import (
     summarize_crypto_signal,
     summarize_orderbook_pressure,
 )
+from app.services.upbit_stream_cache import summarize_stream_momentum
 
 _FETCH_WORKERS = 8
 _MAX_CYCLE_MARKETS = 18
@@ -107,7 +108,7 @@ class CryptoDeskAgent(BaseAgent):
             reverse=True,
         )[:_MAX_CYCLE_MARKETS]
 
-        def _fetch_market(market_weight: tuple[str, float]) -> tuple[str, float, dict, dict, dict, dict]:
+        def _fetch_market(market_weight: tuple[str, float]) -> tuple[str, float, dict, dict, dict, dict, dict]:
             market, weight = market_weight
             candles_15m = get_upbit_15m_candles(market, count=40)
             candles_1m = get_upbit_1m_candles(market, count=80)
@@ -115,6 +116,7 @@ class CryptoDeskAgent(BaseAgent):
             micro = summarize_crypto_micro_momentum_signal(candles_1m)
             orderbook = summarize_orderbook_pressure(get_upbit_orderbook(market))
             atr_sizing = summarize_atr_sizing(candles_15m)
+            stream = summarize_stream_momentum(market)
             corr = 1.0 if market == direction_symbol else _pearson_corr(_pct_returns(candles_15m), direction_returns)
             age_minutes = _latest_candle_age_minutes(candles_1m)
             freshness_factor, freshness_reason = _freshness_factor(age_minutes)
@@ -126,14 +128,14 @@ class CryptoDeskAgent(BaseAgent):
                     "freshness_reason": freshness_reason,
                 }
             )
-            return market, weight, signal, micro, orderbook, atr_sizing
+            return market, weight, signal, micro, orderbook, atr_sizing, stream
 
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
             fetch_results = list(executor.map(_fetch_market, all_markets))
 
         direction_score = float(direction_signal.get("score", 0.5) or 0.5)
         ranked_candidates: list[dict] = []
-        for market, weight, signal, micro, orderbook, atr_sizing in fetch_results:
+        for market, weight, signal, micro, orderbook, atr_sizing, stream in fetch_results:
             combined_score = round(
                 # Orderbook weight raised: it's the most real-time signal we have
                 (float(signal.get("score", 0.5) or 0.5) * 0.38)
@@ -151,6 +153,13 @@ class CryptoDeskAgent(BaseAgent):
             pullback_s = float(signal.get("pullback_score", 0.0) or 0.0)
             if bool(signal.get("pullback_detected", False)) and pullback_s >= 0.60:
                 combined_score = min(1.0, round(combined_score + pullback_s * 0.08, 3))
+            stream_score = float(stream.get("stream_score", 0.0) or 0.0)
+            if bool(stream.get("stream_fresh", False)):
+                combined_score = min(1.0, round(combined_score + (stream_score * 0.06), 3))
+            if bool(stream.get("stream_ignition", False)):
+                combined_score = min(1.0, round(combined_score + 0.04, 3))
+            if bool(stream.get("stream_reversal", False)):
+                combined_score = max(0.0, round(combined_score - 0.08, 3))
             ranked_candidates.append(
                 {
                     "market": market,
@@ -169,6 +178,17 @@ class CryptoDeskAgent(BaseAgent):
                     "micro_vwap_gap_pct": float(micro.get("micro_vwap_gap_pct", 0.0) or 0.0),
                     "micro_range_5_pct": float(micro.get("micro_range_5_pct", 0.0) or 0.0),
                     "micro_exhausted": bool(micro.get("micro_exhausted", False)),
+                    "stream_fresh": bool(stream.get("stream_fresh", False)),
+                    "stream_score": float(stream.get("stream_score", 0.0) or 0.0),
+                    "stream_ignition": bool(stream.get("stream_ignition", False)),
+                    "stream_reversal": bool(stream.get("stream_reversal", False)),
+                    "stream_age_seconds": float(stream.get("stream_age_seconds", 999.0) or 999.0),
+                    "stream_move_5s_pct": float(stream.get("stream_move_5s_pct", 0.0) or 0.0),
+                    "stream_move_15s_pct": float(stream.get("stream_move_15s_pct", 0.0) or 0.0),
+                    "stream_move_60s_pct": float(stream.get("stream_move_60s_pct", 0.0) or 0.0),
+                    "stream_ticks_15s": int(stream.get("stream_ticks_15s", 0) or 0),
+                    "stream_buy_ratio_15s": float(stream.get("stream_buy_ratio_15s", 0.0) or 0.0),
+                    "stream_reasons": list(stream.get("stream_reasons", [])),
                     "orderbook_score": float(orderbook.get("orderbook_score", 0.0) or 0.0),
                     "orderbook_ready": bool(orderbook.get("orderbook_ready", False)),
                     "orderbook_bid_ask_ratio": float(orderbook.get("orderbook_bid_ask_ratio", 0.0) or 0.0),
@@ -242,6 +262,9 @@ class CryptoDeskAgent(BaseAgent):
             "orderbook_score": 0.0,
             "orderbook_ready": False,
             "orderbook_reasons": [],
+            "stream_fresh": False,
+            "stream_score": 0.0,
+            "stream_reasons": [],
         }
 
         lead_market = str(leader.get("market", "") or next(iter(weights), "KRW-BTC"))
@@ -283,6 +306,17 @@ class CryptoDeskAgent(BaseAgent):
                 "micro_vwap_gap_pct": float(leader.get("micro_vwap_gap_pct", 0.0) or 0.0),
                 "micro_range_5_pct": float(leader.get("micro_range_5_pct", 0.0) or 0.0),
                 "micro_exhausted": bool(leader.get("micro_exhausted", False)),
+                "stream_fresh": bool(leader.get("stream_fresh", False)),
+                "stream_score": float(leader.get("stream_score", 0.0) or 0.0),
+                "stream_ignition": bool(leader.get("stream_ignition", False)),
+                "stream_reversal": bool(leader.get("stream_reversal", False)),
+                "stream_age_seconds": float(leader.get("stream_age_seconds", 999.0) or 999.0),
+                "stream_move_5s_pct": float(leader.get("stream_move_5s_pct", 0.0) or 0.0),
+                "stream_move_15s_pct": float(leader.get("stream_move_15s_pct", 0.0) or 0.0),
+                "stream_move_60s_pct": float(leader.get("stream_move_60s_pct", 0.0) or 0.0),
+                "stream_ticks_15s": int(leader.get("stream_ticks_15s", 0) or 0),
+                "stream_buy_ratio_15s": float(leader.get("stream_buy_ratio_15s", 0.0) or 0.0),
+                "stream_reasons": list(leader.get("stream_reasons", [])),
                 "orderbook_score": float(leader.get("orderbook_score", 0.0) or 0.0),
                 "orderbook_ready": bool(leader.get("orderbook_ready", False)),
                 "orderbook_bid_ask_ratio": float(leader.get("orderbook_bid_ask_ratio", 0.0) or 0.0),

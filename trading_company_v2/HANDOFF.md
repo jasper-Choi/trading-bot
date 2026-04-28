@@ -765,3 +765,21 @@ Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레�
   - reduce REST polling latency for price updates
   - make rapid guard and candidate discovery react closer to tick speed
   - prepare the next event-driven entry/exit service without discarding the current multi-agent strategy stack
+
+## 21. Sub-Minute Stream Ignition Patch (2026-04-28)
+
+- The Upbit ticker stream now keeps a short rolling tick history per market.
+- Added `summarize_stream_momentum()`:
+  - calculates 5s / 15s / 60s price movement
+  - tracks 15s tick activity
+  - estimates short-window buy pressure from `ask_bid`
+  - emits `stream_score`, `stream_ignition`, and `stream_reversal`
+- Crypto desk now includes stream momentum in candidate ranking and payload metadata.
+- Crypto recommendation now:
+  - boosts trend ignition when the live stream confirms acceleration
+  - allows controlled `tick ignition` selective probes when the 15s stream move is fresh and supported
+  - blocks new long entries on fresh stream reversal
+- Intent:
+  - detect fast entries before a full 1m candle closes
+  - keep late-chase protection intact
+  - move closer to arbitrage-style reaction speed while still using strategy confirmation and risk gates

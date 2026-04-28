@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import uuid
+from collections import deque
 from collections.abc import Callable
 from typing import Any
 
@@ -24,6 +25,7 @@ REQUEST_TIMEOUT = 8
 
 _lock = threading.Lock()
 _ticker_cache: dict[str, dict[str, Any]] = {}
+_trade_ticks: dict[str, deque[dict[str, Any]]] = {}
 _stream_thread: threading.Thread | None = None
 _stream_started_at = 0.0
 _stream_error = ""
@@ -69,11 +71,17 @@ def _normalize_ticker_message(payload: dict[str, Any]) -> dict[str, Any] | None:
         trade_ts = int(payload.get("trade_timestamp", payload.get("ttms")) or 0)
     except (TypeError, ValueError):
         trade_ts = 0
+    try:
+        trade_volume = float(payload.get("trade_volume", payload.get("tv")) or 0.0)
+    except (TypeError, ValueError):
+        trade_volume = 0.0
     return {
         "market": market,
         "trade_price": trade_price,
         "change_rate": round(change_rate, 4),
         "volume_24h_krw": int(volume_24h),
+        "trade_volume": trade_volume,
+        "ask_bid": str(payload.get("ask_bid", payload.get("ab")) or "").upper(),
         "trade_timestamp": trade_ts,
         "received_at": _now(),
         "source": "upbit_ws",
@@ -122,6 +130,18 @@ async def _stream_loop(markets_provider: Callable[[], list[str]]) -> None:
                         continue
                     with _lock:
                         _ticker_cache[row["market"]] = row
+                        ticks = _trade_ticks.setdefault(row["market"], deque(maxlen=240))
+                        ticks.append(
+                            {
+                                "received_at": row["received_at"],
+                                "price": row["trade_price"],
+                                "volume": row["trade_volume"],
+                                "ask_bid": row["ask_bid"],
+                            }
+                        )
+                        cutoff = row["received_at"] - 120.0
+                        while ticks and float(ticks[0].get("received_at") or 0.0) < cutoff:
+                            ticks.popleft()
         except Exception as exc:
             _stream_error = str(exc)[:240]
             await asyncio.sleep(min(backoff, 30.0))
@@ -176,6 +196,103 @@ def get_cached_ticker_prices(markets: list[str], max_age_seconds: float | None =
         return result
 
 
+def _price_at_or_before(ticks: list[dict[str, Any]], timestamp: float) -> float:
+    price = float(ticks[0].get("price") or 0.0) if ticks else 0.0
+    for tick in ticks:
+        tick_time = float(tick.get("received_at") or 0.0)
+        if tick_time > timestamp:
+            break
+        value = float(tick.get("price") or 0.0)
+        if value > 0:
+            price = value
+    return price
+
+
+def summarize_stream_momentum(market: str, max_age_seconds: float | None = None) -> dict[str, Any]:
+    """Summarize sub-minute momentum from the in-process Upbit ticker stream."""
+    symbol = str(market or "").strip()
+    if not symbol:
+        return {"stream_fresh": False, "stream_score": 0.0, "stream_reasons": ["no market"]}
+    max_age = float(settings.upbit_ws_fresh_seconds if max_age_seconds is None else max_age_seconds)
+    now = _now()
+    with _lock:
+        ticks = list(_trade_ticks.get(symbol) or [])
+    if len(ticks) < 2:
+        return {"stream_fresh": False, "stream_score": 0.0, "stream_reasons": ["not enough stream ticks"]}
+
+    latest = ticks[-1]
+    latest_time = float(latest.get("received_at") or 0.0)
+    latest_price = float(latest.get("price") or 0.0)
+    age = now - latest_time
+    if latest_price <= 0 or age > max_age:
+        return {
+            "stream_fresh": False,
+            "stream_score": 0.0,
+            "stream_age_seconds": round(age, 3),
+            "stream_reasons": [f"stream stale ({age:.2f}s)"],
+        }
+
+    def _move(seconds: float) -> float:
+        ref = _price_at_or_before(ticks, now - seconds)
+        return ((latest_price - ref) / ref * 100) if ref > 0 else 0.0
+
+    move_5 = _move(5.0)
+    move_15 = _move(15.0)
+    move_60 = _move(60.0)
+    ticks_15 = [tick for tick in ticks if float(tick.get("received_at") or 0.0) >= now - 15.0]
+    buy_ticks = [tick for tick in ticks_15 if str(tick.get("ask_bid") or "").upper() == "BID"]
+    buy_ratio = len(buy_ticks) / len(ticks_15) if ticks_15 else 0.0
+
+    score = 0.20
+    reasons: list[str] = []
+    if move_5 >= 0.12:
+        score += 0.18
+        reasons.append(f"5s stream lift {move_5:.2f}%")
+    elif move_5 <= -0.18:
+        score -= 0.16
+        reasons.append(f"5s stream fade {move_5:.2f}%")
+    if move_15 >= 0.30:
+        score += 0.24
+        reasons.append(f"15s stream ignition {move_15:.2f}%")
+    elif move_15 <= -0.35:
+        score -= 0.22
+        reasons.append(f"15s stream reversal {move_15:.2f}%")
+    if move_60 >= 0.75:
+        score += 0.18
+        reasons.append(f"60s stream trend {move_60:.2f}%")
+    elif move_60 <= -0.80:
+        score -= 0.18
+        reasons.append(f"60s stream downtrend {move_60:.2f}%")
+    if len(ticks_15) >= 3:
+        score += 0.08
+        reasons.append(f"stream activity {len(ticks_15)} ticks/15s")
+    if buy_ratio >= 0.58:
+        score += 0.12
+        reasons.append(f"stream buy pressure {buy_ratio:.0%}")
+    elif buy_ratio <= 0.35 and len(ticks_15) >= 3:
+        score -= 0.10
+        reasons.append(f"stream sell pressure {buy_ratio:.0%}")
+
+    score = round(max(0.0, min(1.0, score)), 3)
+    ignition = score >= 0.62 and move_15 >= 0.25 and move_60 >= -0.15 and len(ticks_15) >= 2
+    reversal = move_15 <= -0.35 or (move_5 <= -0.20 and buy_ratio <= 0.40)
+    if not reasons:
+        reasons.append("stream neutral")
+    return {
+        "stream_fresh": True,
+        "stream_score": score,
+        "stream_ignition": ignition,
+        "stream_reversal": reversal,
+        "stream_age_seconds": round(age, 3),
+        "stream_move_5s_pct": round(move_5, 3),
+        "stream_move_15s_pct": round(move_15, 3),
+        "stream_move_60s_pct": round(move_60, 3),
+        "stream_ticks_15s": len(ticks_15),
+        "stream_buy_ratio_15s": round(buy_ratio, 3),
+        "stream_reasons": reasons,
+    }
+
+
 def upbit_stream_status() -> dict[str, Any]:
     now = _now()
     with _lock:
@@ -184,10 +301,12 @@ def upbit_stream_status() -> dict[str, Any]:
             default=None,
         )
         cached_count = len(_ticker_cache)
+        tick_count = sum(len(ticks) for ticks in _trade_ticks.values())
     return {
         "enabled": bool(settings.upbit_ws_enabled),
         "running": bool(_stream_thread and _stream_thread.is_alive()),
         "cached_count": cached_count,
+        "tick_count": tick_count,
         "latest_age_seconds": latest_age,
         "started_at_epoch": _stream_started_at,
         "last_error": _stream_error,

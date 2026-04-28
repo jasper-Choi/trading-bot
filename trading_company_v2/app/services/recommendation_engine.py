@@ -37,6 +37,16 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     micro_vwap_gap = float(payload.get("micro_vwap_gap_pct", 0.0) or 0.0)
     micro_range_5 = float(payload.get("micro_range_5_pct", 0.0) or 0.0)
     micro_exhausted = bool(payload.get("micro_exhausted", False))
+    stream_fresh = bool(payload.get("stream_fresh", False))
+    stream_score = float(payload.get("stream_score", 0.0) or 0.0)
+    stream_ignition = bool(payload.get("stream_ignition", False))
+    stream_reversal = bool(payload.get("stream_reversal", False))
+    stream_age = float(payload.get("stream_age_seconds", 999.0) or 999.0)
+    stream_move_5 = float(payload.get("stream_move_5s_pct", 0.0) or 0.0)
+    stream_move_15 = float(payload.get("stream_move_15s_pct", 0.0) or 0.0)
+    stream_move_60 = float(payload.get("stream_move_60s_pct", 0.0) or 0.0)
+    stream_ticks_15 = int(payload.get("stream_ticks_15s", 0) or 0)
+    stream_buy_ratio = float(payload.get("stream_buy_ratio_15s", 0.0) or 0.0)
     orderbook_ready = bool(payload.get("orderbook_ready", False))
     orderbook_score = float(payload.get("orderbook_score", 0.0) or 0.0)
     orderbook_bid_ask = float(payload.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
@@ -48,20 +58,25 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     retrace_from_high_pct = float(payload.get("retrace_from_high_pct", 0.0) or 0.0)
     vol_contracted_on_pullback = bool(payload.get("vol_contracted_on_pullback", False))
     trend_ignition_score = round(
-        min(max(signal_score, 0.0), 1.0) * 0.34
-        + min(max(micro_score, 0.0), 1.0) * 0.28
-        + min(max(orderbook_score, 0.0), 1.0) * 0.16
-        + min(max(discovery_score, 0.0), 1.0) * 0.12
-        + min(max(vol_ratio / 3.0, 0.0), 1.0) * 0.10,
+        min(
+            1.0,
+            min(max(signal_score, 0.0), 1.0) * 0.32
+            + min(max(micro_score, 0.0), 1.0) * 0.25
+            + min(max(orderbook_score, 0.0), 1.0) * 0.15
+            + min(max(discovery_score, 0.0), 1.0) * 0.10
+            + min(max(vol_ratio / 3.0, 0.0), 1.0) * 0.10
+            + min(max(stream_score, 0.0), 1.0) * 0.08,
+        ),
         3,
     )
-    flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02
+    flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02 or stream_ignition
     # research_support removed from ignition_ready: historical backtest weight shouldn't block fresh movers.
     # CryptoDeskAgent already integrated all signals into combined_score — trust it here.
     ignition_ready = trend_ignition_score >= 0.50 and flow_support
     ignition_note = (
         f"trend_ignition={trend_ignition_score:.2f} / micro={micro_score:.2f} "
-        f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / breakout={breakout_count}/4"
+        f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / stream={stream_score:.2f} "
+        f"({stream_move_15:.2f}%/15s) / breakout={breakout_count}/4"
     )
     # Pullback entry: prior spike + EMA-zone retracement + volume contraction
     # Better entry price and tighter stop than chasing raw momentum
@@ -94,6 +109,18 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and micro_vwap_gap <= 2.2
         and micro_range_5 <= 3.2
         and not micro_exhausted
+    )
+    stream_entry_ok = (
+        stream_fresh
+        and stream_ignition
+        and stream_age <= 2.5
+        and stream_move_15 >= 0.25
+        and stream_move_60 >= -0.15
+        and stream_ticks_15 >= 2
+        and stream_buy_ratio >= 0.48
+        and orderbook_bid_ask >= 0.98
+        and not stream_reversal
+        and not late_chase_risk
     )
     strong_late_breakout_exception = (
         signal_score >= 0.76
@@ -131,6 +158,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"{reason}; wait for RSI reset before new entry.", ignition_note],
+        }
+    if stream_reversal and stream_fresh and stream_move_15 <= -0.45:
+        return {
+            "action": "capital_preservation",
+            "size": "0.00x",
+            "focus": f"{lead_market or 'KRW-BTC'} stream reversal detected. No fresh long entry.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"stream reversal: 5s {stream_move_5:.2f}% / 15s {stream_move_15:.2f}% / "
+                f"60s {stream_move_60:.2f}% / buy {stream_buy_ratio:.0%}",
+                ignition_note,
+            ],
         }
     if recent_change <= -2.8 or burst_change <= -3.2:
         return {
@@ -200,12 +240,12 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # don't re-run the same gates. Catch the moment immediately.
     direct_entry_ok = (
         signal_score >= 0.63
-        and (clean_momentum_window or strong_late_breakout_exception)
+        and (clean_momentum_window or strong_late_breakout_exception or stream_entry_ok)
         and orderbook_bid_ask >= 1.02
         and not rsi_bearish_divergence
     )
     # Volume gate: direct_entry_ok (high combined score) also bypasses
-    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and stance != "DEFENSE":
+    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and stance != "DEFENSE":
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -250,11 +290,28 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [
                 f"direct entry: combined={signal_score:.2f} micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x",
                 f"clean momentum window: move3={micro_move_3:.2f}% move10={micro_move_10:.2f}% vwap_gap={micro_vwap_gap:.2f}% range5={micro_range_5:.2f}%",
+                f"stream: score={stream_score:.2f} move15={stream_move_15:.2f}% ticks15={stream_ticks_15} buy={stream_buy_ratio:.0%}",
                 ignition_note, support_note,
             ],
         }
 
-    if ignition_ready and stance != "DEFENSE" and (micro_entry_ok or breakout_count >= 2 or trend_ignition_score >= 0.60):
+    if stream_entry_ok and stance != "DEFENSE" and signal_score >= 0.52:
+        return {
+            "action": "selective_probe",
+            "size": "0.48x",
+            "focus": f"{lead_market or 'KRW-BTC'} tick ignition entry from Upbit stream.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"stream ignition: score={stream_score:.2f} age={stream_age:.2f}s "
+                f"move5={stream_move_5:.2f}% move15={stream_move_15:.2f}% move60={stream_move_60:.2f}% "
+                f"ticks15={stream_ticks_15} buy={stream_buy_ratio:.0%}",
+                ignition_note,
+                support_note,
+            ],
+        }
+
+    if ignition_ready and stance != "DEFENSE" and (micro_entry_ok or stream_entry_ok or breakout_count >= 2 or trend_ignition_score >= 0.60):
         entry_size = "0.88x" if trend_ignition_score >= 0.68 else "0.68x"
         if soft_overheat:
             entry_size = "0.42x"
@@ -280,7 +337,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # 단타 스윙: 3/4 이상이면 풀사이즈 진입, 임계값 대폭 완화
     # lead_weight threshold lowered to 0.08 to accommodate 9-coin neutral-weight universe (max ~0.14)
     offense_threshold = 0.58 if regime == "RANGING" else 0.55
-    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 5.0 and (breakout_partial or ict_entry_ok or micro_entry_ok or discovery_entry_ok or direct_entry_ok):
+    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 5.0 and (breakout_partial or ict_entry_ok or micro_entry_ok or stream_entry_ok or discovery_entry_ok or direct_entry_ok):
         entry_size = "0.85x" if discovery_support and not validated_support else "1.0x"
         if stance == "OFFENSE":
             entry_size = "0.95x" if discovery_support and not validated_support else "1.15x"
@@ -290,7 +347,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} 단타 스윙 진입.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [ignition_note, f"signal {signal_score:.2f} / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
+            "notes": reasons + [ignition_note, f"signal {signal_score:.2f} / micro {micro_score:.2f} / stream {stream_score:.2f} ({stream_move_15:.2f}%/15s) / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
         }
     # 신호 점수만 충분하면 선택적 진입 (research_support 게이트 제거 — 새로운 모멘텀 코인도 포착)
     if bias == "offense" and signal_score >= max(offense_threshold - 0.06, 0.48) and stance != "DEFENSE":
