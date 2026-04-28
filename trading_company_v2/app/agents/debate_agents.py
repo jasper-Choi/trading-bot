@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any
 
 from app.agents.base import BaseAgent
+from app.config import settings
 from app.core.models import AgentResult, CompanyState
 
 _ENTRY_ACTIONS = {"probe_longs", "attack_opening_drive", "selective_probe"}
@@ -105,12 +106,15 @@ class BullCaseAgent(BaseAgent):
             return AgentResult(name=self.name, score=0.5, reason="not configured", payload={})
         desks = {}
         score_sum = 0.0
+        active_desks = set((self.state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
         for desk, scorer in (("crypto", self._score_crypto), ("korea", self._score_korea), ("us", self._score_us)):
+            if desk not in active_desks:
+                continue
             plan, view = _desk_inputs(self.state, desk)
             score, reasons = scorer(plan, view)
             desks[desk] = {"score": round(score, 3), "reasons": reasons, "action": plan.get("action")}
             score_sum += score
-        avg_score = round(score_sum / 3, 3)
+        avg_score = round(score_sum / max(len(desks), 1), 3)
         return AgentResult(
             name=self.name,
             score=avg_score,
@@ -131,11 +135,18 @@ class BearCaseAgent(BaseAgent):
         if self.state is None:
             return 0.0, []
         daily = self.state.daily_summary or {}
-        combined = _f(daily.get("realized_pnl_pct")) + _f(daily.get("unrealized_pnl_pct"))
-        gross = _f(daily.get("gross_open_notional_pct"))
-        wins = int(daily.get("cumulative_wins", daily.get("wins", 0)) or 0)
-        losses = int(daily.get("cumulative_losses", daily.get("losses", 0)) or 0)
-        win_rate = _f(daily.get("cumulative_win_rate", daily.get("win_rate", 0.0)))
+        active_desks = set((self.state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
+        desk_stats = daily.get("desk_stats", {}) or {}
+        combined = sum(
+            _f((desk_stats.get(desk, {}) or {}).get("realized_pnl_pct"))
+            + _f((desk_stats.get(desk, {}) or {}).get("unrealized_pnl_pct"))
+            for desk in active_desks
+        )
+        gross = sum(_f((desk_stats.get(desk, {}) or {}).get("open_notional_pct")) for desk in active_desks)
+        wins = sum(int((desk_stats.get(desk, {}) or {}).get("wins", 0) or 0) for desk in active_desks)
+        losses = sum(int((desk_stats.get(desk, {}) or {}).get("losses", 0) or 0) for desk in active_desks)
+        closed = wins + losses
+        win_rate = (wins / closed * 100.0) if closed else 0.0
         risk = 0.0
         reasons: list[str] = []
         if self.state.regime == "STRESSED":
@@ -147,10 +158,12 @@ class BearCaseAgent(BaseAgent):
         if combined < -0.75:
             risk += 0.16
             reasons.append(f"combined pnl pressure {combined:.2f}%")
-        if gross >= 1.05:
+        gross_block = 1.65 if active_desks == {"crypto"} else 1.05
+        gross_warn = 1.25 if active_desks == {"crypto"} else 0.85
+        if gross >= gross_block:
             risk += 0.20
             reasons.append(f"gross exposure {gross:.2f}x")
-        elif gross >= 0.85:
+        elif gross >= gross_warn:
             risk += 0.10
             reasons.append(f"gross exposure elevated {gross:.2f}x")
         if not self.state.allow_new_entries:
@@ -220,12 +233,15 @@ class BearCaseAgent(BaseAgent):
             return AgentResult(name=self.name, score=0.5, reason="not configured", payload={})
         desks = {}
         score_sum = 0.0
+        active_desks = set((self.state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
         for desk, scorer in (("crypto", self._score_crypto), ("korea", self._score_korea), ("us", self._score_us)):
+            if desk not in active_desks:
+                continue
             plan, view = _desk_inputs(self.state, desk)
             score, reasons = scorer(plan, view)
             desks[desk] = {"score": round(score, 3), "reasons": reasons[:4], "action": plan.get("action")}
             score_sum += score
-        avg_score = round(score_sum / 3, 3)
+        avg_score = round(score_sum / max(len(desks), 1), 3)
         return AgentResult(
             name=self.name,
             score=avg_score,
@@ -250,9 +266,12 @@ class PortfolioManagerAgent(BaseAgent):
         if self.state is None:
             return False
         daily = self.state.daily_summary or {}
-        wins = int(daily.get("cumulative_wins", daily.get("wins", 0)) or 0)
-        losses = int(daily.get("cumulative_losses", daily.get("losses", 0)) or 0)
-        win_rate = _f(daily.get("cumulative_win_rate", daily.get("win_rate", 0.0)))
+        active_desks = set((self.state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
+        desk_stats = daily.get("desk_stats", {}) or {}
+        wins = sum(int((desk_stats.get(desk, {}) or {}).get("wins", 0) or 0) for desk in active_desks)
+        losses = sum(int((desk_stats.get(desk, {}) or {}).get("losses", 0) or 0) for desk in active_desks)
+        closed = wins + losses
+        win_rate = (wins / closed * 100.0) if closed else 0.0
         return losses >= 3 and losses > wins and win_rate < 35.0
 
     def _adjust_plan(self, desk: str, plan: dict) -> tuple[dict, dict]:
@@ -325,7 +344,10 @@ class PortfolioManagerAgent(BaseAgent):
             return AgentResult(name=self.name, score=0.5, reason="not configured", payload={})
         adjusted_book = deepcopy(self.state.strategy_book or {})
         decisions = []
+        active_desks = set(adjusted_book.get("active_desks") or settings.active_desk_set)
         for desk in ("crypto", "korea", "us"):
+            if desk not in active_desks:
+                continue
             key = f"{desk}_plan"
             adjusted_book[key], decision = self._adjust_plan(desk, adjusted_book.get(key, {}) or {})
             decisions.append(decision)

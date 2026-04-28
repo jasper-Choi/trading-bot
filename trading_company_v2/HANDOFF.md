@@ -607,3 +607,20 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
   - increase trade opportunity without blind overtrading
   - preserve our bot strengths: live scanning, debate layer, Oracle uptime, dashboard visibility
   - reduce the current 0-win sample problem by taking reachable wins first, then compounding through position sizing
+
+## 15. Crypto-Only Trend Engine Pivot (2026-04-28)
+
+- Project direction changed to crypto-first validation:
+  - default `ACTIVE_DESKS=crypto`
+  - Korea/U.S. desks stay configured for later, but are excluded from execution and hidden from the main dashboard by default
+  - this prevents stock paper positions and stock desk logic from blocking crypto entries through gross exposure/risk gates
+- Crypto entry logic now prioritizes trend ignition:
+  - combines swing signal, 1m micro momentum, orderbook flow, full-universe discovery, and breakout volume
+  - RSI is treated as momentum context instead of an automatic sell/avoid signal
+  - hard overheat still blocks weak chases, but strong micro/orderbook ignition can still enter with controlled size
+- Crypto exits now use trend-following protection:
+  - initial stop tightened to `-1.2%`
+  - target raised to `+8%`
+  - failed ignitions can exit quickly after ~16 minutes
+  - profitable positions track `peak_pnl_pct` and close via `breakeven_trail` / `trend_trail` when momentum gives back
+- Risk/debate/execution gates now calculate loss pressure and exposure using active desks only, so disabled stock desks do not suppress crypto testing.

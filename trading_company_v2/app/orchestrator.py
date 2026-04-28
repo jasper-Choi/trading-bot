@@ -287,19 +287,34 @@ def _live_execution_guardrails(live_locks: list[dict]) -> dict[str, object]:
 
 class CompanyOrchestrator:
     def __init__(self):
+        active_desks = settings.active_desk_set
         self.analysis_agents = [
             MarketDataAgent(),
             MacroSentimentAgent(),
             TrendStructureAgent(),
             StrategyAllocatorAgent(),
             CryptoDeskAgent(),
-            KoreaStockDeskAgent(),
-            USStockDeskAgent(),
             CIOAgent(),
             RiskCommitteeAgent(),
         ]
+        if "korea" in active_desks:
+            self.analysis_agents.insert(5, KoreaStockDeskAgent())
+        if "us" in active_desks:
+            self.analysis_agents.insert(6 if "korea" in active_desks else 5, USStockDeskAgent())
         self.execution_agent = ExecutionAgent()
         self.ops_agent = OpsAgent()
+
+    @staticmethod
+    def _inactive_plan(desk: str) -> dict:
+        label = {"korea": "Korea stock", "us": "U.S. stock"}.get(desk, desk)
+        return {
+            "action": "stand_by",
+            "size": "0.00x",
+            "focus": f"{label} desk disabled while crypto trend engine is being validated.",
+            "symbol": "",
+            "candidate_symbols": [],
+            "notes": ["ACTIVE_DESKS=crypto; keep broker/settings ready but do not trade or display this desk."],
+        }
 
     @staticmethod
     def _determine_stance(macro_score: float, trend_score: float) -> str:
@@ -550,6 +565,7 @@ class CompanyOrchestrator:
     def run_cycle(self) -> dict:
         state = load_company_state()
         previous_state = state.model_dump()
+        active_desks = settings.active_desk_set
         results: list[AgentResult] = [agent.safe_run() for agent in self.analysis_agents]
 
         macro_result = next((r for r in results if r.name == "macro_sentiment_agent"), AgentResult(name="macro_sentiment_agent", reason="missing"))
@@ -581,8 +597,7 @@ class CompanyOrchestrator:
             f"regime={state.regime.lower()}",
             f"session_focus={strategy_allocator_result.payload.get('company_focus', 'unknown')}",
             f"crypto_desk={crypto_desk_result.payload.get('desk_bias', 'unknown')}",
-            f"korea_gap_candidates={stock_desk_result.payload.get('active_gap_count', 0)}",
-            f"us_leaders={us_desk_result.payload.get('active_us_count', 0)}",
+            f"active_desks={','.join(sorted(active_desks))}",
         ]
         state.market_snapshot = {
             "as_of": market_data_result.payload.get("as_of"),
@@ -594,25 +609,36 @@ class CompanyOrchestrator:
         state.session_state = strategy_allocator_result.payload.get("session", {})
         state.desk_views = {
             "crypto_desk": crypto_desk_result.payload,
-            "korea_stock_desk": stock_desk_result.payload,
-            "us_stock_desk": us_desk_result.payload,
+            "korea_stock_desk": stock_desk_result.payload if "korea" in active_desks else {"disabled": True},
+            "us_stock_desk": us_desk_result.payload if "us" in active_desks else {"disabled": True},
         }
-        state.strategy_book = {
-            "company_focus": strategy_allocator_result.payload.get("company_focus"),
-            "desk_priorities": strategy_allocator_result.payload.get("desk_priorities", []),
-            "crypto_plan": build_crypto_plan(state.stance, state.regime, crypto_desk_result.payload),
-            "korea_plan": build_korea_plan(
+        korea_plan = (
+            build_korea_plan(
                 state.stance,
                 state.regime,
                 stock_desk_result.payload,
                 strategy_allocator_result.payload.get("session", {}),
-            ),
-            "us_plan": build_us_plan(
+            )
+            if "korea" in active_desks
+            else self._inactive_plan("korea")
+        )
+        us_plan = (
+            build_us_plan(
                 state.stance,
                 state.regime,
                 us_desk_result.payload,
                 strategy_allocator_result.payload.get("session", {}),
-            ),
+            )
+            if "us" in active_desks
+            else self._inactive_plan("us")
+        )
+        state.strategy_book = {
+            "company_focus": strategy_allocator_result.payload.get("company_focus"),
+            "desk_priorities": strategy_allocator_result.payload.get("desk_priorities", []),
+            "active_desks": sorted(active_desks),
+            "crypto_plan": build_crypto_plan(state.stance, state.regime, crypto_desk_result.payload),
+            "korea_plan": korea_plan,
+            "us_plan": us_plan,
         }
         crypto_signal = float(crypto_desk_result.payload.get("signal_score", 0.0) or 0.0)
         crypto_recent = float(crypto_desk_result.payload.get("recent_change_pct", 0.0) or 0.0)
@@ -666,11 +692,13 @@ class CompanyOrchestrator:
             )
         results.extend([bull_result, bear_result, portfolio_result])
         company_focus = str(state.strategy_book.get("company_focus") or "Capital preservation and watchlist maintenance")
-        provisional_allow_new_entries = state.regime != "STRESSED" and (
-            float(state.daily_summary.get("realized_pnl_pct", 0.0) or 0.0)
-            + float(state.daily_summary.get("unrealized_pnl_pct", 0.0) or 0.0)
-            > -1.5
+        active_desk_stats = state.daily_summary.get("desk_stats", {}) or {}
+        active_combined_pnl = sum(
+            float((active_desk_stats.get(desk, {}) or {}).get("realized_pnl_pct", 0.0) or 0.0)
+            + float((active_desk_stats.get(desk, {}) or {}).get("unrealized_pnl_pct", 0.0) or 0.0)
+            for desk in active_desks
         )
+        provisional_allow_new_entries = state.regime != "STRESSED" and active_combined_pnl > -1.5
         live_locks = load_active_live_order_locks()
         live_guardrails = _live_execution_guardrails(live_locks)
         execution_risk_budget = state.risk_budget

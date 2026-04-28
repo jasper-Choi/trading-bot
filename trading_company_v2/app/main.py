@@ -160,6 +160,7 @@ def _build_equity_curve(state: CompanyState) -> list[dict]:
 
 
 def _build_desk_status(state: CompanyState) -> dict:
+    active_desks = set((state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
     crypto_plan = state.strategy_book.get("crypto_plan", {}) if state.strategy_book else {}
     korea_plan = state.strategy_book.get("korea_plan", {}) if state.strategy_book else {}
     us_plan = state.strategy_book.get("us_plan", {}) if state.strategy_book else {}
@@ -175,6 +176,7 @@ def _build_desk_status(state: CompanyState) -> dict:
     return {
         "crypto": {
             "title": "크립토 데스크",
+            "disabled": "crypto" not in active_desks,
             "bias": crypto_view.get("desk_bias", "n/a"),
             "action": crypto_plan.get("action", "n/a"),
             "focus": crypto_plan.get("focus", "크립토 플랜 없음"),
@@ -184,6 +186,7 @@ def _build_desk_status(state: CompanyState) -> dict:
         },
         "korea": {
             "title": "한국주식 데스크",
+            "disabled": "korea" not in active_desks,
             "bias": "active" if korea_view.get("active_gap_count", 0) else "watch",
             "action": korea_plan.get("action", "n/a"),
             "focus": korea_plan.get("focus", "주식 플랜 없음"),
@@ -198,6 +201,7 @@ def _build_desk_status(state: CompanyState) -> dict:
         },
         "us": {
             "title": "미국주식 데스크",
+            "disabled": "us" not in active_desks,
             "bias": us_view.get("desk_bias", "n/a"),
             "action": us_plan.get("action", "n/a"),
             "focus": us_plan.get("focus", "미국 플랜 없음"),
@@ -1097,9 +1101,10 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
     """Human-readable control-room summary for non-technical dashboard use."""
     daily = state.daily_summary or {}
     strategy_book = state.strategy_book or {}
+    active_desks = set(strategy_book.get("active_desks") or settings.active_desk_set)
     debate = (strategy_book.get("decision_debate", {}) or {}).get("portfolio_manager", {}) or {}
-    decisions = list(debate.get("decisions") or [])
-    open_positions = list(state.open_positions or [])
+    decisions = [item for item in list(debate.get("decisions") or []) if str(item.get("desk") or "") in active_desks]
+    open_positions = [item for item in list(state.open_positions or []) if str(item.get("desk") or "") in active_desks]
     live_rows = [item for item in (state.execution_log or []) if item.get("source") == "live"]
     pending_live = [
         item for item in live_rows
@@ -1115,7 +1120,7 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
     wins = int(daily.get("cumulative_wins", daily.get("wins", 0)) or 0)
     losses = int(daily.get("cumulative_losses", daily.get("losses", 0)) or 0)
     win_rate = float(daily.get("cumulative_win_rate", daily.get("win_rate", 0.0)) or 0.0)
-    gross = float(daily.get("gross_open_notional_pct", 0.0) or 0.0)
+    gross = round(sum(float(item.get("notional_pct", 0.0) or 0.0) for item in open_positions), 2)
 
     if pending_live:
         headline = f"{mode_label}: 브로커 주문 {len(pending_live)}건 처리 대기 중"
@@ -1148,6 +1153,8 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
     decision_map = {str(item.get("desk") or ""): item for item in decisions}
     desk_messages: list[dict] = []
     for desk in ("crypto", "korea", "us"):
+        if desk not in active_desks:
+            continue
         plan = plan_map.get(desk, {}) or {}
         decision = decision_map.get(desk, {}) or {}
         action = str(decision.get("action") or plan.get("action") or "stand_by")
@@ -1240,7 +1247,15 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
 
 
 def _build_dashboard_payload(state: CompanyState) -> dict:
-    closed_positions = load_closed_positions(limit=20)
+    active_desks = set((state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
+    closed_positions = [
+        item for item in load_closed_positions(limit=40)
+        if str(item.get("desk") or "") in active_desks
+    ][:20]
+    open_positions = [
+        item for item in (state.open_positions or [])
+        if str(item.get("desk") or "") in active_desks
+    ]
     equity_curve = _build_equity_curve(state)
     latest_equity = equity_curve[-1]["equity"] if equity_curve else 100.0
     return {
@@ -1253,7 +1268,7 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
         },
         "desk_status": _build_desk_status(state),
         "desk_drilldown": _build_desk_drilldown_payload(state, closed_positions),
-        "open_positions": state.open_positions,
+        "open_positions": open_positions,
         "closed_positions": closed_positions,
         "performance": _build_performance_payload(state, closed_positions),
         "capital": _build_capital_payload(state),
@@ -2824,7 +2839,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   function renderPnl(perf,cap){var rp=parseFloat(perf.realized_pnl_pct||0),up=parseFloat(perf.unrealized_pnl_pct||0),cp=parseFloat(cap.cumulative_realized_pnl_pct||0);var rc=document.getElementById('pnl-realized-card'),uc=document.getElementById('pnl-unrealized-card');document.getElementById('pnl-realized').textContent=fmtPct(rp);document.getElementById('pnl-realized').className='pnl-value '+(rp>0?'pos':rp<0?'neg':'neu');document.getElementById('pnl-realized-krw').textContent=fmtKrwFull(perf.realized_pnl_krw,true);rc.className='pnl-card'+(rp>0?' hl-pos':rp<0?' hl-neg':'');document.getElementById('pnl-unrealized').textContent=fmtPct(up);document.getElementById('pnl-unrealized').className='pnl-value '+(up>0?'pos':up<0?'neg':'neu');document.getElementById('pnl-unrealized-krw').textContent=fmtKrwFull(perf.unrealized_pnl_krw,true);uc.className='pnl-card'+(up>0?' hl-pos':up<0?' hl-neg':'');var wr=parseFloat(perf.cumulative_win_rate||perf.win_rate||0);document.getElementById('pnl-winrate').textContent=wr.toFixed(1)+'%';document.getElementById('pnl-winrate').className='pnl-value '+(wr>=55?'pos':wr<40?'neg':'neu');document.getElementById('pnl-trades').textContent=(perf.cumulative_wins||perf.wins||0)+'승 / '+(perf.cumulative_losses||perf.losses||0)+'패 (누적 '+fmtPct(cp)+')';document.getElementById('pnl-capital').textContent='₩'+(parseInt(cap.total_krw||0)).toLocaleString('ko-KR');document.getElementById('pnl-capital-base').textContent='복리자본 ₩'+(parseInt(cap.effective_capital_krw||cap.base_krw||0)).toLocaleString('ko-KR')+(cp!==0?' ('+fmtPct(cp)+')':'');}
   function renderStatusBar(state,readiness,blockSummary){var stance=String(state.stance||'--');var regime=String(state.regime||'--');var allow=!!((readiness.exposure||{}).allow_new_entries!=null?(readiness.exposure||{}).allow_new_entries:state.allow_new_entries);var overall=String(readiness.overall||'caution');var stanceCls=stance==='BULLISH'?'ok':stance==='DEFENSE'?'bad':'warn';var regimeCls=regime==='TRENDING'?'ok':regime==='STRESSED'?'bad':'warn';var bar=document.getElementById('status-bar');bar.innerHTML='<div class="s-pill '+stanceCls+'"><span class="lbl">스탠스</span>'+stance+'</div>'+'<div class="s-pill '+regimeCls+'"><span class="lbl">국면</span>'+regime+'</div>'+'<div class="s-pill '+(allow?'ok':'bad')+'"><span class="lbl">진입</span>'+(allow?'허용':'차단')+'</div>'+'<div class="s-pill '+(overall==='ready'?'ok':overall==='caution'?'warn':'bad')+'"><span class="lbl">준비도</span>'+overall.toUpperCase()+'</div>';}
   function renderSignal(lane,history){var ts=String((lane||{}).trigger_state||'waiting');var sig=parseFloat((lane||{}).signal_score||0);var trig=parseFloat((lane||{}).trigger_threshold||0.56);var dist=parseFloat((lane||{}).distance_to_trigger||0);var sym=String((lane||{}).symbol||'KRW-BTC');var act=String((lane||{}).action||'watchlist_only');var card=document.getElementById('signal-card');var badge=document.getElementById('signal-badge');card.className='signal-card '+(ts==='ready'?'ready':ts==='arming'?'arming':'');badge.className='signal-badge '+ts;badge.textContent=ts==='ready'?'진입 준비':ts==='arming'?'접근 중':'대기';document.getElementById('signal-sym').textContent=sym+' · '+actionKo(act);var pct=trig>0?Math.min(sig/trig*100,100):0;var fill=document.getElementById('gauge-fill');fill.style.width=pct.toFixed(1)+'%';fill.className='gauge-fill '+(ts==='ready'?'ready':ts==='arming'?'arming':'');document.getElementById('gauge-cur').textContent='현재 '+sig.toFixed(2);document.getElementById('gauge-trig').textContent='진입 '+trig.toFixed(2);document.getElementById('signal-meta').textContent=ts==='ready'?'진입 조건 충족 — 파일럿 주문 실행 중':ts==='arming'?'진입까지 거리 '+dist.toFixed(2)+' — 모니터링 강화':'진입까지 거리 '+dist.toFixed(2)+' (필요: '+trig.toFixed(2)+')';var chips=(history||[]).slice(-4).map(function(r){var rs=parseFloat(r.signal_score||0),rt=parseFloat(r.trigger_threshold||0);return '<span class="trend-chip">'+(r.time||'--:--')+' '+rs.toFixed(2)+'</span>';});document.getElementById('trend-mini').innerHTML=chips.join('');}
-  function renderDesks(desks){var map=[['crypto','dk-crypto'],['korea','dk-korea'],['us','dk-us']];var dg=document.getElementById('desk-grid');var cards=dg.querySelectorAll('.desk-card');map.forEach(function(m,i){var key=m[0],pfx=m[1],item=(desks||{})[key]||{};var cls=actionCls(item.action);cards[i].className='desk-card '+(cls==='watch'?'':''+cls);document.getElementById(pfx+'-act').textContent=actionKo(item.action);document.getElementById(pfx+'-act').className='desk-action '+cls;document.getElementById(pfx+'-focus').textContent=item.focus||'신호 없음';var sizeEl=document.getElementById(pfx+'-size');sizeEl.textContent=item.size||'0.00x';sizeEl.className='desk-size'+(item.size&&item.size!=='0.00x'?' active':'');var qfill=document.getElementById(pfx+'-qfill');if(qfill){var qs=parseFloat(item.quality_score||0),qt=parseFloat(item.quality_threshold||0.58);var qpct=qt>0?Math.min(qs/qt*100,100):0;qfill.style.width=qpct.toFixed(1)+'%';qfill.className='mini-gauge-fill'+(qpct>=100?' ready':qpct>=70?' arming':'');var qvalEl=document.getElementById(pfx+'-qval');var qthrEl=document.getElementById(pfx+'-qthr');if(qvalEl)qvalEl.textContent='품질 '+qs.toFixed(2);if(qthrEl)qthrEl.textContent='기준 '+qt.toFixed(2);}
+  function renderDesks(desks){var map=[['crypto','dk-crypto'],['korea','dk-korea'],['us','dk-us']];var dg=document.getElementById('desk-grid');var cards=dg.querySelectorAll('.desk-card');map.forEach(function(m,i){var key=m[0],pfx=m[1],item=(desks||{})[key]||{};if(cards[i])cards[i].style.display=item.disabled?'none':'';var cls=actionCls(item.action);cards[i].className='desk-card '+(cls==='watch'?'':''+cls);document.getElementById(pfx+'-act').textContent=actionKo(item.action);document.getElementById(pfx+'-act').className='desk-action '+cls;document.getElementById(pfx+'-focus').textContent=item.focus||'신호 없음';var sizeEl=document.getElementById(pfx+'-size');sizeEl.textContent=item.size||'0.00x';sizeEl.className='desk-size'+(item.size&&item.size!=='0.00x'?' active':'');var qfill=document.getElementById(pfx+'-qfill');if(qfill){var qs=parseFloat(item.quality_score||0),qt=parseFloat(item.quality_threshold||0.58);var qpct=qt>0?Math.min(qs/qt*100,100):0;qfill.style.width=qpct.toFixed(1)+'%';qfill.className='mini-gauge-fill'+(qpct>=100?' ready':qpct>=70?' arming':'');var qvalEl=document.getElementById(pfx+'-qval');var qthrEl=document.getElementById(pfx+'-qthr');if(qvalEl)qvalEl.textContent='품질 '+qs.toFixed(2);if(qthrEl)qthrEl.textContent='기준 '+qt.toFixed(2);}
       // Breakout badge for Korea / Crypto desks
       var bkEl=document.getElementById(pfx+'-bk');if(bkEl){var bkC=parseInt(item.breakout_confirmed_count||0),bkP=parseInt(item.breakout_partial_count||0);if(bkC>0){bkEl.textContent='BK '+bkC;bkEl.className='desk-bk-badge full';bkEl.style.display='inline-block';}else if(bkP>0){bkEl.textContent='BK ~'+bkP;bkEl.className='desk-bk-badge partial';bkEl.style.display='inline-block';}else{bkEl.style.display='none';}}
     });}

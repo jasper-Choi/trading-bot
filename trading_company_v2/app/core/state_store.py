@@ -77,6 +77,7 @@ class PaperPositionRecord(Base):
     current_price: Mapped[float] = mapped_column(Float, default=0.0)
     exit_price: Mapped[float] = mapped_column(Float, default=0.0)
     pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    peak_pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
     cycles_open: Mapped[int] = mapped_column(Integer, default=0)
     closed_reason: Mapped[str] = mapped_column(String(100), default="")
     focus: Mapped[str] = mapped_column(String(200), default="")
@@ -242,8 +243,8 @@ def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
     #   stock_backtest_v3 → +4% TP / -2.5% stop / ≤5 days (daily momentum breakout)
     # @ 2 min/cycle: 720 = 24h, 360 = 12h, 195 = 6.5h (1 KRX session)
     if desk == "crypto":
-        # Recovery-mode swing: take +4.5% wins first, then compound via sizing.
-        return 4.5, -2.2, 360
+        # Trend mode: cut failed ignitions fast, let winners run with trailing.
+        return 8.0, -1.2, 180
     if desk == "us":
         if action == "probe_longs":
             return 6.0, -3.0, 200
@@ -279,6 +280,13 @@ def _ensure_schema() -> None:
         with engine.begin() as connection:
             for ddl in missing_live:
                 connection.execute(text(ddl))
+    try:
+        paper_position_columns = {column["name"] for column in inspector.get_columns("paper_positions")}
+    except Exception:
+        paper_position_columns = set()
+    if "peak_pnl_pct" not in paper_position_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE paper_positions ADD COLUMN peak_pnl_pct FLOAT DEFAULT 0.0"))
     with engine.begin() as connection:
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_orders_created_at ON paper_orders(created_at)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_cycle_journal_run_at ON cycle_journal(run_at)"))
@@ -546,6 +554,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             if current_price and position.entry_price > 0:
                 position.current_price = current_price
                 position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
+                position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
             position.cycles_open += 1
             target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action)
             # early_failure: exit if still deeply losing after fast_fail_cycle cycles
@@ -553,14 +562,30 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             early_failure_pct = round(stop_pct * 0.7, 2)   # 70% of full stop (e.g. -1.4% at -2% stop)
             stale_floor_pct = round(max(target_pct * 0.15, 0.20), 2)   # 15% of target (e.g. +0.60% at +4% target)
             # fast_fail_cycle: minimum cycles before early_failure triggers
-            # crypto 24/7: 30 cycles = 1h, gives position time to develop
+            # crypto trend ignition: fail fast, protect winners with trailing
             # korea/us intraday: shorter session so smaller window
             if position.desk == "crypto":
-                fast_fail_cycle = 30
+                fast_fail_cycle = 8
             elif position.desk == "korea":
                 fast_fail_cycle = 20 if position.action == "attack_opening_drive" else 30
             else:
                 fast_fail_cycle = 20
+            if position.desk == "crypto":
+                peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
+                trail_giveback = 1.4 if peak_pnl >= 4.0 else 1.0 if peak_pnl >= 2.2 else 0.0
+                if position.pnl_pct >= target_pct:
+                    _close_position(position, "target_hit")
+                elif position.pnl_pct <= stop_pct:
+                    _close_position(position, "stop_hit")
+                elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= -0.65:
+                    _close_position(position, "failed_ignition")
+                elif peak_pnl >= 1.2 and position.pnl_pct <= 0.15:
+                    _close_position(position, "breakeven_trail")
+                elif trail_giveback and position.pnl_pct <= peak_pnl - trail_giveback:
+                    _close_position(position, "trend_trail")
+                elif position.cycles_open >= max_cycles and position.pnl_pct < 0.8:
+                    _close_position(position, "time_exit")
+                continue
             if position.pnl_pct >= target_pct:
                 _close_position(position, "target_hit")
             elif position.pnl_pct <= stop_pct:
@@ -592,6 +617,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     entry_price=reference_price,
                     current_price=reference_price,
                     pnl_pct=0.0,
+                    peak_pnl_pct=0.0,
                     cycles_open=0,
                     focus=order.focus,
                 )
@@ -643,6 +669,7 @@ def load_open_positions(limit: int = 10) -> list[dict]:
                     "entry_price": row.entry_price,
                     "current_price": row.current_price,
                     "pnl_pct": row.pnl_pct,
+                    "peak_pnl_pct": row.peak_pnl_pct,
                     "cycles_open": row.cycles_open,
                     "focus": row.focus,
                 }

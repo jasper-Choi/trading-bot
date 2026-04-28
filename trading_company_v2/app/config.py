@@ -33,6 +33,7 @@ class Settings:
     company_name: str = os.environ.get("COMPANY_NAME", "Solo Trading Company")
     app_env: str = os.environ.get("APP_ENV", "local")
     execution_mode: str = os.environ.get("EXECUTION_MODE", "paper")
+    active_desks: str = os.environ.get("ACTIVE_DESKS", "crypto")
     live_capital_krw: int = int(os.environ.get("LIVE_CAPITAL_KRW", "0"))
     upbit_pilot_max_krw: int = int(os.environ.get("UPBIT_PILOT_MAX_KRW", "2500000"))
     upbit_pilot_single_order_only: bool = os.environ.get("UPBIT_PILOT_SINGLE_ORDER_ONLY", "false").lower() == "true"
@@ -71,6 +72,11 @@ class Settings:
     operator_name: str = os.environ.get("OPERATOR_NAME", "Owner")
     app_username: str = os.environ.get("APP_USERNAME", "")
     app_password: str = os.environ.get("APP_PASSWORD", "")
+
+    @property
+    def active_desk_set(self) -> set[str]:
+        desks = {item.strip().lower() for item in self.active_desks.split(",") if item.strip()}
+        return desks or {"crypto"}
 
 
 settings = Settings()

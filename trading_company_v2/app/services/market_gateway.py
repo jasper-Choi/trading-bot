@@ -312,8 +312,9 @@ def build_market_snapshot() -> MarketSnapshot:
                     crypto_leaders.append({"market": market, "trade_price": price, "change_rate": change_rate, "volume_24h_krw": volume_24h})
         except Exception:
             pass
-    stock_leaders = get_kosdaq_snapshot(top_n=30)
-    us_leaders = get_us_core_snapshot()
+    active_desks = settings.active_desk_set
+    stock_leaders = get_kosdaq_snapshot(top_n=30) if "korea" in active_desks else []
+    us_leaders = get_us_core_snapshot() if "us" in active_desks else []
     return MarketSnapshot(
         crypto_leaders=crypto_leaders,
         crypto_watchlist=[item["market"] for item in crypto_leaders[:5]],

@@ -36,6 +36,22 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     orderbook_ready = bool(payload.get("orderbook_ready", False))
     orderbook_score = float(payload.get("orderbook_score", 0.0) or 0.0)
     orderbook_bid_ask = float(payload.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
+    breakout_count = int(payload.get("breakout_count", 0) or 0)
+    vol_ratio = float(payload.get("vol_ratio", 0.0) or 0.0)
+    trend_ignition_score = round(
+        min(max(signal_score, 0.0), 1.0) * 0.34
+        + min(max(micro_score, 0.0), 1.0) * 0.28
+        + min(max(orderbook_score, 0.0), 1.0) * 0.16
+        + min(max(discovery_score, 0.0), 1.0) * 0.12
+        + min(max(vol_ratio / 3.0, 0.0), 1.0) * 0.10,
+        3,
+    )
+    flow_support = orderbook_score >= 0.58 or orderbook_bid_ask >= 1.08
+    ignition_ready = trend_ignition_score >= 0.62 and research_support and flow_support
+    ignition_note = (
+        f"trend_ignition={trend_ignition_score:.2f} / micro={micro_score:.2f} "
+        f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / breakout={breakout_count}/4"
+    )
 
     if regime == "STRESSED":
         return {
@@ -48,16 +64,16 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
     hard_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 88.0)
     soft_overheat = recent_change >= 3.4 or burst_change >= 3.8 or ema_gap >= 2.8 or (rsi_value is not None and float(rsi_value) >= 82.0)
-    if hard_overheat:
+    if hard_overheat and not (ignition_ready and micro_score >= 0.68 and flow_support):
         return {
             "action": "watchlist_only",
             "size": "0.00x",
             "focus": f"{lead_market or 'KRW-BTC'} is extremely overheated. Watch only.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"hard overheat: recent {recent_change:.2f}% / burst {burst_change:.2f}% / ema gap {ema_gap:.2f}% / rsi {rsi_value}", support_note],
+            "notes": reasons + [f"hard overheat: recent {recent_change:.2f}% / burst {burst_change:.2f}% / ema gap {ema_gap:.2f}% / rsi {rsi_value}", support_note, ignition_note],
         }
-    if not rsi_quality_ok:
+    if rsi_bearish_divergence and not ignition_ready:
         reason = "bearish RSI divergence" if rsi_bearish_divergence else "RSI extreme zone" if rsi_extreme else "RSI quality failed"
         return {
             "action": "watchlist_only",
@@ -65,7 +81,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} RSI quality filter blocked late chase.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"{reason}; wait for RSI reset before new entry."],
+            "notes": reasons + [f"{reason}; wait for RSI reset before new entry.", ignition_note],
         }
     if recent_change <= -2.8 or burst_change <= -3.2:
         return {
@@ -77,10 +93,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% triggered protection."],
         }
 
-    breakout_confirmed = bool(payload.get("breakout_confirmed", False))
     breakout_partial = bool(payload.get("breakout_partial", False))
-    breakout_count = int(payload.get("breakout_count", 0) or 0)
-    vol_ratio = float(payload.get("vol_ratio", 0.0) or 0.0)
 
     ict_score = float(payload.get("ict_score", 0.0) or 0.0)
     kill_zone_active = bool(payload.get("kill_zone_active", False))
@@ -119,6 +132,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and not hard_overheat
     )
 
+    if ignition_ready and stance != "DEFENSE" and (micro_entry_ok or breakout_count >= 3 or trend_ignition_score >= 0.68):
+        entry_size = "0.88x" if trend_ignition_score >= 0.70 else "0.68x"
+        if soft_overheat:
+            entry_size = "0.42x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"{lead_market or 'KRW-BTC'} trend ignition long. Trail instead of fixed early take-profit.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [ignition_note, support_note, "RSI is treated as momentum context, not an automatic sell signal."],
+        }
+
     if soft_overheat and discovery_entry_ok and stance != "DEFENSE":
         return {
             "action": "selective_probe",
@@ -126,7 +152,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} is hot, but discovery signal allows a small test.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [support_note, f"soft overheat controlled by small size: recent {recent_change:.2f}% / burst {burst_change:.2f}% / rsi {rsi_value}"],
+            "notes": reasons + [ignition_note, support_note, f"soft overheat controlled by small size: recent {recent_change:.2f}% / burst {burst_change:.2f}% / rsi {rsi_value}"],
         }
 
     # 단타 스윙: 3/4 이상이면 풀사이즈 진입, 임계값 대폭 완화
@@ -142,7 +168,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} 단타 스윙 진입.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"signal {signal_score:.2f} / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
+            "notes": reasons + [ignition_note, f"signal {signal_score:.2f} / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
         }
     # 신호 점수만 충분하면 선택적 진입
     if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.52) and stance != "DEFENSE" and research_support:
@@ -152,7 +178,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} 공격적 탐색 진입.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"offense bias / signal {signal_score:.2f} / breakout {breakout_count}/4 / weight {lead_weight:.2f}", support_note],
+            "notes": reasons + [ignition_note, f"offense bias / signal {signal_score:.2f} / breakout {breakout_count}/4 / weight {lead_weight:.2f}", support_note],
         }
 
     if micro_entry_ok and stance != "DEFENSE" and research_support and signal_score >= 0.50:
@@ -162,7 +188,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} 1m momentum entry while swing setup is forming.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [f"1m micro ready / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / 1m vol {micro_vol_ratio:.1f}x / move3 {micro_move_3:.2f}% / swing {signal_score:.2f}", support_note],
+            "notes": reasons + [ignition_note, f"1m micro ready / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / 1m vol {micro_vol_ratio:.1f}x / move3 {micro_move_3:.2f}% / swing {signal_score:.2f}", support_note],
         }
 
     mild_defense = (
@@ -209,7 +235,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         "focus": "Crypto confirmation watch.",
         "symbol": lead_market,
         "candidate_symbols": candidate_symbols,
-        "notes": reasons + [f"waiting for stronger confirmation (current {signal_score:.2f}, target {pilot_probe_threshold:.2f}+)", support_note],
+            "notes": reasons + [f"waiting for stronger confirmation (current {signal_score:.2f}, target {pilot_probe_threshold:.2f}+)", ignition_note, support_note],
     }
 
 

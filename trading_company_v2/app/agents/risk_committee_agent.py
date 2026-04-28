@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
+from app.config import settings
 from app.core.models import AgentResult, CompanyState
 
 
@@ -17,12 +18,27 @@ class RiskCommitteeAgent(BaseAgent):
         )
 
     def apply(self, state: CompanyState) -> CompanyState:
-        combined_pnl = float(state.daily_summary.get("realized_pnl_pct", 0.0) or 0.0) + float(
-            state.daily_summary.get("unrealized_pnl_pct", 0.0) or 0.0
-        )
-        gross_open_notional = float(state.daily_summary.get("gross_open_notional_pct", 0.0) or 0.0)
-        wins = int(state.daily_summary.get("wins", 0) or 0)
-        losses = int(state.daily_summary.get("losses", 0) or 0)
+        active_desks = set((state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
+        desk_stats = state.daily_summary.get("desk_stats", {}) or {}
+        if active_desks:
+            combined_pnl = sum(
+                float((desk_stats.get(desk, {}) or {}).get("realized_pnl_pct", 0.0) or 0.0)
+                + float((desk_stats.get(desk, {}) or {}).get("unrealized_pnl_pct", 0.0) or 0.0)
+                for desk in active_desks
+            )
+            gross_open_notional = sum(
+                float((desk_stats.get(desk, {}) or {}).get("open_notional_pct", 0.0) or 0.0)
+                for desk in active_desks
+            )
+            wins = sum(int((desk_stats.get(desk, {}) or {}).get("wins", 0) or 0) for desk in active_desks)
+            losses = sum(int((desk_stats.get(desk, {}) or {}).get("losses", 0) or 0) for desk in active_desks)
+        else:
+            combined_pnl = float(state.daily_summary.get("realized_pnl_pct", 0.0) or 0.0) + float(
+                state.daily_summary.get("unrealized_pnl_pct", 0.0) or 0.0
+            )
+            gross_open_notional = float(state.daily_summary.get("gross_open_notional_pct", 0.0) or 0.0)
+            wins = int(state.daily_summary.get("wins", 0) or 0)
+            losses = int(state.daily_summary.get("losses", 0) or 0)
         capital_profile = state.strategy_book.get("capital_profile", {}) or {}
         compounding_mode = str(capital_profile.get("mode", "neutral") or "neutral")
         profit_buffer_pct = float(capital_profile.get("profit_buffer_pct", 0.0) or 0.0)
@@ -38,9 +54,11 @@ class RiskCommitteeAgent(BaseAgent):
             state.risk_budget = min(state.risk_budget, 0.3)
         if combined_pnl <= -0.75 or losses > wins:
             state.risk_budget = min(state.risk_budget, 0.2)
-        if gross_open_notional >= 0.9:
+        exposure_warn = 1.35 if active_desks == {"crypto"} else 0.9
+        exposure_block = 1.65 if active_desks == {"crypto"} else 1.05
+        if gross_open_notional >= exposure_warn:
             state.risk_budget = min(state.risk_budget, 0.18)
-        if gross_open_notional >= 1.05:
+        if gross_open_notional >= exposure_block:
             state.allow_new_entries = False
         if compounding_mode in {"drift_up", "measured_press", "press_advantage"} and state.allow_new_entries:
             compounding_cap = min(0.72, state.risk_budget + profit_buffer_pct)
@@ -58,7 +76,7 @@ class RiskCommitteeAgent(BaseAgent):
             note = "capital compounding paused while edge is weak"
             if note not in state.notes:
                 state.notes.append(note)
-        if gross_open_notional >= 0.9 and "risk committee reduced sizing due to gross exposure" not in state.notes:
+        if gross_open_notional >= exposure_warn and "risk committee reduced sizing due to gross exposure" not in state.notes:
             state.notes.append("risk committee reduced sizing due to gross exposure")
         if not state.allow_new_entries and "new entries blocked under stressed regime" not in state.notes:
             block_reason = (

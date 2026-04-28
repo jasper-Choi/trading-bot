@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.agents.base import BaseAgent
+from app.config import settings
 from app.core.models import AgentResult, PaperOrder
 
 
@@ -50,7 +51,15 @@ class ExecutionAgent(BaseAgent):
         )
 
     def _gross_open_notional(self) -> float:
-        return round(sum(self._size_to_notional(str(item.get("size", "0.00x"))) for item in self.open_positions), 2)
+        active_desks = settings.active_desk_set
+        return round(
+            sum(
+                self._size_to_notional(str(item.get("size", "0.00x")))
+                for item in self.open_positions
+                if str(item.get("desk") or "") in active_desks
+            ),
+            2,
+        )
 
     def _desk_open_count(self, desk: str) -> int:
         return sum(1 for item in self.open_positions if item.get("desk") == desk)
@@ -66,7 +75,7 @@ class ExecutionAgent(BaseAgent):
         # Crypto: 2 positions allowed to build portfolio; cap at 1.2x (2 × 0.6x)
         # Korea/US: 2 positions, 1.0x cap
         if desk == "crypto":
-            return 3, 2.0
+            return 4, 2.4
         if desk == "us":
             return 3, 1.5
         return 3, 1.5
@@ -442,7 +451,10 @@ class ExecutionAgent(BaseAgent):
         desk_open_notional = self._desk_open_notional(desk)
         gross_open_notional = self._gross_open_notional()
         max_positions, max_desk_notional = self._desk_limits(desk)
-        total_notional_cap = 1.05 if self.risk_budget >= 0.4 else 0.8 if self.risk_budget >= 0.25 else 0.55
+        if settings.active_desk_set == {"crypto"}:
+            total_notional_cap = 1.65 if self.risk_budget >= 0.4 else 1.15 if self.risk_budget >= 0.25 else 0.75
+        else:
+            total_notional_cap = 1.05 if self.risk_budget >= 0.4 else 0.8 if self.risk_budget >= 0.25 else 0.55
         desk_position_cap_hit = desk_open_count >= max_positions
         desk_notional_cap_hit = (desk_open_notional + notional_pct) > max_desk_notional and action in actionable_entries
         gross_notional_cap_hit = (gross_open_notional + notional_pct) > total_notional_cap and action in actionable_entries
@@ -591,14 +603,17 @@ class ExecutionAgent(BaseAgent):
         return orders if orders else [self._plan_to_order(desk, plan).model_dump()]
 
     def run(self) -> AgentResult:
+        active_desks = settings.active_desk_set
         crypto_plan = self.strategy_book.get("crypto_plan", {})
         korea_plan = self.strategy_book.get("korea_plan", {})
         us_plan = self.strategy_book.get("us_plan", {})
-        orders = (
-            self._multi_orders("crypto", crypto_plan)
-            + self._multi_orders("korea", korea_plan)
-            + self._multi_orders("us", us_plan)
-        )
+        orders: list[dict] = []
+        if "crypto" in active_desks:
+            orders += self._multi_orders("crypto", crypto_plan)
+        if "korea" in active_desks:
+            orders += self._multi_orders("korea", korea_plan)
+        if "us" in active_desks:
+            orders += self._multi_orders("us", us_plan)
         active_orders = [item for item in orders if item["status"] == "planned"]
         return AgentResult(
             name=self.name,
