@@ -65,15 +65,19 @@ class CryptoDeskAgent(BaseAgent):
         ranked_candidates: list[dict] = []
         for market, weight, signal, micro, orderbook in fetch_results:
             combined_score = round(
-                (float(signal.get("score", 0.5) or 0.5) * 0.50)
-                + (float(micro.get("micro_score", 0.0) or 0.0) * 0.21)
-                + (float(orderbook.get("orderbook_score", 0.0) or 0.0) * 0.08)
-                + (direction_score * 0.15)
+                # Orderbook weight raised: it's the most real-time signal we have
+                (float(signal.get("score", 0.5) or 0.5) * 0.38)
+                + (float(micro.get("micro_score", 0.0) or 0.0) * 0.26)
+                + (float(orderbook.get("orderbook_score", 0.0) or 0.0) * 0.18)
+                + (direction_score * 0.12)
                 + (float(weight or 0.0) * 0.06),
                 3,
             )
             if bool(micro.get("micro_ready", False)) and bool(orderbook.get("orderbook_ready", False)) and bool(signal.get("rsi_quality_ok", True)):
                 combined_score = min(1.0, round(combined_score + 0.06, 3))
+            pullback_s = float(signal.get("pullback_score", 0.0) or 0.0)
+            if bool(signal.get("pullback_detected", False)) and pullback_s >= 0.60:
+                combined_score = min(1.0, round(combined_score + pullback_s * 0.08, 3))
             ranked_candidates.append(
                 {
                     "market": market,
@@ -125,6 +129,11 @@ class CryptoDeskAgent(BaseAgent):
                     "price_in_bull_fvg": bool(signal.get("price_in_bull_fvg", False)),
                     "ict_bullish_count": int(signal.get("ict_bullish_count", 0) or 0),
                     "ict_structure": str(signal.get("ict_structure", "undecided") or "undecided"),
+                    "pullback_detected": bool(signal.get("pullback_detected", False)),
+                    "pullback_score": float(signal.get("pullback_score", 0.0) or 0.0),
+                    "spike_pct_15m": float(signal.get("spike_pct_15m", 0.0) or 0.0),
+                    "retrace_from_high_pct": float(signal.get("retrace_from_high_pct", 0.0) or 0.0),
+                    "vol_contracted_on_pullback": bool(signal.get("vol_contracted_on_pullback", False)),
                 }
             )
 
@@ -219,6 +228,11 @@ class CryptoDeskAgent(BaseAgent):
                 "bos_bearish": bool(leader.get("bos_bearish", False)),
                 "price_at_bull_ob": bool(leader.get("price_at_bull_ob", False)),
                 "price_in_bull_fvg": bool(leader.get("price_in_bull_fvg", False)),
+                "pullback_detected": bool(leader.get("pullback_detected", False)),
+                "pullback_score": float(leader.get("pullback_score", 0.0) or 0.0),
+                "spike_pct_15m": float(leader.get("spike_pct_15m", 0.0) or 0.0),
+                "retrace_from_high_pct": float(leader.get("retrace_from_high_pct", 0.0) or 0.0),
+                "vol_contracted_on_pullback": bool(leader.get("vol_contracted_on_pullback", False)),
                 "ict_bullish_count": int(leader.get("ict_bullish_count", 0) or 0),
                 "ict_structure": str(leader.get("ict_structure", "undecided") or "undecided"),
             },

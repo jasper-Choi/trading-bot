@@ -565,21 +565,30 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             # crypto trend ignition: fail fast, protect winners with trailing
             # korea/us intraday: shorter session so smaller window
             if position.desk == "crypto":
-                fast_fail_cycle = 8
+                fast_fail_cycle = 12  # 24 min — avoid noise-based exits (was 8 = 16 min)
             elif position.desk == "korea":
                 fast_fail_cycle = 20 if position.action == "attack_opening_drive" else 30
             else:
                 fast_fail_cycle = 20
             if position.desk == "crypto":
                 peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
-                trail_giveback = 1.4 if peak_pnl >= 4.0 else 1.0 if peak_pnl >= 2.2 else 0.0
+                # Tighter trailing: lock in profit faster at each tier
+                # peak >=1.5%: trail at 0.5% giveback (new tier)
+                # peak >=2.2%: trail at 0.7% giveback (was 1.0%)
+                # peak >=4.0%: trail at 1.0% giveback (was 1.4%)
+                trail_giveback = (
+                    1.0 if peak_pnl >= 4.0
+                    else 0.7 if peak_pnl >= 2.2
+                    else 0.5 if peak_pnl >= 1.5
+                    else 0.0
+                )
                 if position.pnl_pct >= target_pct:
                     _close_position(position, "target_hit")
                 elif position.pnl_pct <= stop_pct:
                     _close_position(position, "stop_hit")
-                elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= -0.65:
+                elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= -0.80:
                     _close_position(position, "failed_ignition")
-                elif peak_pnl >= 1.2 and position.pnl_pct <= 0.15:
+                elif peak_pnl >= 1.0 and position.pnl_pct <= 0.1:
                     _close_position(position, "breakeven_trail")
                 elif trail_giveback and position.pnl_pct <= peak_pnl - trail_giveback:
                     _close_position(position, "trend_trail")

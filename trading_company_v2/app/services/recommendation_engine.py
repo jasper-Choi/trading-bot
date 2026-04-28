@@ -38,6 +38,11 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     orderbook_bid_ask = float(payload.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
     breakout_count = int(payload.get("breakout_count", 0) or 0)
     vol_ratio = float(payload.get("vol_ratio", 0.0) or 0.0)
+    pullback_detected = bool(payload.get("pullback_detected", False))
+    pullback_score = float(payload.get("pullback_score", 0.0) or 0.0)
+    spike_pct_15m = float(payload.get("spike_pct_15m", 0.0) or 0.0)
+    retrace_from_high_pct = float(payload.get("retrace_from_high_pct", 0.0) or 0.0)
+    vol_contracted_on_pullback = bool(payload.get("vol_contracted_on_pullback", False))
     trend_ignition_score = round(
         min(max(signal_score, 0.0), 1.0) * 0.34
         + min(max(micro_score, 0.0), 1.0) * 0.28
@@ -52,6 +57,24 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         f"trend_ignition={trend_ignition_score:.2f} / micro={micro_score:.2f} "
         f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / breakout={breakout_count}/4"
     )
+    # Pullback entry: prior spike + EMA-zone retracement + volume contraction
+    # Better entry price and tighter stop than chasing raw momentum
+    pullback_entry_ok = (
+        pullback_detected
+        and pullback_score >= 0.60
+        and signal_score >= 0.44
+        and micro_score >= 0.46
+        and (orderbook_score >= 0.50 or orderbook_bid_ask >= 1.05)
+        and research_support
+        and not rsi_bearish_divergence
+    )
+    pullback_note = (
+        f"pullback score {pullback_score:.2f} / spike {spike_pct_15m:.1f}% / "
+        f"retrace {retrace_from_high_pct:.1f}% / vol contracted: {vol_contracted_on_pullback}"
+    )
+    # Volume gate: ignition entries need real volume confirmation.
+    # Pullback entries intentionally have low current volume (contracting on retracement).
+    ignition_vol_ok = vol_ratio >= 1.4 or micro_vol_ratio >= 1.5
 
     if regime == "STRESSED":
         return {
@@ -131,6 +154,34 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and (breakout_count >= 2 or micro_entry_ok or orderbook_score >= 0.62)
         and not hard_overheat
     )
+
+    # Volume gate: if current volume is weak AND no pullback setup AND no ICT confluence → watchlist
+    # Pullback entries intentionally have low current-candle volume (contracting after spike)
+    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and stance != "DEFENSE":
+        return {
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": f"{lead_market or 'KRW-BTC'} volume too low for entry. Wait for volume confirmation.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"volume gate: 15m vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x — need 1.4x/1.5x",
+                ignition_note, support_note,
+            ],
+        }
+
+    # Pullback entry path: prior spike + controlled retracement to EMA + volume contraction
+    # This is the Ross Cameron 'first red candle' / Raschke Holy Grail entry
+    if pullback_entry_ok and stance != "DEFENSE" and not hard_overheat:
+        entry_size = "0.65x" if validated_support else "0.50x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"{lead_market or 'KRW-BTC'} pullback entry — retracement near EMA after spike.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [pullback_note, ignition_note, support_note],
+        }
 
     if ignition_ready and stance != "DEFENSE" and (micro_entry_ok or breakout_count >= 3 or trend_ignition_score >= 0.68):
         entry_size = "0.88x" if trend_ignition_score >= 0.70 else "0.68x"

@@ -567,6 +567,89 @@ def summarize_breakout_signal(
     }
 
 
+def detect_pullback_entry(
+    candles: list[dict[str, Any]],
+    spike_lookback: int = 8,
+    min_spike_pct: float = 1.0,
+) -> dict[str, Any]:
+    """
+    Detects the 'first pullback' entry pattern used by Ross Cameron, Raschke, Minervini:
+    1. Prior N candles showed a momentum spike (>= min_spike_pct)
+    2. Current price has pulled back from the spike high (volume contracting)
+    3. Price is near the EMA10 sweet spot — not extended, not reversed
+
+    This is the opposite of chasing: we wait for price to come to us after
+    a confirmed spike, improving both entry price and stop-loss placement.
+    """
+    _empty: dict[str, Any] = {
+        "pullback_detected": False,
+        "pullback_score": 0.0,
+        "spike_pct": 0.0,
+        "retrace_from_high_pct": 0.0,
+        "vol_contracted_on_pullback": False,
+        "in_pullback_zone": False,
+        "pullback_gap_from_ema_pct": 0.0,
+    }
+    if len(candles) < spike_lookback + 4:
+        return _empty
+
+    closes = [float(c["close"]) for c in candles]
+    highs = [float(c.get("high") or c["close"]) for c in candles]
+    volumes = [float(c.get("volume") or 0.0) for c in candles]
+
+    ema10_vals = ema(closes, 10)
+    ema_val = ema10_vals[-1]
+    current_close = closes[-1]
+
+    # Spike window: the lookback+2 candles before the most recent 2
+    spike_window = candles[-(spike_lookback + 2):-2]
+    if not spike_window:
+        return _empty
+
+    spike_closes = [float(c["close"]) for c in spike_window]
+    spike_highs = [float(c.get("high") or c["close"]) for c in spike_window]
+    spike_volumes = [float(c.get("volume") or 0.0) for c in spike_window]
+
+    anchor_close = spike_closes[0]
+    spike_high = max(spike_highs)
+    max_spike_vol = max(spike_volumes) if spike_volumes else 0.0
+
+    spike_pct = (spike_high - anchor_close) / anchor_close * 100 if anchor_close > 0 else 0.0
+    retrace_from_high_pct = (spike_high - current_close) / spike_high * 100 if spike_high > 0 else 0.0
+    pullback_gap_from_ema = (current_close - ema_val) / ema_val * 100 if ema_val > 0 else 0.0
+    in_pullback_zone = -1.0 <= pullback_gap_from_ema <= 2.5
+
+    recent_vol_avg = sum(volumes[-3:]) / max(len(volumes[-3:]), 1) if volumes[-3:] else 0.0
+    vol_contracted_on_pullback = max_spike_vol > 0 and recent_vol_avg < max_spike_vol * 0.65
+
+    pullback_detected = (
+        spike_pct >= min_spike_pct
+        and 0.3 <= retrace_from_high_pct <= 3.5
+        and in_pullback_zone
+        and current_close >= anchor_close
+    )
+
+    score = 0.0
+    if pullback_detected:
+        score = 0.45
+        if vol_contracted_on_pullback:
+            score += 0.25
+        if 0.0 <= pullback_gap_from_ema <= 2.0:
+            score += 0.15
+        if 0.5 <= retrace_from_high_pct <= 2.5:
+            score += 0.15
+
+    return {
+        "pullback_detected": pullback_detected,
+        "pullback_score": round(min(score, 1.0), 3),
+        "spike_pct": round(spike_pct, 2),
+        "retrace_from_high_pct": round(retrace_from_high_pct, 2),
+        "vol_contracted_on_pullback": vol_contracted_on_pullback,
+        "in_pullback_zone": in_pullback_zone,
+        "pullback_gap_from_ema_pct": round(pullback_gap_from_ema, 2),
+    }
+
+
 def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(item["close"]) for item in candles]
     if len(closes) < 30:
@@ -660,6 +743,7 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         bias = "defense"
     else:
         bias = "balanced"
+    pullback = detect_pullback_entry(candles)
     return {
         "bias": bias,
         "score": score,
@@ -692,6 +776,12 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "price_in_bull_fvg": bool(ict.get("price_in_bull_fvg")),
         "ict_bullish_count": int(ict.get("ict_bullish_count", 0) or 0),
         "ict_structure": str(ict.get("ict_structure", "undecided")),
+        # Pullback entry detection (Ross Cameron / Holy Grail style)
+        "pullback_detected": bool(pullback.get("pullback_detected", False)),
+        "pullback_score": float(pullback.get("pullback_score", 0.0) or 0.0),
+        "spike_pct_15m": float(pullback.get("spike_pct", 0.0) or 0.0),
+        "retrace_from_high_pct": float(pullback.get("retrace_from_high_pct", 0.0) or 0.0),
+        "vol_contracted_on_pullback": bool(pullback.get("vol_contracted_on_pullback", False)),
     }
 
 
