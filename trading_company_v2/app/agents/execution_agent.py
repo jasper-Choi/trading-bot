@@ -462,6 +462,8 @@ class ExecutionAgent(BaseAgent):
         repeated_loss_block = self._repeated_loss_block(desk, symbol)
         extended_symbol_block = self._extended_symbol_block(desk, symbol)
         desk_loss_pressure = self._desk_loss_pressure(desk)
+        crypto_recovery_mode = desk == "crypto" and settings.active_desk_set == {"crypto"}
+        desk_loss_pressure_blocks = desk_loss_pressure and not crypto_recovery_mode
         desk_chronic_drawdown = self._desk_chronic_drawdown(desk)
         desk_performance_lock = self._desk_performance_lock(desk)
         desk_recovery_ready = self._desk_recovery_ready(desk)
@@ -502,7 +504,7 @@ class ExecutionAgent(BaseAgent):
             and not cooldown_loss
             and not repeated_loss_block
             and not extended_symbol_block
-            and not desk_loss_pressure
+            and not desk_loss_pressure_blocks
             and not desk_chronic_drawdown
             and not desk_performance_lock
             and not desk_offense_block
@@ -545,7 +547,10 @@ class ExecutionAgent(BaseAgent):
         if extended_symbol_block and symbol:
             notes.append(f"{symbol} remains under extended Korea block after repeated failed attempts")
         if desk_loss_pressure:
-            notes.append(f"{desk} desk loss pressure active, new entries paused")
+            if crypto_recovery_mode:
+                notes.append(f"{desk} desk loss pressure active, recovery mode keeps only throttled entries")
+            else:
+                notes.append(f"{desk} desk loss pressure active, new entries paused")
         if desk_chronic_drawdown:
             notes.append(f"{desk} desk under chronic drawdown lock, new entries require manual recovery")
         if desk_performance_lock:
