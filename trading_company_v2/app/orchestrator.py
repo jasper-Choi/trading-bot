@@ -5,6 +5,7 @@ import re
 
 from app.agents.chief_market_officer import CIOAgent, build_compounding_profile
 from app.agents.crypto_desk_agent import CryptoDeskAgent
+from app.agents.debate_agents import BearCaseAgent, BullCaseAgent, PortfolioManagerAgent
 from app.agents.execution_agent import ExecutionAgent
 from app.agents.korea_stock_desk_agent import KoreaStockDeskAgent
 from app.agents.macro_sentiment_agent import MacroSentimentAgent
@@ -633,6 +634,30 @@ class CompanyOrchestrator:
         state.strategy_book, capital_overlay_notes = _apply_compounding_overlays(state.strategy_book, capital_profile)
         for note in capital_overlay_notes[:3]:
             state.notes.append(note)
+        bull_agent = BullCaseAgent()
+        bull_agent.configure(state)
+        bull_result = bull_agent.safe_run()
+        bear_agent = BearCaseAgent()
+        bear_agent.configure(state)
+        bear_result = bear_agent.safe_run()
+        portfolio_manager = PortfolioManagerAgent()
+        portfolio_manager.configure(state, bull_result.payload, bear_result.payload)
+        portfolio_result = portfolio_manager.safe_run()
+        debate_payload = {
+            "bull_case": bull_result.payload,
+            "bear_case": bear_result.payload,
+            "portfolio_manager": portfolio_result.payload,
+        }
+        if portfolio_result.payload.get("strategy_book"):
+            state.strategy_book = portfolio_result.payload["strategy_book"]
+        state.strategy_book["decision_debate"] = debate_payload
+        for decision in (portfolio_result.payload.get("decisions") or [])[:3]:
+            state.notes.append(
+                "portfolio manager "
+                f"{decision.get('decision', 'review')} {decision.get('desk', 'desk')}: "
+                f"{decision.get('reason', 'no reason')}"
+            )
+        results.extend([bull_result, bear_result, portfolio_result])
         company_focus = str(state.strategy_book.get("company_focus") or "Capital preservation and watchlist maintenance")
         provisional_allow_new_entries = state.regime != "STRESSED" and (
             float(state.daily_summary.get("realized_pnl_pct", 0.0) or 0.0)

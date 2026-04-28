@@ -579,3 +579,16 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
 1. Rework Korea stock backtest universe and trigger definition until trade count is statistically usable.
 2. Refine crypto breakout entry to reduce stop-hit frequency without killing DOGE/XRP expectancy.
 3. After both are validated, transplant the winning rules into `recommendation_engine.py` and `execution_agent.py` more completely.
+
+## 13. TradingAgents-Inspired Decision Layer (2026-04-28)
+
+- Added a lightweight debate layer based on TauricResearch/TradingAgents concepts, without adding external LLM calls or changing the dashboard layout:
+  - `BullCaseAgent`: scores each desk's upside case from momentum, volatility expansion, liquidity, orderbook/micro confirmation, and setup quality.
+  - `BearCaseAgent`: scores each desk's downside case from late-chase risk, RSI/EMA overheat, weak confirmation, drawdown pressure, and gross exposure.
+  - `PortfolioManagerAgent`: compares bull vs bear scores before execution, then approves, presses, throttles, cuts, or blocks planned entries.
+- The layer runs after recommendation plans and compounding overlays, but before `ExecutionAgent`.
+- It stores the full decision review under `strategy_book["decision_debate"]` and adds portfolio-manager notes into state notes, so Claude/Codex can audit why sizing changed.
+- This is intentionally a decision-quality layer, not another hard safety gate:
+  - strong clean setups can get a small size increase
+  - mixed setups are throttled
+  - severe bear cases are blocked or downgraded
