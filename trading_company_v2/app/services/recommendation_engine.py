@@ -51,8 +51,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         + min(max(vol_ratio / 3.0, 0.0), 1.0) * 0.10,
         3,
     )
-    flow_support = orderbook_score >= 0.58 or orderbook_bid_ask >= 1.08
-    ignition_ready = trend_ignition_score >= 0.62 and research_support and flow_support
+    flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02
+    # research_support removed from ignition_ready: historical backtest weight shouldn't block fresh movers.
+    # CryptoDeskAgent already integrated all signals into combined_score — trust it here.
+    ignition_ready = trend_ignition_score >= 0.50 and flow_support
     ignition_note = (
         f"trend_ignition={trend_ignition_score:.2f} / micro={micro_score:.2f} "
         f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / breakout={breakout_count}/4"
@@ -61,11 +63,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # Better entry price and tighter stop than chasing raw momentum
     pullback_entry_ok = (
         pullback_detected
-        and pullback_score >= 0.60
-        and signal_score >= 0.44
-        and micro_score >= 0.46
-        and (orderbook_score >= 0.50 or orderbook_bid_ask >= 1.05)
-        and research_support
+        and pullback_score >= 0.55
+        and signal_score >= 0.40
+        and micro_score >= 0.38
+        and (orderbook_score >= 0.44 or orderbook_bid_ask >= 1.0)
         and not rsi_bearish_divergence
     )
     pullback_note = (
@@ -87,7 +88,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
     soft_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 85.0)
-    if hard_overheat and not (ignition_ready and micro_score >= 0.55 and flow_support):
+    if hard_overheat and not (signal_score >= 0.68 and micro_score >= 0.50 and flow_support):
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -140,27 +141,30 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # ICT 컨플루언스 진입: breakout_partial 없어도 ICT 3개 이상이면 허용
     ict_entry_ok = ict_bullish_count >= 3 or (ssl_sweep_confirmed and kill_zone_active) or (choch_bullish and ict_bullish_count >= 2)
+    # micro_entry_ok: simplified — needs 1m momentum + volume without requiring all 5 sub-flags of micro_ready
     micro_entry_ok = (
-        micro_ready
-        and micro_score >= 0.64
-        and micro_vol_ratio >= 1.55
-        and -0.35 <= micro_move_3 <= 2.5
-        and (orderbook_ready or orderbook_score >= 0.58)
+        micro_score >= 0.48
+        and micro_vol_ratio >= 1.1
+        and micro_move_3 >= -1.5
+        and orderbook_bid_ask >= 1.0
     )
+    # discovery_entry_ok: removed research_support gate — backtest history shouldn't block fresh opportunities
     discovery_entry_ok = (
-        research_support
-        and signal_score >= 0.54
-        and micro_score >= 0.54
-        and (breakout_count >= 2 or micro_entry_ok or orderbook_score >= 0.62)
+        signal_score >= 0.52
+        and micro_score >= 0.44
+        and orderbook_bid_ask >= 0.98
         and not hard_overheat
     )
-
-    # High-conviction bypass: strong combined signal + micro confirmation skips volume gate
-    # Rationale: a coin with combined_score >= 0.72 + micro >= 0.50 is already trending
-    high_conviction = signal_score >= 0.72 and micro_score >= 0.50
-    # Volume gate: if current volume is weak AND no pullback setup AND no ICT confluence → watchlist
-    # Pullback entries intentionally have low current-candle volume (contracting after spike)
-    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not high_conviction and stance != "DEFENSE":
+    # direct_entry_ok: the bot's core purpose — if CryptoDeskAgent's combined_score is high,
+    # don't re-run the same gates. Catch the moment immediately.
+    direct_entry_ok = (
+        signal_score >= 0.63
+        and micro_score >= 0.38
+        and orderbook_bid_ask >= 0.98
+        and not rsi_bearish_divergence
+    )
+    # Volume gate: direct_entry_ok (high combined score) also bypasses
+    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and stance != "DEFENSE":
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -186,8 +190,30 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [pullback_note, ignition_note, support_note],
         }
 
-    if ignition_ready and stance != "DEFENSE" and (micro_entry_ok or breakout_count >= 3 or trend_ignition_score >= 0.68):
-        entry_size = "0.88x" if trend_ignition_score >= 0.70 else "0.68x"
+    # Direct entry: combined_score is the signal — enter now without extra gate chains
+    if direct_entry_ok and stance != "DEFENSE" and not hard_overheat:
+        if signal_score >= 0.76:
+            entry_size = "0.90x"
+        elif signal_score >= 0.70:
+            entry_size = "0.75x"
+        else:
+            entry_size = "0.58x"
+        if soft_overheat:
+            entry_size = "0.38x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"{lead_market or 'KRW-BTC'} direct momentum entry — combined signal {signal_score:.2f}.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"direct entry: combined={signal_score:.2f} micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x",
+                ignition_note, support_note,
+            ],
+        }
+
+    if ignition_ready and stance != "DEFENSE" and (micro_entry_ok or breakout_count >= 2 or trend_ignition_score >= 0.60):
+        entry_size = "0.88x" if trend_ignition_score >= 0.68 else "0.68x"
         if soft_overheat:
             entry_size = "0.42x"
         return {
@@ -211,8 +237,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # 단타 스윙: 3/4 이상이면 풀사이즈 진입, 임계값 대폭 완화
     # lead_weight threshold lowered to 0.08 to accommodate 9-coin neutral-weight universe (max ~0.14)
-    offense_threshold = 0.60 if regime == "RANGING" else 0.58
-    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 3.0 and research_support and (breakout_partial or ict_entry_ok or micro_entry_ok or discovery_entry_ok):
+    offense_threshold = 0.58 if regime == "RANGING" else 0.55
+    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 5.0 and (breakout_partial or ict_entry_ok or micro_entry_ok or discovery_entry_ok or direct_entry_ok):
         entry_size = "0.85x" if discovery_support and not validated_support else "1.0x"
         if stance == "OFFENSE":
             entry_size = "0.95x" if discovery_support and not validated_support else "1.15x"
@@ -222,10 +248,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} 단타 스윙 진입.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [ignition_note, f"signal {signal_score:.2f} / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
+            "notes": reasons + [ignition_note, f"signal {signal_score:.2f} / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
         }
-    # 신호 점수만 충분하면 선택적 진입
-    if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.52) and stance != "DEFENSE" and research_support:
+    # 신호 점수만 충분하면 선택적 진입 (research_support 게이트 제거 — 새로운 모멘텀 코인도 포착)
+    if bias == "offense" and signal_score >= max(offense_threshold - 0.06, 0.48) and stance != "DEFENSE":
         return {
             "action": "selective_probe",
             "size": "0.55x" if discovery_support and not validated_support else "0.70x",
@@ -235,7 +261,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [ignition_note, f"offense bias / signal {signal_score:.2f} / breakout {breakout_count}/4 / weight {lead_weight:.2f}", support_note],
         }
 
-    if micro_entry_ok and stance != "DEFENSE" and research_support and signal_score >= 0.50:
+    if micro_entry_ok and stance != "DEFENSE" and signal_score >= 0.48:
         return {
             "action": "selective_probe",
             "size": "0.45x" if discovery_support and not validated_support else "0.55x",
@@ -272,9 +298,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + ["Wait for momentum recovery before new crypto entries."],
         }
 
-    # balanced 바이어스에서도 적극 진입
-    pilot_probe_threshold = 0.50 if research_support and recent_change >= -0.5 else 0.55
-    if bias == "balanced" and signal_score >= pilot_probe_threshold and stance != "DEFENSE" and ema_gap <= 2.5 and recent_change > -1.5 and research_support:
+    # balanced 바이어스: research_support 게이트 제거 — 신호가 있으면 진입
+    pilot_probe_threshold = 0.48 if recent_change >= -0.3 else 0.52
+    if bias == "balanced" and signal_score >= pilot_probe_threshold and stance != "DEFENSE" and ema_gap <= 5.0 and recent_change > -1.5:
         return {
             "action": "probe_longs",
             "size": "0.42x" if discovery_support and not validated_support else "0.60x",
