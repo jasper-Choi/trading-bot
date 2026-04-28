@@ -1067,6 +1067,178 @@ def _build_agent_log(state: CompanyState) -> list[dict]:
     return result
 
 
+def _action_label(action: str) -> str:
+    labels = {
+        "probe_longs": "진입 탐색",
+        "selective_probe": "선별 진입",
+        "attack_opening_drive": "공격 진입",
+        "reduce_risk": "리스크 축소",
+        "capital_preservation": "자본 보존",
+        "watchlist_only": "관찰 대기",
+        "stand_by": "대기",
+        "pre_market_watch": "장외 대기",
+    }
+    return labels.get(str(action or ""), str(action or "대기"))
+
+
+def _desk_label(desk: str) -> str:
+    return {"crypto": "코인", "korea": "한국주식", "us": "미국주식"}.get(str(desk or ""), str(desk or "데스크"))
+
+
+def _briefing_tone(value: float) -> str:
+    if value > 0.25:
+        return "positive"
+    if value < -0.25:
+        return "negative"
+    return "neutral"
+
+
+def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) -> dict:
+    """Human-readable control-room summary for non-technical dashboard use."""
+    daily = state.daily_summary or {}
+    strategy_book = state.strategy_book or {}
+    debate = (strategy_book.get("decision_debate", {}) or {}).get("portfolio_manager", {}) or {}
+    decisions = list(debate.get("decisions") or [])
+    open_positions = list(state.open_positions or [])
+    live_rows = [item for item in (state.execution_log or []) if item.get("source") == "live"]
+    pending_live = [
+        item for item in live_rows
+        if str(item.get("status") or "") in {"submitted", "partial"}
+        or str(item.get("effect_status") or "") in {"pending", "awaiting_balance_sync", "partial_balance_sync"}
+    ]
+    mode = str(state.execution_mode or settings.execution_mode or "paper")
+    mode_label = "실거래" if "live" in mode else "모의운영"
+    open_count = len(open_positions)
+    current_cycle_planned = int(daily.get("current_cycle_planned_orders", 0) or 0)
+    cumulative_pct = float(daily.get("cumulative_realized_pnl_pct", 0.0) or 0.0)
+    unrealized_pct = float(daily.get("unrealized_pnl_pct", 0.0) or 0.0)
+    wins = int(daily.get("cumulative_wins", daily.get("wins", 0)) or 0)
+    losses = int(daily.get("cumulative_losses", daily.get("losses", 0)) or 0)
+    win_rate = float(daily.get("cumulative_win_rate", daily.get("win_rate", 0.0)) or 0.0)
+    gross = float(daily.get("gross_open_notional_pct", 0.0) or 0.0)
+
+    if pending_live:
+        headline = f"{mode_label}: 브로커 주문 {len(pending_live)}건 처리 대기 중"
+        headline_tone = "warning"
+    elif open_count:
+        headline = f"{mode_label}: {open_count}개 포지션 보유, 신규 진입은 조건 충족 시에만 실행"
+        headline_tone = "active"
+    elif current_cycle_planned:
+        headline = f"{mode_label}: 이번 사이클 신규 주문 {current_cycle_planned}건 계획"
+        headline_tone = "active"
+    else:
+        headline = f"{mode_label}: 현재 신규 진입 없음, 조건 충족 대기"
+        headline_tone = "waiting"
+
+    pnl_tone = _briefing_tone(cumulative_pct + unrealized_pct)
+    pnl_message = (
+        f"누적 실현 {cumulative_pct:+.2f}%, 현재 미실현 {unrealized_pct:+.2f}% / "
+        f"누적 승률 {win_rate:.1f}% ({wins}승 {losses}패)"
+    )
+    if losses > wins and losses >= 3:
+        pnl_message += " - 손실 거래가 우세해서 사이징 축소와 선별 진입이 필요합니다."
+    elif cumulative_pct > 0 and win_rate >= 50:
+        pnl_message += " - 현재는 수익 우위가 있어 좋은 셋업에서만 증액 가능합니다."
+
+    plan_map = {
+        "crypto": strategy_book.get("crypto_plan", {}) or {},
+        "korea": strategy_book.get("korea_plan", {}) or {},
+        "us": strategy_book.get("us_plan", {}) or {},
+    }
+    decision_map = {str(item.get("desk") or ""): item for item in decisions}
+    desk_messages: list[dict] = []
+    for desk in ("crypto", "korea", "us"):
+        plan = plan_map.get(desk, {}) or {}
+        decision = decision_map.get(desk, {}) or {}
+        action = str(decision.get("action") or plan.get("action") or "stand_by")
+        size = str(decision.get("size") or plan.get("size") or "0.00x")
+        symbol = str(plan.get("symbol") or "")
+        focus = str(plan.get("focus") or "").strip()
+        decision_name = str(decision.get("decision") or "review")
+        bull_score = decision.get("bull_score")
+        bear_score = decision.get("bear_score")
+        if action in {"probe_longs", "selective_probe", "attack_opening_drive"} and size != "0.00x":
+            state_text = f"{_action_label(action)} 준비"
+            tone = "active"
+        elif action in {"watchlist_only", "stand_by", "pre_market_watch"}:
+            state_text = "보류"
+            tone = "waiting"
+        else:
+            state_text = _action_label(action)
+            tone = "warning" if action in {"reduce_risk", "capital_preservation"} else "neutral"
+        reason_parts = []
+        if focus:
+            reason_parts.append(focus)
+        if decision_name in {"press", "throttle", "cut", "block"}:
+            reason_parts.append(f"PM 판단: {decision_name}")
+        if bull_score is not None and bear_score is not None:
+            reason_parts.append(f"찬성 {float(bull_score):.2f} / 반대 {float(bear_score):.2f}")
+        desk_messages.append(
+            {
+                "desk": desk,
+                "title": _desk_label(desk),
+                "tone": tone,
+                "state": state_text,
+                "action": action,
+                "size": size,
+                "symbol": symbol,
+                "message": f"{symbol + ' - ' if symbol else ''}{' / '.join(reason_parts) if reason_parts else '판단 근거 수집 중'}",
+            }
+        )
+
+    close_reason_stats = daily.get("close_reason_stats", {}) or {}
+    symbol_stats = list(daily.get("symbol_performance_stats", []) or [])
+    main_causes: list[str] = []
+    if losses and wins == 0:
+        main_causes.append(f"현재 누적 {losses}패 0승으로 아직 승리 샘플이 없습니다.")
+    if close_reason_stats:
+        worst_reason = max(close_reason_stats.items(), key=lambda item: int((item[1] or {}).get("count", 0) or 0))
+        main_causes.append(f"가장 많은 청산 사유는 {worst_reason[0]} {int((worst_reason[1] or {}).get('count', 0) or 0)}건입니다.")
+    negative_symbols = [
+        item for item in symbol_stats
+        if float(item.get("pnl_pct", 0.0) or 0.0) < 0
+    ][:3]
+    if negative_symbols:
+        names = ", ".join(f"{item.get('symbol')} {float(item.get('pnl_pct', 0.0) or 0.0):+.2f}%" for item in negative_symbols)
+        main_causes.append(f"손실 기여 종목: {names}.")
+    if not main_causes:
+        main_causes.append("수익 악화 원인은 아직 통계 샘플이 부족합니다. 포지션별 결과를 더 쌓아야 합니다.")
+
+    open_summary = [
+        {
+            "desk": item.get("desk"),
+            "symbol": item.get("symbol"),
+            "pnl_pct": float(item.get("unrealized_pnl_pct", item.get("pnl_pct", 0.0)) or 0.0),
+            "notional_pct": float(item.get("notional_pct", 0.0) or 0.0),
+        }
+        for item in open_positions[:6]
+    ]
+
+    next_actions = []
+    if pnl_tone == "negative":
+        next_actions.append("손실 우위 구간이므로 신규 진입은 PM debate에서 찬성 우위가 큰 경우만 허용합니다.")
+    if gross >= 0.9:
+        next_actions.append(f"총 노출 {gross:.2f}x가 높아 추가 진입보다 기존 포지션 관리가 우선입니다.")
+    if any(item.get("tone") == "active" for item in desk_messages):
+        next_actions.append("활성 후보는 소액/선별 진입으로만 진행하고, 손실 종목 재진입은 cooldown을 유지합니다.")
+    if not next_actions:
+        next_actions.append("현재는 확실한 진입 조건 대기 상태입니다. 과열 추격보다 다음 좋은 셋업을 기다립니다.")
+
+    return {
+        "headline": headline,
+        "headline_tone": headline_tone,
+        "mode": mode,
+        "mode_label": mode_label,
+        "pnl_tone": pnl_tone,
+        "pnl_message": pnl_message,
+        "desk_messages": desk_messages,
+        "loss_causes": main_causes[:4],
+        "open_summary": open_summary,
+        "next_actions": next_actions[:3],
+        "gross_open_notional_pct": gross,
+    }
+
+
 def _build_dashboard_payload(state: CompanyState) -> dict:
     closed_positions = load_closed_positions(limit=20)
     equity_curve = _build_equity_curve(state)
@@ -1101,6 +1273,7 @@ def _build_dashboard_payload(state: CompanyState) -> dict:
         "ops_flags": _build_ops_flags(state),
         "market_charts": _build_market_charts_payload(state),
         "agent_log": _build_agent_log(state),
+        "operator_briefing": _build_operator_briefing(state, closed_positions),
     }
 
 
@@ -2179,6 +2352,31 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     /* ── 경보 배너 (문제 있을 때만) ── */
     .alert-bar{padding:10px 14px;border-radius:10px;border:1px solid var(--red-border);background:var(--red-bg);color:var(--red);font-size:.84rem;font-weight:600;margin-bottom:14px;display:none}
     .alert-bar.visible{display:block}
+    .briefing-panel{border:1px solid var(--border);border-radius:14px;background:linear-gradient(135deg,rgba(22,27,34,.94),rgba(13,17,23,.98));padding:14px;margin:0 0 14px;box-shadow:0 10px 28px rgba(0,0,0,.22)}
+    .briefing-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
+    .briefing-title{font-size:.95rem;font-weight:800;line-height:1.35}
+    .briefing-sub{font-size:.78rem;color:var(--muted);line-height:1.45;margin-top:3px}
+    .briefing-badge{font-size:.72rem;font-weight:800;padding:4px 8px;border-radius:999px;white-space:nowrap;border:1px solid var(--border)}
+    .briefing-badge.active{color:var(--green);background:var(--green-bg);border-color:var(--green-border)}
+    .briefing-badge.waiting{color:var(--yellow);background:var(--yellow-bg);border-color:rgba(210,153,34,.3)}
+    .briefing-badge.warning,.briefing-badge.negative{color:var(--red);background:var(--red-bg);border-color:var(--red-border)}
+    .briefing-grid{display:grid;grid-template-columns:1.1fr .9fr;gap:10px;margin-bottom:10px}
+    .briefing-card{border:1px solid var(--border-subtle);border-radius:12px;background:rgba(255,255,255,.03);padding:11px}
+    .briefing-card-title{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.07em;margin-bottom:6px}
+    .briefing-card-main{font-size:.85rem;line-height:1.5;font-weight:600}
+    .briefing-card-main.positive{color:var(--green)}.briefing-card-main.negative{color:var(--red)}.briefing-card-main.neutral{color:var(--text)}
+    .briefing-desk-list{display:grid;gap:7px}
+    .briefing-desk{display:flex;align-items:flex-start;gap:8px;font-size:.8rem;padding:7px 0;border-top:1px solid var(--border-subtle)}
+    .briefing-desk:first-child{border-top:none;padding-top:0}
+    .briefing-desk-tag{font-size:.68rem;font-weight:800;padding:3px 7px;border-radius:999px;background:var(--blue-bg);color:var(--blue);white-space:nowrap}
+    .briefing-desk-state{font-weight:800}.briefing-desk-state.active{color:var(--green)}.briefing-desk-state.waiting{color:var(--yellow)}.briefing-desk-state.warning{color:var(--red)}
+    .briefing-desk-msg{font-size:.74rem;color:var(--muted);line-height:1.42;margin-top:2px}
+    .briefing-list{display:grid;gap:5px;margin:0;padding:0;list-style:none}
+    .briefing-list li{font-size:.78rem;line-height:1.45;color:var(--muted)}
+    .briefing-open{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+    .briefing-open-chip{font-size:.72rem;padding:4px 7px;border-radius:999px;background:rgba(255,255,255,.05);border:1px solid var(--border-subtle)}
+    .briefing-open-chip.pos{color:var(--green);border-color:var(--green-border);background:var(--green-bg)}
+    .briefing-open-chip.neg{color:var(--red);border-color:var(--red-border);background:var(--red-bg)}
     /* ── 손익 히어로 ── */
     .pnl-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px}
     .pnl-card{padding:16px;border-radius:12px;border:1px solid var(--border);background:rgba(22,27,34,.8)}
@@ -2331,8 +2529,8 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     .cand-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
     .cand-score{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
     /* ── 반응형 ── */
-    @media(max-width:900px){.pnl-hero{grid-template-columns:repeat(2,1fr)}.desk-grid{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:600px){.app{padding:12px 12px 72px}.topbar{padding:10px 12px}.pnl-hero{grid-template-columns:repeat(2,1fr)}.pnl-value{font-size:1.2rem}.desk-grid{grid-template-columns:repeat(3,1fr)}.desk-card{padding:10px}.desk-action{font-size:.8rem}.desk-focus{display:none}.status-bar{gap:6px}.s-pill{font-size:.75rem;padding:5px 10px}.btn{padding:6px 12px;font-size:.78rem}}
+    @media(max-width:900px){.pnl-hero{grid-template-columns:repeat(2,1fr)}.desk-grid{grid-template-columns:repeat(3,1fr)}.briefing-grid{grid-template-columns:1fr}}
+    @media(max-width:600px){.app{padding:12px 12px 72px}.topbar{padding:10px 12px}.pnl-hero{grid-template-columns:repeat(2,1fr)}.pnl-value{font-size:1.2rem}.desk-grid{grid-template-columns:repeat(3,1fr)}.desk-card{padding:10px}.desk-action{font-size:.8rem}.desk-focus{display:none}.status-bar{gap:6px}.s-pill{font-size:.75rem;padding:5px 10px}.btn{padding:6px 12px;font-size:.78rem}.briefing-head{display:block}.briefing-badge{display:inline-flex;margin-top:8px}.briefing-panel{padding:12px}}
     @media(max-width:400px){.pnl-hero,.desk-grid{grid-template-columns:repeat(2,1fr)}.desk-grid .desk-card:last-child{grid-column:span 2}}
   </style>
 </head>
@@ -2355,6 +2553,35 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
 
   <!-- 경보 배너 -->
   <div class="alert-bar" id="alert-bar"></div>
+
+  <section class="briefing-panel" id="operator-briefing">
+    <div class="briefing-head">
+      <div>
+        <div class="briefing-title" id="briefing-headline">운영 상태 로딩 중...</div>
+        <div class="briefing-sub" id="briefing-pnl">손익 상태 확인 중</div>
+      </div>
+      <span class="briefing-badge waiting" id="briefing-mode">대기</span>
+    </div>
+    <div class="briefing-grid">
+      <div class="briefing-card">
+        <div class="briefing-card-title">지금 왜 거래/보류 중인가</div>
+        <div class="briefing-desk-list" id="briefing-desks"></div>
+      </div>
+      <div class="briefing-card">
+        <div class="briefing-card-title">수익 악화 원인</div>
+        <ul class="briefing-list" id="briefing-losses"></ul>
+      </div>
+      <div class="briefing-card">
+        <div class="briefing-card-title">현재 보유</div>
+        <div class="briefing-card-main" id="briefing-open-text">--</div>
+        <div class="briefing-open" id="briefing-open"></div>
+      </div>
+      <div class="briefing-card">
+        <div class="briefing-card-title">다음 운영 방침</div>
+        <ul class="briefing-list" id="briefing-actions"></ul>
+      </div>
+    </div>
+  </section>
 
   <!-- 손익 히어로 -->
   <div class="pnl-hero">
@@ -2521,6 +2748,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   function fmtKrw(v){var n=Math.abs(parseInt(v)||0);return n>=1000000?(n/1000000).toFixed(2)+'M':n>=1000?(n/1000).toFixed(0)+'K':String(n);}
   function fmtKrwFull(v,sign){var n=parseInt(v)||0;var prefix=sign?(n>=0?'+':''):'';return prefix+'\\u20a9'+Math.abs(n).toLocaleString('ko-KR');}
   function pctCls(v){var n=parseFloat(v)||0;return n>0?'pos':n<0?'neg':'';}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function actionCls(a){var s=String(a||'').toLowerCase();if(s.indexOf('probe_long')>=0||s.indexOf('attack')>=0)return 'buy';if(s.indexOf('reduce')>=0||s.indexOf('preservation')>=0)return 'sell';if(s.indexOf('probe')>=0||s.indexOf('selective')>=0)return 'probe';return 'watch';}
   function actionKo(a){var s=String(a||'').toLowerCase();if(s==='probe_longs')return '롱 진입 탐색';if(s==='selective_probe')return '선택적 진입';if(s==='attack_opening_drive')return '공세 진입';if(s==='reduce_risk')return '리스크 축소';if(s==='capital_preservation')return '자본 보존';if(s==='watchlist_only')return '관찰 대기';if(s==='stand_by')return '대기';if(s==='pre_market_watch')return '장 외 대기';if(s==='n/a')return '--';return a||'대기';}
   window.__activeDeskDetail = null;
@@ -2575,6 +2803,24 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     panel.classList.add('open');
   }
   function toggleDeskDetail(desk){renderDeskDetail(desk);}
+  function renderOperatorBriefing(b){
+    b=b||{};
+    var badge=document.getElementById('briefing-mode');
+    document.getElementById('briefing-headline').textContent=b.headline||'운영 상태 정보 없음';
+    document.getElementById('briefing-pnl').textContent=b.pnl_message||'손익 상태 정보 없음';
+    document.getElementById('briefing-pnl').className='briefing-sub '+(b.pnl_tone||'neutral');
+    badge.textContent=b.mode_label||b.mode||'대기';
+    badge.className='briefing-badge '+(b.headline_tone||'waiting');
+    var desks=(b.desk_messages||[]).map(function(d){
+      return '<div class="briefing-desk"><span class="briefing-desk-tag">'+esc(d.title||d.desk||'데스크')+'</span><div><div><span class="briefing-desk-state '+esc(d.tone||'waiting')+'">'+esc(d.state||'대기')+'</span> <span style="color:var(--muted);font-size:.72rem">'+esc(d.size||'0.00x')+'</span></div><div class="briefing-desk-msg">'+esc(d.message||'판단 근거 수집 중')+'</div></div></div>';
+    }).join('');
+    document.getElementById('briefing-desks').innerHTML=desks||'<div class="empty-row">데스크 판단 없음</div>';
+    document.getElementById('briefing-losses').innerHTML=(b.loss_causes||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')||'<li>손익 원인 분석 데이터 없음</li>';
+    document.getElementById('briefing-actions').innerHTML=(b.next_actions||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')||'<li>다음 운영 방침 없음</li>';
+    var opens=b.open_summary||[];
+    document.getElementById('briefing-open-text').textContent=opens.length?opens.length+'개 포지션 보유 / 총 노출 '+Number(b.gross_open_notional_pct||0).toFixed(2)+'x':'보유 포지션 없음';
+    document.getElementById('briefing-open').innerHTML=opens.map(function(p){var pnl=parseFloat(p.pnl_pct||0);return '<span class="briefing-open-chip '+(pnl>0?'pos':pnl<0?'neg':'')+'">'+esc(p.symbol||'--')+' '+fmtPct(pnl)+'</span>';}).join('');
+  }
   function renderPnl(perf,cap){var rp=parseFloat(perf.realized_pnl_pct||0),up=parseFloat(perf.unrealized_pnl_pct||0),cp=parseFloat(cap.cumulative_realized_pnl_pct||0);var rc=document.getElementById('pnl-realized-card'),uc=document.getElementById('pnl-unrealized-card');document.getElementById('pnl-realized').textContent=fmtPct(rp);document.getElementById('pnl-realized').className='pnl-value '+(rp>0?'pos':rp<0?'neg':'neu');document.getElementById('pnl-realized-krw').textContent=fmtKrwFull(perf.realized_pnl_krw,true);rc.className='pnl-card'+(rp>0?' hl-pos':rp<0?' hl-neg':'');document.getElementById('pnl-unrealized').textContent=fmtPct(up);document.getElementById('pnl-unrealized').className='pnl-value '+(up>0?'pos':up<0?'neg':'neu');document.getElementById('pnl-unrealized-krw').textContent=fmtKrwFull(perf.unrealized_pnl_krw,true);uc.className='pnl-card'+(up>0?' hl-pos':up<0?' hl-neg':'');var wr=parseFloat(perf.cumulative_win_rate||perf.win_rate||0);document.getElementById('pnl-winrate').textContent=wr.toFixed(1)+'%';document.getElementById('pnl-winrate').className='pnl-value '+(wr>=55?'pos':wr<40?'neg':'neu');document.getElementById('pnl-trades').textContent=(perf.cumulative_wins||perf.wins||0)+'승 / '+(perf.cumulative_losses||perf.losses||0)+'패 (누적 '+fmtPct(cp)+')';document.getElementById('pnl-capital').textContent='₩'+(parseInt(cap.total_krw||0)).toLocaleString('ko-KR');document.getElementById('pnl-capital-base').textContent='복리자본 ₩'+(parseInt(cap.effective_capital_krw||cap.base_krw||0)).toLocaleString('ko-KR')+(cp!==0?' ('+fmtPct(cp)+')':'');}
   function renderStatusBar(state,readiness,blockSummary){var stance=String(state.stance||'--');var regime=String(state.regime||'--');var allow=!!((readiness.exposure||{}).allow_new_entries!=null?(readiness.exposure||{}).allow_new_entries:state.allow_new_entries);var overall=String(readiness.overall||'caution');var stanceCls=stance==='BULLISH'?'ok':stance==='DEFENSE'?'bad':'warn';var regimeCls=regime==='TRENDING'?'ok':regime==='STRESSED'?'bad':'warn';var bar=document.getElementById('status-bar');bar.innerHTML='<div class="s-pill '+stanceCls+'"><span class="lbl">스탠스</span>'+stance+'</div>'+'<div class="s-pill '+regimeCls+'"><span class="lbl">국면</span>'+regime+'</div>'+'<div class="s-pill '+(allow?'ok':'bad')+'"><span class="lbl">진입</span>'+(allow?'허용':'차단')+'</div>'+'<div class="s-pill '+(overall==='ready'?'ok':overall==='caution'?'warn':'bad')+'"><span class="lbl">준비도</span>'+overall.toUpperCase()+'</div>';}
   function renderSignal(lane,history){var ts=String((lane||{}).trigger_state||'waiting');var sig=parseFloat((lane||{}).signal_score||0);var trig=parseFloat((lane||{}).trigger_threshold||0.56);var dist=parseFloat((lane||{}).distance_to_trigger||0);var sym=String((lane||{}).symbol||'KRW-BTC');var act=String((lane||{}).action||'watchlist_only');var card=document.getElementById('signal-card');var badge=document.getElementById('signal-badge');card.className='signal-card '+(ts==='ready'?'ready':ts==='arming'?'arming':'');badge.className='signal-badge '+ts;badge.textContent=ts==='ready'?'진입 준비':ts==='arming'?'접근 중':'대기';document.getElementById('signal-sym').textContent=sym+' · '+actionKo(act);var pct=trig>0?Math.min(sig/trig*100,100):0;var fill=document.getElementById('gauge-fill');fill.style.width=pct.toFixed(1)+'%';fill.className='gauge-fill '+(ts==='ready'?'ready':ts==='arming'?'arming':'');document.getElementById('gauge-cur').textContent='현재 '+sig.toFixed(2);document.getElementById('gauge-trig').textContent='진입 '+trig.toFixed(2);document.getElementById('signal-meta').textContent=ts==='ready'?'진입 조건 충족 — 파일럿 주문 실행 중':ts==='arming'?'진입까지 거리 '+dist.toFixed(2)+' — 모니터링 강화':'진입까지 거리 '+dist.toFixed(2)+' (필요: '+trig.toFixed(2)+')';var chips=(history||[]).slice(-4).map(function(r){var rs=parseFloat(r.signal_score||0),rt=parseFloat(r.trigger_threshold||0);return '<span class="trend-chip">'+(r.time||'--:--')+' '+rs.toFixed(2)+'</span>';});document.getElementById('trend-mini').innerHTML=chips.join('');}
@@ -2616,7 +2862,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     body.innerHTML=html;
   }
   function renderBroker(health,readiness){var bhtml='';['upbit','kis'].forEach(function(key){var item=(health||{})[key]||{};var ok=item.balances_ok,cfg=item.configured!==false;bhtml+='<div class="broker-row"><div><div class="broker-name">'+key.toUpperCase()+'</div><div class="'+(cfg?ok?'broker-ok':'broker-warn':'broker-muted')+'">'+(cfg?ok?'잔고 확인':'잔고 오류':'미설정')+'</div></div><div class="status-tag '+(cfg?ok?'pass':'warn':'')+'">'+( cfg?ok?'연결':'점검':'미설정')+'</div></div>';});var rhtml='';((readiness||{}).checklist||[]).slice(0,6).forEach(function(item){var st=item.status||'warn';rhtml+='<div class="check-row"><div><div class="check-lbl">'+(item.label||'--')+'</div><div class="check-det">'+(item.detail||'')+'</div></div><div class="status-tag '+st+'">'+(st==='pass'?'통과':st==='block'?'차단':'주의')+'</div></div>';});document.getElementById('broker-rows').innerHTML=bhtml;document.getElementById('readiness-rows').innerHTML=rhtml||'<div style="color:var(--muted);font-size:.82rem;padding:8px 0">준비도 데이터 없음</div>';}
-  async function loadData(){try{var dr=await fetch('/dashboard-data'),hr=await fetch('/health');var data=await dr.json(),health=await hr.json();var state=data.state||{},dash=data.dashboard||{},readiness=data.live_readiness_checklist||{},brokerH=data.broker_live_health||{},exec=(dash.execution_summary||{}),perf=(dash.performance||{}),cap=(dash.capital||{}),blockSummary=((dash.exposure||{}).entry_block_summary)||((readiness||{}).entry_block_summary)||{};var isLive=String(readiness.execution_mode||'').indexOf('live')>=0;var dot=document.getElementById('status-dot');dot.className='status-dot'+(blockSummary.blocked?' err':isLive?' ':'');var modeEl=document.getElementById('mode-tag');modeEl.textContent=String(readiness.execution_mode||'모의투자');modeEl.className='mode-tag'+(isLive?' live':'');document.getElementById('update-time').textContent=toKST(state.updated_at);if(blockSummary&&blockSummary.blocked){var ab=document.getElementById('alert-bar');ab.textContent='\\u26a0\\ufe0f '+String(blockSummary.detail||blockSummary.headline||'실행 차단');ab.className='alert-bar visible';}else{document.getElementById('alert-bar').className='alert-bar';}renderPnl(perf,cap);renderStatusBar(state,readiness,blockSummary);renderSignal(dash.crypto_live_lane||null,dash.crypto_live_lane_history||[]);window.__deskDrilldown=dash.desk_drilldown||{};renderDesks(dash.desk_status||{});renderOrderBar(exec);renderPositions(dash.open_positions||[]);renderTrades(dash.closed_positions||[]);renderEquity(dash.equity_curve||[]);renderBroker(brokerH,readiness);renderAgentLog(dash.agent_log||[]);}catch(e){var dot2=document.getElementById('status-dot');dot2.className='status-dot err';document.getElementById('alert-bar').textContent='\\u26a0\\ufe0f 데이터 로딩 실패: '+e.message;document.getElementById('alert-bar').className='alert-bar visible';}}
+  async function loadData(){try{var dr=await fetch('/dashboard-data'),hr=await fetch('/health');var data=await dr.json(),health=await hr.json();var state=data.state||{},dash=data.dashboard||{},readiness=data.live_readiness_checklist||{},brokerH=data.broker_live_health||{},exec=(dash.execution_summary||{}),perf=(dash.performance||{}),cap=(dash.capital||{}),blockSummary=((dash.exposure||{}).entry_block_summary)||((readiness||{}).entry_block_summary)||{};var isLive=String(readiness.execution_mode||'').indexOf('live')>=0;var dot=document.getElementById('status-dot');dot.className='status-dot'+(blockSummary.blocked?' err':isLive?' ':'');var modeEl=document.getElementById('mode-tag');modeEl.textContent=String(readiness.execution_mode||'모의투자');modeEl.className='mode-tag'+(isLive?' live':'');document.getElementById('update-time').textContent=toKST(state.updated_at);if(blockSummary&&blockSummary.blocked){var ab=document.getElementById('alert-bar');ab.textContent='\\u26a0\\ufe0f '+String(blockSummary.detail||blockSummary.headline||'실행 차단');ab.className='alert-bar visible';}else{document.getElementById('alert-bar').className='alert-bar';}renderOperatorBriefing(dash.operator_briefing||{});renderPnl(perf,cap);renderStatusBar(state,readiness,blockSummary);renderSignal(dash.crypto_live_lane||null,dash.crypto_live_lane_history||[]);window.__deskDrilldown=dash.desk_drilldown||{};renderDesks(dash.desk_status||{});renderOrderBar(exec);renderPositions(dash.open_positions||[]);renderTrades(dash.closed_positions||[]);renderEquity(dash.equity_curve||[]);renderBroker(brokerH,readiness);renderAgentLog(dash.agent_log||[]);}catch(e){var dot2=document.getElementById('status-dot');dot2.className='status-dot err';document.getElementById('alert-bar').textContent='\\u26a0\\ufe0f 데이터 로딩 실패: '+e.message;document.getElementById('alert-bar').className='alert-bar visible';}}
   async function runCycle(){var btn=document.getElementById('cycle-btn');btn.disabled=true;btn.textContent='실행 중...';try{await fetch('/cycle',{method:'POST'});await loadData();}catch(e){console.error(e);}finally{btn.disabled=false;btn.textContent='사이클 실행';}}
   setInterval(function(){loadData().catch(function(){});},20000);loadData().catch(function(){});
 </script>
