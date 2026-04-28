@@ -13,6 +13,7 @@ import requests
 from requests import RequestException
 
 from app.config import settings
+from app.services.upbit_stream_cache import get_cached_ticker_prices, get_cached_ticker_rows
 
 _log = logging.getLogger(__name__)
 
@@ -79,7 +80,54 @@ def _chunked(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
 
 
+def _rank_krw_ticker_rows(tickers: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    max_volume = max((float(item.get("volume_24h_krw", item.get("acc_trade_price_24h", 0.0)) or 0.0) for item in tickers), default=1.0)
+    for item in tickers:
+        market = str(item.get("market") or "").strip()
+        price = float(item.get("trade_price") or 0.0)
+        volume_24h = float(item.get("volume_24h_krw", item.get("acc_trade_price_24h", 0.0)) or 0.0)
+        change_rate = float(item.get("change_rate", item.get("signed_change_rate", 0.0)) or 0.0)
+        if abs(change_rate) <= 1.0 and "signed_change_rate" in item:
+            change_rate *= 100
+        if not market or price <= 0 or volume_24h <= 0:
+            continue
+        liquidity_score = min(volume_24h / max_volume, 1.0)
+        momentum_score = min(max(change_rate, 0.0) / 12.0, 1.0)
+        volatility_score = min(abs(change_rate) / 18.0, 1.0)
+        discovery_score = round(
+            (liquidity_score * 0.45)
+            + (momentum_score * 0.35)
+            + (volatility_score * 0.20),
+            4,
+        )
+        rows.append(
+            {
+                "market": market,
+                "trade_price": price,
+                "change_rate": round(change_rate, 2),
+                "volume_24h_krw": int(volume_24h),
+                "discovery_score": discovery_score,
+                "source": str(item.get("source") or "upbit_rest"),
+            }
+        )
+    rows.sort(key=lambda item: (item["discovery_score"], item["volume_24h_krw"]), reverse=True)
+    return rows[:limit]
+
+
 def get_top_krw_coins(top_n: int = 10) -> list[dict[str, Any]]:
+    cached_rows = get_cached_ticker_rows()
+    if len(cached_rows) >= min(top_n, 8):
+        leaders = sorted(cached_rows, key=lambda item: int(item.get("volume_24h_krw") or 0), reverse=True)[:top_n]
+        return [
+            {
+                "market": item.get("market"),
+                "trade_price": float(item.get("trade_price") or 0),
+                "change_rate": round(float(item.get("change_rate") or 0), 2),
+                "volume_24h_krw": int(float(item.get("volume_24h_krw") or 0)),
+            }
+            for item in leaders
+        ]
     try:
         market_resp = requests.get(UPBIT_MARKETS_URL, timeout=REQUEST_TIMEOUT)
         market_resp.raise_for_status()
@@ -120,6 +168,10 @@ def get_krw_crypto_candidates(limit: int = 18) -> list[dict[str, Any]]:
     We keep the market open to every KRW coin, but only run expensive candle
     and orderbook analysis on the best live candidates for the current cycle.
     """
+    cached_rows = get_cached_ticker_rows()
+    if len(cached_rows) >= min(limit, 12):
+        return _rank_krw_ticker_rows(cached_rows, limit)
+
     try:
         market_resp = requests.get(UPBIT_MARKETS_URL, timeout=REQUEST_TIMEOUT)
         market_resp.raise_for_status()
@@ -135,36 +187,7 @@ def get_krw_crypto_candidates(limit: int = 18) -> list[dict[str, Any]]:
             ticker_resp.raise_for_status()
             tickers.extend(ticker_resp.json())
 
-        rows: list[dict[str, Any]] = []
-        max_volume = max((float(item.get("acc_trade_price_24h") or 0.0) for item in tickers), default=1.0)
-        for item in tickers:
-            market = str(item.get("market") or "").strip()
-            price = float(item.get("trade_price") or 0.0)
-            volume_24h = float(item.get("acc_trade_price_24h") or 0.0)
-            change_rate = float(item.get("signed_change_rate") or 0.0) * 100
-            if not market or price <= 0 or volume_24h <= 0:
-                continue
-            liquidity_score = min(volume_24h / max_volume, 1.0)
-            momentum_score = min(max(change_rate, 0.0) / 12.0, 1.0)
-            volatility_score = min(abs(change_rate) / 18.0, 1.0)
-            discovery_score = round(
-                (liquidity_score * 0.45)
-                + (momentum_score * 0.35)
-                + (volatility_score * 0.20),
-                4,
-            )
-            rows.append(
-                {
-                    "market": market,
-                    "trade_price": price,
-                    "change_rate": round(change_rate, 2),
-                    "volume_24h_krw": int(volume_24h),
-                    "discovery_score": discovery_score,
-                }
-            )
-
-        rows.sort(key=lambda item: (item["discovery_score"], item["volume_24h_krw"]), reverse=True)
-        return rows[:limit]
+        return _rank_krw_ticker_rows(tickers, limit)
     except (RequestException, ValueError, TypeError):
         return []
 
@@ -173,9 +196,13 @@ def get_upbit_ticker_prices(markets: list[str]) -> dict[str, float]:
     symbols = [str(item).strip() for item in markets if str(item).strip()]
     if not symbols:
         return {}
+    cached = get_cached_ticker_prices(symbols)
+    missing = [symbol for symbol in dict.fromkeys(symbols) if symbol not in cached]
+    if not missing:
+        return cached
     try:
-        prices: dict[str, float] = {}
-        for chunk in _chunked(list(dict.fromkeys(symbols)), 100):
+        prices: dict[str, float] = dict(cached)
+        for chunk in _chunked(missing, 100):
             resp = requests.get(
                 UPBIT_TICKER_URL,
                 params={"markets": ",".join(chunk)},

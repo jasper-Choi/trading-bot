@@ -9,6 +9,7 @@ from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
+from app.services.upbit_stream_cache import start_upbit_ticker_stream, upbit_stream_status
 
 
 def _determine_runtime_interval_seconds(session: dict) -> int:
@@ -55,6 +56,13 @@ def _sleep_with_rapid_guards(interval_seconds: int) -> None:
 
 def run_company_loop() -> None:
     orchestrator = CompanyOrchestrator()
+    if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
+        started = start_upbit_ticker_stream()
+        status = upbit_stream_status()
+        print(
+            "[runtime] upbit websocket cache "
+            f"started={started} running={status.get('running')} cached={status.get('cached_count')}"
+        )
     print(
         "[runtime] starting reactive company loop "
         f"(active={settings.realtime_active_interval_seconds}s, "

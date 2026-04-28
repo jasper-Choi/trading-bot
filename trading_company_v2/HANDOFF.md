@@ -744,3 +744,24 @@ Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레�
   - keep the full-universe strategy scan open
   - make open-position risk response much faster
   - prevent profitable spikes or sudden reversals from waiting on a slow full cycle
+
+## 20. Upbit WebSocket Ticker Cache Patch (2026-04-28)
+
+- Added a persistent Upbit ticker stream cache:
+  - new `app/services/upbit_stream_cache.py`
+  - default public stream: `wss://api.upbit.com/websocket/v1`
+  - subscribes to the KRW universe up to `UPBIT_WS_CODES_LIMIT=220`
+  - stores latest `trade_price`, 24h KRW volume, change rate, exchange timestamp, and local receive time
+- Market data now uses websocket cache first:
+  - `get_upbit_ticker_prices()` reads fresh stream prices first, then REST only for missing symbols
+  - `get_krw_crypto_candidates()` can rank candidates directly from the live stream cache when enough fresh rows exist
+  - `get_top_krw_coins()` also uses the stream cache when populated
+- Runtime starts the stream automatically in crypto-only mode when `UPBIT_WS_ENABLED=true`.
+- New environment controls:
+  - `UPBIT_WS_ENABLED=true`
+  - `UPBIT_WS_FRESH_SECONDS=6`
+  - `UPBIT_WS_CODES_LIMIT=220`
+- Intent:
+  - reduce REST polling latency for price updates
+  - make rapid guard and candidate discovery react closer to tick speed
+  - prepare the next event-driven entry/exit service without discarding the current multi-agent strategy stack

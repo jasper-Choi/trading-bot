@@ -53,6 +53,9 @@ class Settings:
     realtime_idle_interval_seconds: int = int(os.environ.get("REALTIME_IDLE_INTERVAL_SECONDS", "120"))
     crypto_fast_cycle_seconds: int = int(os.environ.get("CRYPTO_FAST_CYCLE_SECONDS", "8"))
     crypto_rapid_guard_seconds: int = int(os.environ.get("CRYPTO_RAPID_GUARD_SECONDS", "3"))
+    upbit_ws_enabled: bool = os.environ.get("UPBIT_WS_ENABLED", "true").lower() == "true"
+    upbit_ws_fresh_seconds: float = float(os.environ.get("UPBIT_WS_FRESH_SECONDS", "6"))
+    upbit_ws_codes_limit: int = int(os.environ.get("UPBIT_WS_CODES_LIMIT", "220"))
     timezone: str = os.environ.get("APP_TIMEZONE", "Asia/Seoul")
     paper_capital_krw: int = int(os.environ.get("PAPER_CAPITAL_KRW", "10000000"))
     db_path: Path = Path(os.environ.get("APP_DB_PATH", str(DATA_DIR / "trading_company_v2.db")))
