@@ -75,7 +75,7 @@ class ExecutionAgent(BaseAgent):
         # Crypto: 2 positions allowed to build portfolio; cap at 1.2x (2 × 0.6x)
         # Korea/US: 2 positions, 1.0x cap
         if desk == "crypto":
-            return 2, 1.2  # concentrate on best 2 setups (was 4 / 2.4x)
+            return 4, 2.0  # enter all valid signals (was limited to 2 — wrong for profit max)
         if desk == "us":
             return 3, 1.5
         return 3, 1.5

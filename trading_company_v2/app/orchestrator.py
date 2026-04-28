@@ -809,6 +809,45 @@ class CompanyOrchestrator:
             skip_desks.add("crypto")
         if live_korea_enabled:
             skip_desks.add("korea")
+
+        # Signal-based exit: close long positions when downtrend reversal detected.
+        # Faster than waiting for trailing stop — exit on the signal, not the drawdown.
+        # Conditions for signal reversal exit:
+        #   (A) CHoCH bearish + weak signal_score → structure has flipped down
+        #   (B) micro_score collapsed (<= 0.18) + orderbook selling pressure → real-time reversal
+        if "crypto" not in skip_desks:
+            candidate_signal_map: dict[str, dict] = {
+                str(item.get("market", "")).strip(): item
+                for item in (crypto_desk_result.payload.get("candidate_markets") or [])
+                if str(item.get("market", "")).strip()
+            }
+            current_prices = _extract_prices(state.market_snapshot)
+            for pos in list(state.open_positions):
+                if pos.get("desk") != "crypto":
+                    continue
+                symbol = str(pos.get("symbol") or "").strip()
+                if not symbol:
+                    continue
+                sig = candidate_signal_map.get(symbol)
+                if not sig:
+                    continue
+                choch_bear = bool(sig.get("choch_bearish", False))
+                signal_score_val = float(sig.get("signal_score", 0.5) or 0.5)
+                micro_score_val = float(sig.get("micro_score", 0.5) or 0.5)
+                orderbook_bid_ask = float(sig.get("orderbook_bid_ask_ratio", 1.0) or 1.0)
+                # (A) structural reversal: CHoCH bearish with weak signal
+                # (B) momentum collapse: micro dead AND orderbook dominated by sellers
+                reversal_a = choch_bear and signal_score_val < 0.40
+                reversal_b = micro_score_val <= 0.18 and orderbook_bid_ask <= 0.78
+                if reversal_a or reversal_b:
+                    reason = "choch_bearish_exit" if reversal_a else "momentum_collapse_exit"
+                    close_position_by_symbol("crypto", symbol, current_prices, reason=reason)
+                    state.notes.append(
+                        f"signal exit {symbol}: {reason} "
+                        f"(signal={signal_score_val:.2f} micro={micro_score_val:.2f} "
+                        f"choch_bear={choch_bear} ob_ratio={orderbook_bid_ask:.2f})"
+                    )
+
         _manage_positions(paper_orders, state.market_snapshot, skip_desks=skip_desks or None)
         save_cycle_journal(
             CycleJournalEntry(
