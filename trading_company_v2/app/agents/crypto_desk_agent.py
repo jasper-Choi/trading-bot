@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from app.agents.base import BaseAgent
+from app.config import settings
 from app.core.models import AgentResult
 from app.services.atr_sizing import summarize_atr_sizing
 from app.services.backtest_advisor import get_crypto_weights
@@ -20,6 +23,56 @@ from app.services.signal_engine import (
 
 _FETCH_WORKERS = 8
 _MAX_CYCLE_MARKETS = 18
+_KST = ZoneInfo("Asia/Seoul")
+
+
+def _pct_returns(candles: list[dict], limit: int = 32) -> list[float]:
+    closes = [float(item.get("close") or 0.0) for item in candles if float(item.get("close") or 0.0) > 0]
+    if len(closes) < 3:
+        return []
+    values = closes[-(limit + 1):]
+    return [((values[idx] - values[idx - 1]) / values[idx - 1]) for idx in range(1, len(values)) if values[idx - 1] > 0]
+
+
+def _pearson_corr(left: list[float], right: list[float]) -> float:
+    n = min(len(left), len(right))
+    if n < 8:
+        return 1.0
+    a = left[-n:]
+    b = right[-n:]
+    avg_a = sum(a) / n
+    avg_b = sum(b) / n
+    var_a = sum((value - avg_a) ** 2 for value in a)
+    var_b = sum((value - avg_b) ** 2 for value in b)
+    if var_a <= 0 or var_b <= 0:
+        return 1.0
+    cov = sum((a[idx] - avg_a) * (b[idx] - avg_b) for idx in range(n))
+    return round(max(min(cov / ((var_a * var_b) ** 0.5), 1.0), -1.0), 3)
+
+
+def _latest_candle_age_minutes(candles: list[dict]) -> float:
+    if not candles:
+        return 999.0
+    raw = str(candles[-1].get("date") or "").strip()
+    if not raw:
+        return 999.0
+    try:
+        parsed = datetime.fromisoformat(raw)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=_KST)
+        return round(max((datetime.now(_KST) - parsed.astimezone(_KST)).total_seconds() / 60, 0.0), 2)
+    except ValueError:
+        return 999.0
+
+
+def _freshness_factor(age_minutes: float) -> tuple[float, str]:
+    stale_limit = max(float(settings.crypto_signal_stale_minutes or 6.0), 1.0)
+    if age_minutes <= 2.0:
+        return 1.0, f"fresh 1m signal ({age_minutes:.1f}m)"
+    if age_minutes <= stale_limit:
+        factor = max(0.82, 1.0 - ((age_minutes - 2.0) / stale_limit) * 0.18)
+        return round(factor, 3), f"aging 1m signal ({age_minutes:.1f}m)"
+    return 0.68, f"stale 1m signal ({age_minutes:.1f}m)"
 
 
 class CryptoDeskAgent(BaseAgent):
@@ -29,7 +82,9 @@ class CryptoDeskAgent(BaseAgent):
     def run(self) -> AgentResult:
         weights = get_crypto_weights()
         direction_symbol = "KRW-BTC"
-        direction_signal = summarize_crypto_signal(get_upbit_15m_candles(direction_symbol, count=40))
+        direction_candles = get_upbit_15m_candles(direction_symbol, count=40)
+        direction_returns = _pct_returns(direction_candles)
+        direction_signal = summarize_crypto_signal(direction_candles)
 
         discovery_candidates = get_krw_crypto_candidates(limit=_MAX_CYCLE_MARKETS)
         market_weights: dict[str, float] = {}
@@ -55,10 +110,22 @@ class CryptoDeskAgent(BaseAgent):
         def _fetch_market(market_weight: tuple[str, float]) -> tuple[str, float, dict, dict, dict, dict]:
             market, weight = market_weight
             candles_15m = get_upbit_15m_candles(market, count=40)
+            candles_1m = get_upbit_1m_candles(market, count=80)
             signal = summarize_crypto_signal(candles_15m)
-            micro = summarize_crypto_micro_momentum_signal(get_upbit_1m_candles(market, count=80))
+            micro = summarize_crypto_micro_momentum_signal(candles_1m)
             orderbook = summarize_orderbook_pressure(get_upbit_orderbook(market))
             atr_sizing = summarize_atr_sizing(candles_15m)
+            corr = 1.0 if market == direction_symbol else _pearson_corr(_pct_returns(candles_15m), direction_returns)
+            age_minutes = _latest_candle_age_minutes(candles_1m)
+            freshness_factor, freshness_reason = _freshness_factor(age_minutes)
+            signal.update(
+                {
+                    "btc_corr_15m": corr,
+                    "signal_age_minutes": age_minutes,
+                    "signal_freshness": freshness_factor,
+                    "freshness_reason": freshness_reason,
+                }
+            )
             return market, weight, signal, micro, orderbook, atr_sizing
 
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
@@ -76,6 +143,9 @@ class CryptoDeskAgent(BaseAgent):
                 + (float(weight or 0.0) * 0.06),
                 3,
             )
+            freshness = float(signal.get("signal_freshness", 1.0) or 1.0)
+            if freshness < 1.0:
+                combined_score = round(combined_score * freshness, 3)
             if bool(micro.get("micro_ready", False)) and bool(orderbook.get("orderbook_ready", False)) and bool(signal.get("rsi_quality_ok", True)):
                 combined_score = min(1.0, round(combined_score + 0.06, 3))
             pullback_s = float(signal.get("pullback_score", 0.0) or 0.0)
@@ -106,6 +176,10 @@ class CryptoDeskAgent(BaseAgent):
                     "atr_size_multiplier": float(atr_sizing.get("atr_size_multiplier", 1.0) or 1.0),
                     "volatility_tier": str(atr_sizing.get("volatility_tier", "unknown") or "unknown"),
                     "atr_sizing_reason": str(atr_sizing.get("atr_sizing_reason", "") or ""),
+                    "btc_corr_15m": float(signal.get("btc_corr_15m", 1.0) or 1.0),
+                    "signal_age_minutes": float(signal.get("signal_age_minutes", 999.0) or 999.0),
+                    "signal_freshness": float(signal.get("signal_freshness", 1.0) or 1.0),
+                    "freshness_reason": str(signal.get("freshness_reason", "") or ""),
                     "combined_score": combined_score,
                     "bias": str(signal.get("bias", "balanced") or "balanced"),
                     "recent_change_pct": float(signal.get("recent_change_pct", 0.0) or 0.0),
@@ -213,6 +287,10 @@ class CryptoDeskAgent(BaseAgent):
                 "atr_size_multiplier": float(leader.get("atr_size_multiplier", 1.0) or 1.0),
                 "volatility_tier": str(leader.get("volatility_tier", "unknown") or "unknown"),
                 "atr_sizing_reason": str(leader.get("atr_sizing_reason", "") or ""),
+                "btc_corr_15m": float(leader.get("btc_corr_15m", 1.0) or 1.0),
+                "signal_age_minutes": float(leader.get("signal_age_minutes", 999.0) or 999.0),
+                "signal_freshness": float(leader.get("signal_freshness", 1.0) or 1.0),
+                "freshness_reason": str(leader.get("freshness_reason", "") or ""),
                 "backtest_weights": weights,
                 "candidate_symbols": candidate_markets[:6],
                 "candidate_markets": ranked_candidates[:6],

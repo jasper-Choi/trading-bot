@@ -61,6 +61,14 @@ class ExecutionAgent(BaseAgent):
             2,
         )
 
+    def _crypto_high_corr_open_count(self) -> int:
+        """Approximate BTC-beta crowding until per-position signal metadata is persisted."""
+        return sum(
+            1
+            for item in self.open_positions
+            if item.get("desk") == "crypto" and str(item.get("symbol") or "").startswith("KRW-")
+        )
+
     def _desk_open_count(self, desk: str) -> int:
         return sum(1 for item in self.open_positions if item.get("desk") == desk)
 
@@ -413,6 +421,14 @@ class ExecutionAgent(BaseAgent):
                 atr_multiplier = max(min(float(plan.get("atr_size_multiplier", 1.0) or 1.0), 1.15), 0.45)
             except (TypeError, ValueError):
                 atr_multiplier = 1.0
+        try:
+            btc_corr_15m = float(plan.get("btc_corr_15m", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            btc_corr_15m = 1.0
+        try:
+            signal_freshness = float(plan.get("signal_freshness", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            signal_freshness = 1.0
         offense_scaled_base = round(
             base_notional
             * float(desk_offense.get("size_multiplier", 1.0) or 1.0)
@@ -465,11 +481,20 @@ class ExecutionAgent(BaseAgent):
         desk_position_cap_hit = desk_open_count >= max_positions
         desk_notional_cap_hit = (desk_open_notional + notional_pct) > max_desk_notional and action in actionable_entries
         gross_notional_cap_hit = (gross_open_notional + notional_pct) > total_notional_cap and action in actionable_entries
+        high_corr_cap_hit = (
+            desk == "crypto"
+            and action in actionable_entries
+            and btc_corr_15m >= float(settings.crypto_high_corr_threshold)
+            and self._crypto_high_corr_open_count() >= int(settings.crypto_high_corr_max_positions)
+        ) or bool(plan.get("force_high_corr_cap", False))
+        stale_signal_block = desk == "crypto" and action in actionable_entries and signal_freshness <= 0.70
         exit_status = "planned" if action in actionable_exits and existing_open else "idle"
         meta = {
             "symbol": symbol,
             "reference_price": reference_price,
             "notional_pct": notional_pct,
+            "btc_corr_15m": round(btc_corr_15m, 3),
+            "signal_freshness": round(signal_freshness, 3),
             "status": "planned"
             if action in actionable_entries
             and notional_pct > 0
@@ -487,6 +512,8 @@ class ExecutionAgent(BaseAgent):
             and not desk_position_cap_hit
             and not desk_notional_cap_hit
             and not gross_notional_cap_hit
+            and not high_corr_cap_hit
+            and not stale_signal_block
             else exit_status,
             "pnl_estimate_pct": pnl_estimate_pct,
         }
@@ -553,6 +580,17 @@ class ExecutionAgent(BaseAgent):
             notes.append(
                 f"gross exposure cap hit: open {gross_open_notional:.2f}x + new {notional_pct:.2f}x > {total_notional_cap:.2f}x"
             )
+        if high_corr_cap_hit:
+            scope = "open/planned" if bool(plan.get("force_high_corr_cap", False)) else "open"
+            notes.append(
+                f"BTC correlation cap hit: corr {btc_corr_15m:.2f} >= {settings.crypto_high_corr_threshold:.2f}, "
+                f"{scope} high-beta crypto positions limit {settings.crypto_high_corr_max_positions}"
+            )
+        if stale_signal_block:
+            notes.append(
+                f"stale signal blocked entry: freshness {signal_freshness:.2f} "
+                f"({plan.get('freshness_reason', 'no freshness detail')})"
+            )
         rationale = [meta, *notes]
         return PaperOrder(
             desk=desk,
@@ -595,9 +633,15 @@ class ExecutionAgent(BaseAgent):
         n_intended = min(slots, len(all_candidates))
         per_order_notional = round(base_notional / n_intended, 2) if n_intended > 1 else base_notional
         per_order_size = f"{per_order_notional:.2f}x"
+        candidate_meta = {
+            str(item.get("market", "")).strip(): item
+            for item in (plan.get("candidate_markets") or [])
+            if str(item.get("market", "")).strip()
+        }
 
         orders: list[dict] = []
         planned_count = 0
+        planned_high_corr_count = 0
         for candidate in all_candidates:
             if planned_count >= slots:
                 break
@@ -607,10 +651,35 @@ class ExecutionAgent(BaseAgent):
             single_plan["symbol"] = candidate
             single_plan["candidate_symbols"] = []
             single_plan["size"] = per_order_size
+            meta = candidate_meta.get(candidate, {})
+            for key in (
+                "atr_size_multiplier",
+                "atr_pct",
+                "volatility_tier",
+                "btc_corr_15m",
+                "signal_freshness",
+                "signal_age_minutes",
+                "freshness_reason",
+            ):
+                if key in meta:
+                    single_plan[key] = meta[key]
+            try:
+                candidate_corr = float(single_plan.get("btc_corr_15m", 1.0) or 1.0)
+            except (TypeError, ValueError):
+                candidate_corr = 1.0
+            high_corr_open_count = self._crypto_high_corr_open_count() if desk == "crypto" else 0
+            if (
+                desk == "crypto"
+                and candidate_corr >= float(settings.crypto_high_corr_threshold)
+                and high_corr_open_count + planned_high_corr_count >= int(settings.crypto_high_corr_max_positions)
+            ):
+                single_plan["force_high_corr_cap"] = True
             order = self._plan_to_order(desk, single_plan)
             orders.append(order.model_dump())
             if order.status == "planned":
                 planned_count += 1
+                if desk == "crypto" and candidate_corr >= float(settings.crypto_high_corr_threshold):
+                    planned_high_corr_count += 1
 
         return orders if orders else [self._plan_to_order(desk, plan).model_dump()]
 

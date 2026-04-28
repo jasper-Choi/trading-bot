@@ -637,10 +637,20 @@ class CompanyOrchestrator:
         crypto_plan["atr_size_multiplier"] = atr_multiplier
         crypto_plan["atr_pct"] = float(crypto_desk_result.payload.get("atr_pct", 0.0) or 0.0)
         crypto_plan["volatility_tier"] = str(crypto_desk_result.payload.get("volatility_tier", "unknown") or "unknown")
+        crypto_plan["candidate_markets"] = list(crypto_desk_result.payload.get("candidate_markets") or [])
+        crypto_plan["btc_corr_15m"] = float(crypto_desk_result.payload.get("btc_corr_15m", 1.0) or 1.0)
+        crypto_plan["signal_freshness"] = float(crypto_desk_result.payload.get("signal_freshness", 1.0) or 1.0)
+        crypto_plan["signal_age_minutes"] = float(crypto_desk_result.payload.get("signal_age_minutes", 999.0) or 999.0)
+        crypto_plan["freshness_reason"] = str(crypto_desk_result.payload.get("freshness_reason", "") or "")
         atr_reason = str(crypto_desk_result.payload.get("atr_sizing_reason", "") or "")
         if atr_reason:
             crypto_notes = list(crypto_plan.get("notes", []) or [])
             crypto_notes.append(atr_reason)
+            crypto_plan["notes"] = crypto_notes
+        freshness_reason = str(crypto_plan.get("freshness_reason", "") or "")
+        if freshness_reason and float(crypto_plan.get("signal_freshness", 1.0) or 1.0) < 1.0:
+            crypto_notes = list(crypto_plan.get("notes", []) or [])
+            crypto_notes.append(f"signal freshness adjusted score: {freshness_reason}")
             crypto_plan["notes"] = crypto_notes
 
         state.strategy_book = {

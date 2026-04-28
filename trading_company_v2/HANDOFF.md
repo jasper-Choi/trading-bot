@@ -688,3 +688,18 @@ Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레�
   - stop paper P&L from looking better than realistic live execution
   - avoid equal sizing across low-vol and high-vol coins
   - make future strategy changes judgeable on net expectancy, not gross price movement
+
+## 17. Phase 1 Edge Quality Patch - Freshness + BTC Correlation Cap (2026-04-28)
+
+- Added signal freshness scoring to the crypto desk:
+  - each candidate now records latest 1m candle age, freshness factor, and freshness reason
+  - stale 1m data reduces combined score instead of being treated like a current signal
+  - execution blocks entries when freshness collapses to stale territory
+- Added 15m BTC correlation measurement:
+  - each candidate now carries `btc_corr_15m`
+  - execution caps high-BTC-beta crypto crowding with `CRYPTO_HIGH_CORR_THRESHOLD=0.85`
+  - default max high-correlation crypto positions: `CRYPTO_HIGH_CORR_MAX_POSITIONS=2`
+- Intent:
+  - reduce late-chase entries after the move has already aged
+  - stop four alt positions from behaving like one oversized BTC-beta bet
+  - preserve active full-universe scanning while forcing better diversification of live opportunities
