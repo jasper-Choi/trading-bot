@@ -643,15 +643,22 @@ class CompanyOrchestrator:
         portfolio_manager = PortfolioManagerAgent()
         portfolio_manager.configure(state, bull_result.payload, bear_result.payload)
         portfolio_result = portfolio_manager.safe_run()
+        adjusted_strategy_book = portfolio_result.payload.get("strategy_book")
+        portfolio_decision_payload = {
+            key: value
+            for key, value in portfolio_result.payload.items()
+            if key != "strategy_book"
+        }
         debate_payload = {
             "bull_case": bull_result.payload,
             "bear_case": bear_result.payload,
-            "portfolio_manager": portfolio_result.payload,
+            "portfolio_manager": portfolio_decision_payload,
         }
-        if portfolio_result.payload.get("strategy_book"):
-            state.strategy_book = portfolio_result.payload["strategy_book"]
+        if adjusted_strategy_book:
+            state.strategy_book = adjusted_strategy_book
         state.strategy_book["decision_debate"] = debate_payload
-        for decision in (portfolio_result.payload.get("decisions") or [])[:3]:
+        portfolio_result.payload = portfolio_decision_payload
+        for decision in (portfolio_decision_payload.get("decisions") or [])[:3]:
             state.notes.append(
                 "portfolio manager "
                 f"{decision.get('decision', 'review')} {decision.get('desk', 'desk')}: "
