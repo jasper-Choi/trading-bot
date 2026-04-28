@@ -101,8 +101,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     )
 
     # 단타 스윙: 3/4 이상이면 풀사이즈 진입, 임계값 대폭 완화
+    # lead_weight threshold lowered to 0.08 to accommodate 9-coin neutral-weight universe (max ~0.14)
     offense_threshold = 0.60 if regime == "RANGING" else 0.58
-    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 3.0 and lead_weight >= 0.20 and (breakout_partial or ict_entry_ok or micro_entry_ok):
+    if bias == "offense" and signal_score >= offense_threshold and stance != "DEFENSE" and ema_gap <= 3.0 and lead_weight >= 0.08 and (breakout_partial or ict_entry_ok or micro_entry_ok):
         return {
             "action": "probe_longs",
             "size": "1.0x" if stance == "BALANCED" else "1.3x",
@@ -112,7 +113,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [f"signal {signal_score:.2f} / micro {micro_score:.2f} / orderbook {orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / ema gap {ema_gap:.2f}% / weight {lead_weight:.2f} / vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x / breakout {breakout_count}/4 / ict {ict_bullish_count}/5 {ict_structure}"],
         }
     # 신호 점수만 충분하면 선택적 진입
-    if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.52) and stance != "DEFENSE" and lead_weight >= 0.15:
+    if bias == "offense" and signal_score >= max(offense_threshold - 0.05, 0.52) and stance != "DEFENSE" and lead_weight >= 0.08:
         return {
             "action": "selective_probe",
             "size": "0.70x",
@@ -122,7 +123,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [f"offense bias / signal {signal_score:.2f} / breakout {breakout_count}/4 / weight {lead_weight:.2f}"],
         }
 
-    if micro_entry_ok and stance != "DEFENSE" and lead_weight >= 0.15 and signal_score >= 0.50:
+    if micro_entry_ok and stance != "DEFENSE" and lead_weight >= 0.08 and signal_score >= 0.50:
         return {
             "action": "selective_probe",
             "size": "0.55x",
@@ -138,7 +139,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and signal_score >= 0.33
         and recent_change > -0.5
         and ema_gap > -0.35
-        and lead_weight >= 0.28
+        and lead_weight >= 0.10
     )
     if bias == "defense" and mild_defense:
         return {
@@ -160,7 +161,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
 
     # balanced 바이어스에서도 적극 진입
-    pilot_probe_threshold = 0.52 if lead_weight >= 0.25 and recent_change >= -0.5 else 0.55
+    pilot_probe_threshold = 0.52 if lead_weight >= 0.10 and recent_change >= -0.5 else 0.55
     if bias == "balanced" and signal_score >= pilot_probe_threshold and stance != "DEFENSE" and ema_gap <= 2.5 and recent_change > -1.5:
         return {
             "action": "probe_longs",

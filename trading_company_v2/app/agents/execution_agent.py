@@ -543,15 +543,62 @@ class ExecutionAgent(BaseAgent):
             rationale=rationale,
         )
 
+    def _multi_orders(self, desk: str, plan: dict) -> list[dict]:
+        """Generate up to max_positions concurrent orders per desk from ranked candidates."""
+        action = str(plan.get("action", ""))
+        if action not in {"probe_longs", "attack_opening_drive", "selective_probe"}:
+            return [self._plan_to_order(desk, plan).model_dump()]
+
+        max_positions, _ = self._desk_limits(desk)
+        already_open = self._desk_open_count(desk)
+        slots = max_positions - already_open
+
+        if slots <= 1:
+            return [self._plan_to_order(desk, plan).model_dump()]
+
+        primary = str(plan.get("symbol", "")).strip()
+        all_candidates: list[str] = [primary] if primary else []
+        for item in plan.get("candidate_symbols", []) or []:
+            s = str(item).strip()
+            if s and s not in all_candidates:
+                all_candidates.append(s)
+
+        if len(all_candidates) <= 1:
+            return [self._plan_to_order(desk, plan).model_dump()]
+
+        # Divide base size evenly across concurrent slots
+        base_notional = self._size_to_notional(str(plan.get("size", "0.00x")))
+        n_intended = min(slots, len(all_candidates))
+        per_order_notional = round(base_notional / n_intended, 2) if n_intended > 1 else base_notional
+        per_order_size = f"{per_order_notional:.2f}x"
+
+        orders: list[dict] = []
+        planned_count = 0
+        for candidate in all_candidates:
+            if planned_count >= slots:
+                break
+            if self._has_open_position(desk, candidate):
+                continue
+            single_plan = dict(plan)
+            single_plan["symbol"] = candidate
+            single_plan["candidate_symbols"] = []
+            single_plan["size"] = per_order_size
+            order = self._plan_to_order(desk, single_plan)
+            orders.append(order.model_dump())
+            if order.status == "planned":
+                planned_count += 1
+
+        return orders if orders else [self._plan_to_order(desk, plan).model_dump()]
+
     def run(self) -> AgentResult:
         crypto_plan = self.strategy_book.get("crypto_plan", {})
         korea_plan = self.strategy_book.get("korea_plan", {})
         us_plan = self.strategy_book.get("us_plan", {})
-        orders = [
-            self._plan_to_order("crypto", crypto_plan).model_dump(),
-            self._plan_to_order("korea", korea_plan).model_dump(),
-            self._plan_to_order("us", us_plan).model_dump(),
-        ]
+        orders = (
+            self._multi_orders("crypto", crypto_plan)
+            + self._multi_orders("korea", korea_plan)
+            + self._multi_orders("us", us_plan)
+        )
         active_orders = [item for item in orders if item["status"] == "planned"]
         return AgentResult(
             name=self.name,

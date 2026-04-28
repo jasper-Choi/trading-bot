@@ -621,7 +621,7 @@ class CompanyOrchestrator:
             or "KRW-BTC"
         )
         crypto_weight = float((crypto_desk_result.payload.get("backtest_weights", {}) or {}).get(crypto_lead, 0.0) or 0.0)
-        crypto_trigger = 0.56 if crypto_weight >= 0.30 and crypto_recent >= -0.4 else 0.58
+        crypto_trigger = 0.56 if crypto_weight >= 0.10 and crypto_recent >= -0.4 else 0.58
         state.latest_signals.extend(
             [
                 f"crypto_signal={crypto_signal:.2f}",
