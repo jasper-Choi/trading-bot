@@ -580,6 +580,54 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
 2. Refine crypto breakout entry to reduce stop-hit frequency without killing DOGE/XRP expectancy.
 3. After both are validated, transplant the winning rules into `recommendation_engine.py` and `execution_agent.py` more completely.
 
+## 0. Latest Claude Notes - 2026-04-28 (2nd session)
+
+### 전략 분석 → 5가지 개선 구현 (commit ebd61b6)
+
+**문제 진단**: 봇이 EMA 갭이 벌어진 상태(추세 확립 후)에 진입 → 정상 되돌림 -1.2%에 손절 반복.
+Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레이더 공통 원칙:
+**"스파이크 확인 → 거래량 줄며 눌림 → EMA 근처 되돌림 완료 시 진입"**
+
+#### 변경 1: detect_pullback_entry() (signal_engine.py)
+- 최근 8봉 중 1%+ 스파이크 감지 → 현재 가격이 EMA10 근처(-1~+2.5%)로 되돌림
+- 눌림 구간 거래량 < 스파이크 거래량의 65% → vol_contracted_on_pullback=True
+- pullback_score 0~1 반환 (0.60+ 시 진입 허용)
+
+#### 변경 2: 거래량 게이트 (recommendation_engine.py)
+- 돌파형 진입: vol_ratio < 1.4x AND micro_vol < 1.5x AND pullback/ICT 없음 → watchlist_only
+- 되돌림 진입은 현재 거래량이 낮아도 허용 (스파이크 후 정상 수축)
+
+#### 변경 3: 되돌림 진입 경로 (recommendation_engine.py)
+- pullback_score ≥ 0.60 + signal ≥ 0.44 + micro ≥ 0.46 + orderbook ≥ 0.50 → probe_longs 0.65x/0.50x
+- 기존 ignition_ready보다 완화된 조건이지만 더 좋은 진입 가격
+
+#### 변경 4: 트레일링 타이트화 (state_store.py)
+- peak ≥ 1.5% → 0.5% 되돌리면 청산 (신규 티어)
+- peak ≥ 2.2% → 0.7% 되돌리면 청산 (기존 1.0%)
+- peak ≥ 4.0% → 1.0% 되돌리면 청산 (기존 1.4%)
+- fast_fail: 8사이클(16분) @-0.65% → 12사이클(24분) @-0.80%
+
+#### 변경 5: 동시 포지션 집중화 (execution_agent.py)
+- 크립토 최대 동시 포지션: 4개 → 2개 (2.4x → 1.2x 캡)
+- 3~4위 신호에 자본 분산하지 말고 최우선 2개 신호에 집중
+
+#### CryptoDeskAgent combined_score 가중치 재조정
+- 15m signal: 50% → 38%
+- 1m micro: 21% → 26%
+- orderbook: 8% → 18% (가장 실시간 신호 → 비중 2배 이상)
+- BTC direction: 15% → 12%
+- backtest weight: 6% 유지
+
+#### 기대효과 vs 현재
+| 항목 | 현재 | 개선 후 |
+|---|---|---|
+| 진입 타이밍 | EMA 갭 벌어진 후(고가) | EMA 눌림목(저가) |
+| 손절 빈도 | 노이즈 손절 多 | 의미 있는 레벨 기반 |
+| peak 2.5% 포지션 청산 기준 | 2.5%-1.0%=1.5% | 2.5%-0.7%=1.8% |
+| 분산 | 4코인 동시 | 2코인 집중 |
+
+---
+
 ## 13. TradingAgents-Inspired Decision Layer (2026-04-28)
 
 - Added a lightweight debate layer based on TauricResearch/TradingAgents concepts, without adding external LLM calls or changing the dashboard layout:
