@@ -5,14 +5,20 @@ from concurrent.futures import ThreadPoolExecutor
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
 from app.services.backtest_advisor import get_crypto_weights
-from app.services.market_gateway import get_upbit_15m_candles, get_upbit_1m_candles, get_upbit_orderbook
+from app.services.market_gateway import (
+    get_krw_crypto_candidates,
+    get_upbit_15m_candles,
+    get_upbit_1m_candles,
+    get_upbit_orderbook,
+)
 from app.services.signal_engine import (
     summarize_crypto_micro_momentum_signal,
     summarize_crypto_signal,
     summarize_orderbook_pressure,
 )
 
-_FETCH_WORKERS = 6
+_FETCH_WORKERS = 8
+_MAX_CYCLE_MARKETS = 18
 
 
 class CryptoDeskAgent(BaseAgent):
@@ -24,7 +30,26 @@ class CryptoDeskAgent(BaseAgent):
         direction_symbol = "KRW-BTC"
         direction_signal = summarize_crypto_signal(get_upbit_15m_candles(direction_symbol, count=40))
 
-        all_markets = list(weights.items())
+        discovery_candidates = get_krw_crypto_candidates(limit=_MAX_CYCLE_MARKETS)
+        market_weights: dict[str, float] = {}
+        discovery_map: dict[str, dict] = {}
+        for item in discovery_candidates:
+            market = str(item.get("market", "")).strip()
+            if not market:
+                continue
+            discovery_map[market] = item
+            market_weights[market] = max(float(item.get("discovery_score", 0.0) or 0.0) * 0.35, 0.03)
+        for market, weight in weights.items():
+            market_weights[market] = max(float(weight or 0.0), market_weights.get(market, 0.0))
+
+        all_markets = sorted(
+            market_weights.items(),
+            key=lambda item: (
+                item[1],
+                float((discovery_map.get(item[0], {}) or {}).get("volume_24h_krw", 0.0) or 0.0),
+            ),
+            reverse=True,
+        )[:_MAX_CYCLE_MARKETS]
 
         def _fetch_market(market_weight: tuple[str, float]) -> tuple[str, float, dict, dict, dict]:
             market, weight = market_weight
@@ -53,6 +78,9 @@ class CryptoDeskAgent(BaseAgent):
                 {
                     "market": market,
                     "weight": round(float(weight or 0.0), 4),
+                    "discovery_score": float((discovery_map.get(market, {}) or {}).get("discovery_score", 0.0) or 0.0),
+                    "change_rate": float((discovery_map.get(market, {}) or {}).get("change_rate", 0.0) or 0.0),
+                    "volume_24h_krw": int(float((discovery_map.get(market, {}) or {}).get("volume_24h_krw", 0.0) or 0.0)),
                     "signal_score": float(signal.get("score", 0.5) or 0.5),
                     "micro_score": float(micro.get("micro_score", 0.0) or 0.0),
                     "micro_ready": bool(micro.get("micro_ready", False)),
@@ -165,6 +193,8 @@ class CryptoDeskAgent(BaseAgent):
                 "backtest_weights": weights,
                 "candidate_symbols": candidate_markets[:6],
                 "candidate_markets": ranked_candidates[:6],
+                "scanned_market_count": len(all_markets),
+                "discovery_universe_count": len(discovery_candidates),
                 "direction_bias": direction_signal.get("bias", "balanced"),
                 "direction_score": float(direction_signal.get("score", 0.5) or 0.5),
                 "breakout_confirmed": bool(leader.get("breakout_confirmed", False)),

@@ -113,6 +113,62 @@ def get_top_krw_coins(top_n: int = 10) -> list[dict[str, Any]]:
         return []
 
 
+def get_krw_crypto_candidates(limit: int = 18) -> list[dict[str, Any]]:
+    """
+    Scan the full Upbit KRW universe, then return a tradable shortlist.
+
+    We keep the market open to every KRW coin, but only run expensive candle
+    and orderbook analysis on the best live candidates for the current cycle.
+    """
+    try:
+        market_resp = requests.get(UPBIT_MARKETS_URL, timeout=REQUEST_TIMEOUT)
+        market_resp.raise_for_status()
+        krw_markets = [item["market"] for item in market_resp.json() if item["market"].startswith("KRW-")]
+
+        tickers: list[dict[str, Any]] = []
+        for chunk in _chunked(krw_markets, 100):
+            ticker_resp = requests.get(
+                UPBIT_TICKER_URL,
+                params={"markets": ",".join(chunk)},
+                timeout=REQUEST_TIMEOUT,
+            )
+            ticker_resp.raise_for_status()
+            tickers.extend(ticker_resp.json())
+
+        rows: list[dict[str, Any]] = []
+        max_volume = max((float(item.get("acc_trade_price_24h") or 0.0) for item in tickers), default=1.0)
+        for item in tickers:
+            market = str(item.get("market") or "").strip()
+            price = float(item.get("trade_price") or 0.0)
+            volume_24h = float(item.get("acc_trade_price_24h") or 0.0)
+            change_rate = float(item.get("signed_change_rate") or 0.0) * 100
+            if not market or price <= 0 or volume_24h <= 0:
+                continue
+            liquidity_score = min(volume_24h / max_volume, 1.0)
+            momentum_score = min(max(change_rate, 0.0) / 12.0, 1.0)
+            volatility_score = min(abs(change_rate) / 18.0, 1.0)
+            discovery_score = round(
+                (liquidity_score * 0.45)
+                + (momentum_score * 0.35)
+                + (volatility_score * 0.20),
+                4,
+            )
+            rows.append(
+                {
+                    "market": market,
+                    "trade_price": price,
+                    "change_rate": round(change_rate, 2),
+                    "volume_24h_krw": int(volume_24h),
+                    "discovery_score": discovery_score,
+                }
+            )
+
+        rows.sort(key=lambda item: (item["discovery_score"], item["volume_24h_krw"]), reverse=True)
+        return rows[:limit]
+    except (RequestException, ValueError, TypeError):
+        return []
+
+
 def get_upbit_minute_candles(market: str, unit: int = 15, count: int = 40) -> list[dict[str, Any]]:
     try:
         resp = requests.get(

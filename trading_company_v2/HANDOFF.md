@@ -22,6 +22,13 @@ notional stays constant. Falls back to single-order behavior when slots <= 1.
 etc. weren't in the top-20 Upbit volume list, `_manage_positions` couldn't find their price and
 silently skipped opening the position. Fixed: pinned all 9 neutral-weight coins.
 
+### Dynamic crypto universe - Codex 2026-04-28
+The 9 fixed coins are now only a safety/price fallback, not the trading universe.
+`get_krw_crypto_candidates()` scans the full Upbit KRW ticker universe each cycle and ranks coins by
+live liquidity, positive momentum, and volatility. `CryptoDeskAgent` merges that live shortlist with
+backtest weights, then runs expensive 15m/1m/orderbook analysis only on the top live candidates.
+This keeps the universe open to all KRW coins while preventing API overload.
+
 ### Also fixed (prior session, still relevant)
 - Crypto universe expanded: 2 coins (DOGE/XRP) → 9 coins with parallel evaluation
 - Compounding capital: cumulative all-time P&L now tracked, displayed as 복리자본
