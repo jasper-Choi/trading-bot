@@ -1,7 +1,43 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-04-28
+
+Three critical bugs fixed that prevented multi-coin trading:
+
+### Bug 1: Weight gate blocking all crypto entries
+`build_crypto_plan()` in `recommendation_engine.py` had weight thresholds of 0.15-0.20 for entry.
+With 9-coin neutral weights (max 0.14), NO coin ever passed. Every cycle returned `watchlist_only`
+despite good signal scores (0.80+). Fixed: lowered thresholds to 0.08/0.10.
+
+### Bug 2: ExecutionAgent generated only 1 order per desk
+Added `ExecutionAgent._multi_orders()` that generates up to `max_positions` (3) concurrent orders
+per desk by iterating ranked candidates. Base size is divided evenly across slots so total
+notional stays constant. Falls back to single-order behavior when slots <= 1.
+
+### Bug 3: ADA/AVAX/TRX/LINK missing from crypto price lookup
+`_PINNED_CRYPTO` in `market_gateway.py` only had 5 coins (BTC/ETH/XRP/SOL/DOGE). When ADA/AVAX
+etc. weren't in the top-20 Upbit volume list, `_manage_positions` couldn't find their price and
+silently skipped opening the position. Fixed: pinned all 9 neutral-weight coins.
+
+### Also fixed (prior session, still relevant)
+- Crypto universe expanded: 2 coins (DOGE/XRP) → 9 coins with parallel evaluation
+- Compounding capital: cumulative all-time P&L now tracked, displayed as 복리자본
+- Position PnL display bug: renderPositions JS was using `p.unrealized_pnl_pct` (always 0), fixed to `p.pnl_pct||p.unrealized_pnl_pct`
+- Mobile session auth: cookie-based so JS fetch() calls work on mobile browsers
+
+### Commits this session
+- `b8ea393` — universe expansion (9 coins), compounding capital, PnL display fix
+- `da7e1e9` — multi-position execution + weight gate fix
+- `98ddbf1` — pin all 9 neutral-weight coins in crypto_leaders price lookup
+
+### Current VM state
+- Oracle VM: 134.185.118.144, both services active
+- `EXECUTION_MODE=upbit_live`, `UPBIT_PILOT_SINGLE_ORDER_ONLY=true` (1 live order/cycle, accumulates to 3)
+- KRW-ETH currently open as paper position (live order failed, paper fallback caught it)
+- Expected: 2-3 simultaneous crypto positions now functional; Korea/US open as market hours permit
 
 ## 0. Latest Codex Notes - 2026-04-27
 
