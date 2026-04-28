@@ -872,6 +872,7 @@ def summarize_crypto_micro_momentum_signal(candles: list[dict[str, Any]]) -> dic
         "micro_score": score,
         "micro_bias": bias,
         "micro_reasons": reasons,
+        "micro_exhausted": exhausted,
         "micro_vol_ratio": vol_ratio,
         "micro_move_3_pct": round(move_3, 2),
         "micro_move_10_pct": round(move_10, 2),

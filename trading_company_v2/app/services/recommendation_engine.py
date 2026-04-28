@@ -33,6 +33,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     micro_score = float(payload.get("micro_score", 0.0) or 0.0)
     micro_vol_ratio = float(payload.get("micro_vol_ratio", 0.0) or 0.0)
     micro_move_3 = float(payload.get("micro_move_3_pct", 0.0) or 0.0)
+    micro_move_10 = float(payload.get("micro_move_10_pct", 0.0) or 0.0)
+    micro_vwap_gap = float(payload.get("micro_vwap_gap_pct", 0.0) or 0.0)
+    micro_range_5 = float(payload.get("micro_range_5_pct", 0.0) or 0.0)
+    micro_exhausted = bool(payload.get("micro_exhausted", False))
     orderbook_ready = bool(payload.get("orderbook_ready", False))
     orderbook_score = float(payload.get("orderbook_score", 0.0) or 0.0)
     orderbook_bid_ask = float(payload.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
@@ -76,6 +80,27 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # Volume gate: ignition entries need real volume confirmation.
     # Pullback entries intentionally have low current volume (contracting on retracement).
     ignition_vol_ok = vol_ratio >= 1.4 or micro_vol_ratio >= 1.5
+    late_chase_risk = (
+        micro_exhausted
+        or micro_move_3 >= 1.8
+        or micro_move_10 >= 3.8
+        or micro_vwap_gap >= 2.3
+        or micro_range_5 >= 3.4
+    )
+    clean_momentum_window = (
+        micro_score >= 0.55
+        and micro_vol_ratio >= 1.1
+        and -0.35 <= micro_move_3 <= 1.55
+        and micro_vwap_gap <= 2.2
+        and micro_range_5 <= 3.2
+        and not micro_exhausted
+    )
+    strong_late_breakout_exception = (
+        signal_score >= 0.76
+        and micro_ready
+        and orderbook_bid_ask >= 1.15
+        and micro_vwap_gap <= 2.8
+    )
 
     if regime == "STRESSED":
         return {
@@ -116,6 +141,20 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% triggered protection."],
         }
+    if late_chase_risk and not (pullback_entry_ok or strong_late_breakout_exception):
+        return {
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": f"{lead_market or 'KRW-BTC'} is moving, but entry is late. Wait for first pullback/reclaim.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"late chase guard: move3 {micro_move_3:.2f}% / move10 {micro_move_10:.2f}% / "
+                f"vwap gap {micro_vwap_gap:.2f}% / range5 {micro_range_5:.2f}%",
+                "blocks failed-ignition style chase entries while preserving pullback/ICT entries.",
+                ignition_note,
+            ],
+        }
 
     breakout_partial = bool(payload.get("breakout_partial", False))
 
@@ -143,7 +182,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     ict_entry_ok = ict_bullish_count >= 3 or (ssl_sweep_confirmed and kill_zone_active) or (choch_bullish and ict_bullish_count >= 2)
     # micro_entry_ok: simplified — needs 1m momentum + volume without requiring all 5 sub-flags of micro_ready
     micro_entry_ok = (
-        micro_score >= 0.48
+        clean_momentum_window
+        and micro_score >= 0.48
         and micro_vol_ratio >= 1.1
         and micro_move_3 >= -1.5
         and orderbook_bid_ask >= 1.0
@@ -153,14 +193,15 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         signal_score >= 0.52
         and micro_score >= 0.44
         and orderbook_bid_ask >= 0.98
+        and not late_chase_risk
         and not hard_overheat
     )
     # direct_entry_ok: the bot's core purpose — if CryptoDeskAgent's combined_score is high,
     # don't re-run the same gates. Catch the moment immediately.
     direct_entry_ok = (
         signal_score >= 0.63
-        and micro_score >= 0.38
-        and orderbook_bid_ask >= 0.98
+        and (clean_momentum_window or strong_late_breakout_exception)
+        and orderbook_bid_ask >= 1.02
         and not rsi_bearish_divergence
     )
     # Volume gate: direct_entry_ok (high combined score) also bypasses
@@ -208,6 +249,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [
                 f"direct entry: combined={signal_score:.2f} micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x",
+                f"clean momentum window: move3={micro_move_3:.2f}% move10={micro_move_10:.2f}% vwap_gap={micro_vwap_gap:.2f}% range5={micro_range_5:.2f}%",
                 ignition_note, support_note,
             ],
         }

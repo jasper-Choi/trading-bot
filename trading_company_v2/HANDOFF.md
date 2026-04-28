@@ -708,3 +708,20 @@ Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레�
   - reduce late-chase entries after the move has already aged
   - stop four alt positions from behaving like one oversized BTC-beta bet
   - preserve active full-universe scanning while forcing better diversification of live opportunities
+
+## 18. Failed-Ignition Reduction Patch - Late Chase Guard (2026-04-28)
+
+- Added 1m exhaustion metadata to the crypto micro signal:
+  - `micro_exhausted`
+  - `micro_move_10_pct`
+  - `micro_range_5_pct`
+  - `micro_vwap_gap_pct`
+- Crypto recommendation now distinguishes:
+  - clean momentum ignition: controlled 1m move, volume support, orderbook support
+  - late chase: 1m/10m move already stretched, VWAP gap wide, or 5-bar range too large
+- Late chase entries are blocked unless:
+  - a valid pullback entry is present, or
+  - a very strong live breakout exception exists (`micro_ready`, high combined score, strong orderbook)
+- Intent:
+  - reduce `failed_ignition` losses caused by buying the end of the first candle burst
+  - preserve the high-return trend strategy by waiting for the first pullback/reclaim instead of reverting to low-risk inactivity
