@@ -232,7 +232,10 @@ def _get_kosdaq_snapshot_from_naver_html(top_n: int) -> list[dict[str, Any]]:
     return candidates[:top_n]
 
 
-_PINNED_CRYPTO = ["KRW-DOGE", "KRW-XRP", "KRW-SOL", "KRW-BTC", "KRW-ETH"]
+_PINNED_CRYPTO = [
+    "KRW-BTC", "KRW-ETH", "KRW-XRP", "KRW-SOL", "KRW-DOGE",
+    "KRW-ADA", "KRW-AVAX", "KRW-TRX", "KRW-LINK",
+]
 
 
 def build_market_snapshot() -> MarketSnapshot:
