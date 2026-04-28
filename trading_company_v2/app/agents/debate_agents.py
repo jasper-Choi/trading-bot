@@ -133,11 +133,17 @@ class BearCaseAgent(BaseAgent):
         daily = self.state.daily_summary or {}
         combined = _f(daily.get("realized_pnl_pct")) + _f(daily.get("unrealized_pnl_pct"))
         gross = _f(daily.get("gross_open_notional_pct"))
+        wins = int(daily.get("cumulative_wins", daily.get("wins", 0)) or 0)
+        losses = int(daily.get("cumulative_losses", daily.get("losses", 0)) or 0)
+        win_rate = _f(daily.get("cumulative_win_rate", daily.get("win_rate", 0.0)))
         risk = 0.0
         reasons: list[str] = []
         if self.state.regime == "STRESSED":
             risk += 0.35
             reasons.append("market regime is stressed")
+        if losses >= 3 and losses > wins and win_rate < 35.0:
+            risk += 0.18
+            reasons.append(f"loss streak control active ({wins}W/{losses}L, win_rate {win_rate:.1f}%)")
         if combined < -0.75:
             risk += 0.16
             reasons.append(f"combined pnl pressure {combined:.2f}%")
@@ -240,6 +246,15 @@ class PortfolioManagerAgent(BaseAgent):
         self.bull_payload = bull_payload or {}
         self.bear_payload = bear_payload or {}
 
+    def _loss_control_active(self) -> bool:
+        if self.state is None:
+            return False
+        daily = self.state.daily_summary or {}
+        wins = int(daily.get("cumulative_wins", daily.get("wins", 0)) or 0)
+        losses = int(daily.get("cumulative_losses", daily.get("losses", 0)) or 0)
+        win_rate = _f(daily.get("cumulative_win_rate", daily.get("win_rate", 0.0)))
+        return losses >= 3 and losses > wins and win_rate < 35.0
+
     def _adjust_plan(self, desk: str, plan: dict) -> tuple[dict, dict]:
         adjusted = dict(plan or {})
         bull = ((self.bull_payload.get("desks", {}) or {}).get(desk, {}) or {})
@@ -253,6 +268,7 @@ class PortfolioManagerAgent(BaseAgent):
         decision = "hold"
         multiplier = 1.0
         reason = f"bull={bull_score:.2f} bear={bear_score:.2f} edge={edge:.2f}"
+        loss_control = self._loss_control_active()
 
         if action in _ENTRY_ACTIONS and size > 0:
             if bear_score >= 0.78 and bull_score < 0.72:
@@ -271,6 +287,11 @@ class PortfolioManagerAgent(BaseAgent):
                 adjusted["size"] = _float_to_size(size * multiplier)
                 decision = "throttle"
                 reason += " / mixed debate throttles size"
+            elif loss_control:
+                multiplier = 0.72
+                adjusted["size"] = _float_to_size(size * multiplier)
+                decision = "loss_control"
+                reason += " / losing streak disables pressing and cuts size"
             elif bull_score >= 0.74 and bear_score <= 0.46 and self.state and self.state.stance != "DEFENSE":
                 multiplier = 1.12 if desk == "crypto" else 1.08
                 adjusted["size"] = _float_to_size(size * multiplier)
