@@ -592,3 +592,18 @@ From `C:\Users\User\Desktop\trading-bot\frontend`:
   - strong clean setups can get a small size increase
   - mixed setups are throttled
   - severe bear cases are blocked or downgraded
+
+## 14. Vibe-Investing Benchmark Strategy Update (2026-04-28)
+
+- Borrowed the `vibe-investing` quant-research principle: keep validated edges, but do not confuse old in-sample backtest weights with live opportunity discovery.
+- Crypto plan now has two support tracks:
+  - `validated_support`: known backtest-backed symbols still get priority.
+  - `discovery_support`: full Upbit KRW universe leaders can enter when discovery score, liquidity, micro momentum, and orderbook confirmation are strong.
+- This fixes the previous bottleneck where full-universe scanning found strong coins, but `lead_weight == 0` forced most new candidates into watch-only mode.
+- Recovery-mode targets were tightened to build positive samples before pressing size:
+  - crypto paper threshold: `+4.5% / -2.2%`
+  - Korea paper threshold: `+3.8% / -2.0%`
+- Intent:
+  - increase trade opportunity without blind overtrading
+  - preserve our bot strengths: live scanning, debate layer, Oracle uptime, dashboard visibility
+  - reduce the current 0-win sample problem by taking reachable wins first, then compounding through position sizing

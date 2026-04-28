@@ -76,11 +76,11 @@ class ExecutionAgent(BaseAgent):
         if action in {"watchlist_only", "reduce_risk", "stand_by", "capital_preservation", "pre_market_watch"}:
             return 0.0
         if desk == "crypto":
-            # All crypto actions target +4% (vol-breakout strategy)
-            return 4.0
+            # Recovery-mode target: reachable win first, then compound via sizing.
+            return 4.5
         if desk == "korea":
-            # Momentum-breakout strategy: all actionable entries target +4%
-            return 4.0
+            # Momentum-breakout recovery target calibrated to current live/paper drawdown.
+            return 3.8
         if action == "probe_longs":
             return 3.2
         if action == "selective_probe":
