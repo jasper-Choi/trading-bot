@@ -632,11 +632,22 @@ class CompanyOrchestrator:
             if "us" in active_desks
             else self._inactive_plan("us")
         )
+        crypto_plan = build_crypto_plan(state.stance, state.regime, crypto_desk_result.payload)
+        atr_multiplier = float(crypto_desk_result.payload.get("atr_size_multiplier", 1.0) or 1.0)
+        crypto_plan["atr_size_multiplier"] = atr_multiplier
+        crypto_plan["atr_pct"] = float(crypto_desk_result.payload.get("atr_pct", 0.0) or 0.0)
+        crypto_plan["volatility_tier"] = str(crypto_desk_result.payload.get("volatility_tier", "unknown") or "unknown")
+        atr_reason = str(crypto_desk_result.payload.get("atr_sizing_reason", "") or "")
+        if atr_reason:
+            crypto_notes = list(crypto_plan.get("notes", []) or [])
+            crypto_notes.append(atr_reason)
+            crypto_plan["notes"] = crypto_notes
+
         state.strategy_book = {
             "company_focus": strategy_allocator_result.payload.get("company_focus"),
             "desk_priorities": strategy_allocator_result.payload.get("desk_priorities", []),
             "active_desks": sorted(active_desks),
-            "crypto_plan": build_crypto_plan(state.stance, state.regime, crypto_desk_result.payload),
+            "crypto_plan": crypto_plan,
             "korea_plan": korea_plan,
             "us_plan": us_plan,
         }

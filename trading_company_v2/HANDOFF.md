@@ -672,3 +672,19 @@ Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레�
   - failed ignitions can exit quickly after ~16 minutes
   - profitable positions track `peak_pnl_pct` and close via `breakeven_trail` / `trend_trail` when momentum gives back
 - Risk/debate/execution gates now calculate loss pressure and exposure using active desks only, so disabled stock desks do not suppress crypto testing.
+
+## 16. Phase 1 Realism Patch - Fees, Slippage, ATR Sizing (2026-04-28)
+
+- Added paper-trading cost realism for crypto:
+  - entry fill price includes adverse slippage
+  - open/closed P&L includes estimated exit slippage
+  - round-trip Upbit-style fee is deducted from paper P&L
+  - defaults: `PAPER_FEE_BPS=5`, `PAPER_SLIPPAGE_MIN_BPS=5`, `PAPER_SLIPPAGE_MAX_BPS=15`
+- Added ATR-based volatility sizing:
+  - new `app/services/atr_sizing.py`
+  - crypto desk calculates ATR% from the same 15m candles used for signal generation
+  - execution scales crypto notional down for high/extreme ATR and slightly up for clean quiet volatility
+- Intent:
+  - stop paper P&L from looking better than realistic live execution
+  - avoid equal sizing across low-vol and high-vol coins
+  - make future strategy changes judgeable on net expectancy, not gross price movement

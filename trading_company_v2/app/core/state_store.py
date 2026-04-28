@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
+import hashlib
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -172,6 +173,35 @@ def _size_to_notional(size: str) -> float:
         return float(str(size).replace("x", ""))
     except ValueError:
         return 0.0
+
+
+def _paper_slippage_bps(symbol: str, side: str, salt: str = "") -> float:
+    min_bps = float(settings.paper_slippage_min_bps)
+    max_bps = max(float(settings.paper_slippage_max_bps), min_bps)
+    if max_bps == min_bps:
+        return min_bps
+    digest = hashlib.blake2b(f"{symbol}:{side}:{salt}".encode("utf-8"), digest_size=2).digest()
+    bucket = int.from_bytes(digest, "big") / 65535
+    return round(min_bps + (max_bps - min_bps) * bucket, 4)
+
+
+def _paper_entry_price(raw_price: float, symbol: str, salt: str = "") -> float:
+    slip = _paper_slippage_bps(symbol, "entry", salt) / 10_000
+    return round(raw_price * (1 + slip), 8)
+
+
+def _paper_exit_price(raw_price: float, symbol: str, salt: str = "") -> float:
+    slip = _paper_slippage_bps(symbol, "exit", salt) / 10_000
+    return round(raw_price * (1 - slip), 8)
+
+
+def _paper_net_pnl_pct(entry_price: float, raw_current_price: float, symbol: str, salt: str = "") -> float:
+    if entry_price <= 0 or raw_current_price <= 0:
+        return 0.0
+    exit_price = _paper_exit_price(raw_current_price, symbol, salt)
+    gross_pct = ((exit_price - entry_price) / entry_price) * 100
+    fee_pct = float(settings.paper_fee_bps) * 2 / 100
+    return round(gross_pct - fee_pct, 2)
 
 
 def _local_timezone():
@@ -373,7 +403,11 @@ def _symbol_performance_stats(positions: list[PaperPositionRecord]) -> list[dict
 def _close_position(position: PaperPositionRecord, reason: str) -> None:
     position.status = "closed"
     position.closed_at = utcnow_iso()
-    position.exit_price = position.current_price
+    if position.desk == "crypto":
+        position.exit_price = _paper_exit_price(position.current_price, position.symbol, position.closed_at)
+        position.pnl_pct = _paper_net_pnl_pct(position.entry_price, position.current_price, position.symbol, position.closed_at)
+    else:
+        position.exit_price = position.current_price
     position.closed_reason = reason
 
 
@@ -553,7 +587,10 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             current_price = price_lookup.get((position.desk, position.symbol), position.current_price)
             if current_price and position.entry_price > 0:
                 position.current_price = current_price
-                position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
+                if position.desk == "crypto":
+                    position.pnl_pct = _paper_net_pnl_pct(position.entry_price, current_price, position.symbol, str(position.cycles_open))
+                else:
+                    position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
                 position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
             position.cycles_open += 1
             target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action)
@@ -615,6 +652,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 continue
             if (order.desk, symbol) in existing_open_keys:
                 continue
+            entry_price = _paper_entry_price(reference_price, symbol, order.created_at) if order.desk == "crypto" else reference_price
             db.add(
                 PaperPositionRecord(
                     desk=order.desk,
@@ -623,7 +661,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     action=order.action,
                     size=order.size,
                     opened_at=order.created_at,
-                    entry_price=reference_price,
+                    entry_price=entry_price,
                     current_price=reference_price,
                     pnl_pct=0.0,
                     peak_pnl_pct=0.0,
@@ -904,15 +942,17 @@ def open_or_skip_position(desk: str, symbol: str, entry_price: float, notional_p
         ).scalar_one_or_none()
         if existing is not None:
             return False
+        opened_at = utcnow_iso()
+        stored_entry_price = _paper_entry_price(entry_price, symbol, opened_at) if desk == "crypto" else entry_price
         db.add(PositionRecord(
             desk=desk,
             symbol=symbol,
-            entry_price=entry_price,
+            entry_price=stored_entry_price,
             current_price=entry_price,
             notional_pct=notional_pct,
             action=action,
             unrealized_pnl_pct=0.0,
-            opened_at=utcnow_iso(),
+            opened_at=opened_at,
         ))
         db.commit()
         return True
@@ -927,10 +967,12 @@ def close_positions_for_desk(desk: str, prices: dict[str, float]) -> list[Closed
             select(PositionRecord).where(PositionRecord.desk == desk)
         ).scalars().all()
         for pos in positions:
-            exit_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
+            raw_exit_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
+            exit_price = _paper_exit_price(raw_exit_price, pos.symbol, "desk_exit") if pos.desk == "crypto" else raw_exit_price
             realized_pnl_pct = (
-                round(((exit_price - pos.entry_price) / pos.entry_price) * 100, 4)
-                if pos.entry_price > 0 else 0.0
+                _paper_net_pnl_pct(pos.entry_price, raw_exit_price, pos.symbol, "desk_exit")
+                if pos.desk == "crypto"
+                else round(((exit_price - pos.entry_price) / pos.entry_price) * 100, 4) if pos.entry_price > 0 else 0.0
             )
             db.add(ClosedPositionRecord(
                 desk=pos.desk,
@@ -971,10 +1013,12 @@ def close_position_by_symbol(desk: str, symbol: str, prices: dict[str, float], r
         ).scalar_one_or_none()
         if pos is None:
             return None
-        exit_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
+        raw_exit_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
+        exit_price = _paper_exit_price(raw_exit_price, pos.symbol, reason) if pos.desk == "crypto" else raw_exit_price
         realized_pnl_pct = (
-            round(((exit_price - pos.entry_price) / pos.entry_price) * 100, 4)
-            if pos.entry_price > 0 else 0.0
+            _paper_net_pnl_pct(pos.entry_price, raw_exit_price, pos.symbol, reason)
+            if pos.desk == "crypto"
+            else round(((exit_price - pos.entry_price) / pos.entry_price) * 100, 4) if pos.entry_price > 0 else 0.0
         )
         record = ClosedPositionRecord(
             desk=pos.desk,
@@ -1103,8 +1147,10 @@ def update_positions_unrealized(prices: dict[str, float]) -> None:
             current_price = prices.get(pos.symbol)
             if current_price and current_price > 0 and pos.entry_price > 0:
                 pos.current_price = current_price
-                pos.unrealized_pnl_pct = round(
-                    ((current_price - pos.entry_price) / pos.entry_price) * 100, 4
+                pos.unrealized_pnl_pct = (
+                    _paper_net_pnl_pct(pos.entry_price, current_price, pos.symbol, "mark")
+                    if pos.desk == "crypto"
+                    else round(((current_price - pos.entry_price) / pos.entry_price) * 100, 4)
                 )
         db.commit()
 
@@ -1123,7 +1169,11 @@ def auto_exit_positions(prices: dict[str, float], skip_desks: set[str] | None = 
             current_price = prices.get(pos.symbol, pos.current_price) or pos.current_price
             if not current_price or pos.entry_price <= 0:
                 continue
-            unrealized = round(((current_price - pos.entry_price) / pos.entry_price) * 100, 4)
+            unrealized = (
+                _paper_net_pnl_pct(pos.entry_price, current_price, pos.symbol, "auto_exit")
+                if pos.desk == "crypto"
+                else round(((current_price - pos.entry_price) / pos.entry_price) * 100, 4)
+            )
             try:
                 opened = datetime.fromisoformat(pos.opened_at.replace("Z", "+00:00"))
                 elapsed_minutes = (datetime.now(timezone.utc) - opened).total_seconds() / 60
@@ -1139,7 +1189,7 @@ def auto_exit_positions(prices: dict[str, float], skip_desks: set[str] | None = 
             elif elapsed_minutes >= max_open_minutes:
                 reason = "time_exit"
             if reason:
-                exit_price = current_price
+                exit_price = _paper_exit_price(current_price, pos.symbol, reason) if pos.desk == "crypto" else current_price
                 realized_pnl_pct = unrealized
                 db.add(ClosedPositionRecord(
                     desk=pos.desk,

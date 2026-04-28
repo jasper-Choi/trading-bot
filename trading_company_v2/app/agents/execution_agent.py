@@ -407,13 +407,20 @@ class ExecutionAgent(BaseAgent):
         desk_offense = self._desk_offense_state(desk)
         symbol_edge = self._symbol_edge_state(desk, symbol)
         base_notional = self._size_to_notional(base_size)
+        atr_multiplier = 1.0
+        if desk == "crypto":
+            try:
+                atr_multiplier = max(min(float(plan.get("atr_size_multiplier", 1.0) or 1.0), 1.15), 0.45)
+            except (TypeError, ValueError):
+                atr_multiplier = 1.0
         offense_scaled_base = round(
             base_notional
             * float(desk_offense.get("size_multiplier", 1.0) or 1.0)
             * float(symbol_edge.get("size_multiplier", 1.0) or 1.0),
             2,
         )
-        risk_scaled_notional = round(offense_scaled_base * max(min(self.risk_budget, 1.0), 0.0), 2)
+        volatility_scaled_base = round(offense_scaled_base * atr_multiplier, 2)
+        risk_scaled_notional = round(volatility_scaled_base * max(min(self.risk_budget, 1.0), 0.0), 2)
         desk_stop_pressure = self._desk_stop_pressure(desk)
         symbol_stop_pressure = self._symbol_stop_pressure(desk, symbol)
         downgrade_notes: list[str] = []
@@ -485,7 +492,12 @@ class ExecutionAgent(BaseAgent):
         }
         notes = list(plan.get("notes", [])) + rotation_notes + downgrade_notes
         if action in actionable_entries and base_size != size:
-            if offense_scaled_base != base_notional:
+            if atr_multiplier != 1.0:
+                notes.append(
+                    f"ATR volatility sizing adjusted base {offense_scaled_base:.2f}x -> {volatility_scaled_base:.2f}x "
+                    f"({plan.get('volatility_tier', 'unknown')} / ATR {float(plan.get('atr_pct', 0.0) or 0.0):.2f}%)"
+                )
+            elif offense_scaled_base != base_notional:
                 notes.append(
                     f"{desk} desk offense {desk_offense.get('tone', 'balanced')} adjusted size from {base_size} to {size}"
                 )

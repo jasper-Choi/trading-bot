@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
+from app.services.atr_sizing import summarize_atr_sizing
 from app.services.backtest_advisor import get_crypto_weights
 from app.services.market_gateway import (
     get_krw_crypto_candidates,
@@ -51,19 +52,21 @@ class CryptoDeskAgent(BaseAgent):
             reverse=True,
         )[:_MAX_CYCLE_MARKETS]
 
-        def _fetch_market(market_weight: tuple[str, float]) -> tuple[str, float, dict, dict, dict]:
+        def _fetch_market(market_weight: tuple[str, float]) -> tuple[str, float, dict, dict, dict, dict]:
             market, weight = market_weight
-            signal = summarize_crypto_signal(get_upbit_15m_candles(market, count=40))
+            candles_15m = get_upbit_15m_candles(market, count=40)
+            signal = summarize_crypto_signal(candles_15m)
             micro = summarize_crypto_micro_momentum_signal(get_upbit_1m_candles(market, count=80))
             orderbook = summarize_orderbook_pressure(get_upbit_orderbook(market))
-            return market, weight, signal, micro, orderbook
+            atr_sizing = summarize_atr_sizing(candles_15m)
+            return market, weight, signal, micro, orderbook, atr_sizing
 
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
             fetch_results = list(executor.map(_fetch_market, all_markets))
 
         direction_score = float(direction_signal.get("score", 0.5) or 0.5)
         ranked_candidates: list[dict] = []
-        for market, weight, signal, micro, orderbook in fetch_results:
+        for market, weight, signal, micro, orderbook, atr_sizing in fetch_results:
             combined_score = round(
                 # Orderbook weight raised: it's the most real-time signal we have
                 (float(signal.get("score", 0.5) or 0.5) * 0.38)
@@ -99,6 +102,10 @@ class CryptoDeskAgent(BaseAgent):
                     "orderbook_spread_pct": float(orderbook.get("orderbook_spread_pct", 0.0) or 0.0),
                     "orderbook_imbalance": float(orderbook.get("orderbook_imbalance", 0.0) or 0.0),
                     "orderbook_reasons": list(orderbook.get("orderbook_reasons", [])),
+                    "atr_pct": float(atr_sizing.get("atr_pct", 0.0) or 0.0),
+                    "atr_size_multiplier": float(atr_sizing.get("atr_size_multiplier", 1.0) or 1.0),
+                    "volatility_tier": str(atr_sizing.get("volatility_tier", "unknown") or "unknown"),
+                    "atr_sizing_reason": str(atr_sizing.get("atr_sizing_reason", "") or ""),
                     "combined_score": combined_score,
                     "bias": str(signal.get("bias", "balanced") or "balanced"),
                     "recent_change_pct": float(signal.get("recent_change_pct", 0.0) or 0.0),
@@ -202,6 +209,10 @@ class CryptoDeskAgent(BaseAgent):
                 "orderbook_spread_pct": float(leader.get("orderbook_spread_pct", 0.0) or 0.0),
                 "orderbook_imbalance": float(leader.get("orderbook_imbalance", 0.0) or 0.0),
                 "orderbook_reasons": list(leader.get("orderbook_reasons", [])),
+                "atr_pct": float(leader.get("atr_pct", 0.0) or 0.0),
+                "atr_size_multiplier": float(leader.get("atr_size_multiplier", 1.0) or 1.0),
+                "volatility_tier": str(leader.get("volatility_tier", "unknown") or "unknown"),
+                "atr_sizing_reason": str(leader.get("atr_sizing_reason", "") or ""),
                 "backtest_weights": weights,
                 "candidate_symbols": candidate_markets[:6],
                 "candidate_markets": ranked_candidates[:6],
