@@ -85,9 +85,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + ["Stress regime blocks aggressive crypto entries."],
         }
-    hard_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 88.0)
-    soft_overheat = recent_change >= 3.4 or burst_change >= 3.8 or ema_gap >= 2.8 or (rsi_value is not None and float(rsi_value) >= 82.0)
-    if hard_overheat and not (ignition_ready and micro_score >= 0.68 and flow_support):
+    hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
+    soft_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 85.0)
+    if hard_overheat and not (ignition_ready and micro_score >= 0.55 and flow_support):
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -155,9 +155,12 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and not hard_overheat
     )
 
+    # High-conviction bypass: strong combined signal + micro confirmation skips volume gate
+    # Rationale: a coin with combined_score >= 0.72 + micro >= 0.50 is already trending
+    high_conviction = signal_score >= 0.72 and micro_score >= 0.50
     # Volume gate: if current volume is weak AND no pullback setup AND no ICT confluence → watchlist
     # Pullback entries intentionally have low current-candle volume (contracting after spike)
-    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and stance != "DEFENSE":
+    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not high_conviction and stance != "DEFENSE":
         return {
             "action": "watchlist_only",
             "size": "0.00x",

@@ -244,7 +244,7 @@ def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
     # @ 2 min/cycle: 720 = 24h, 360 = 12h, 195 = 6.5h (1 KRX session)
     if desk == "crypto":
         # Trend mode: cut failed ignitions fast, let winners run with trailing.
-        return 8.0, -1.2, 180
+        return 10.0, -2.0, 180
     if desk == "us":
         if action == "probe_longs":
             return 6.0, -3.0, 200

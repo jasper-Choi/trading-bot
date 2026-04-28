@@ -696,8 +696,8 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     if 0.5 <= recent_change <= 2.4 and burst_change <= 1.8 and abs(pullback_gap) <= 1.6:
         score += 0.08
         reasons.append(f"controlled breakout {recent_change:.2f}% / pullback gap {pullback_gap:.2f}%")
-    if burst_change > 2.4:
-        score -= 0.1
+    if burst_change > 4.5:
+        score -= 0.08
         reasons.append(f"3-candle burst {burst_change:.2f}%")
     elif burst_change < -2.5:
         score -= 0.08
