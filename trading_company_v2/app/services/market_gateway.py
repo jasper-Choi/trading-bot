@@ -169,6 +169,29 @@ def get_krw_crypto_candidates(limit: int = 18) -> list[dict[str, Any]]:
         return []
 
 
+def get_upbit_ticker_prices(markets: list[str]) -> dict[str, float]:
+    symbols = [str(item).strip() for item in markets if str(item).strip()]
+    if not symbols:
+        return {}
+    try:
+        prices: dict[str, float] = {}
+        for chunk in _chunked(list(dict.fromkeys(symbols)), 100):
+            resp = requests.get(
+                UPBIT_TICKER_URL,
+                params={"markets": ",".join(chunk)},
+                timeout=min(REQUEST_TIMEOUT, 3),
+            )
+            resp.raise_for_status()
+            for item in resp.json():
+                market = str(item.get("market") or "").strip()
+                price = float(item.get("trade_price") or 0.0)
+                if market and price > 0:
+                    prices[market] = price
+        return prices
+    except (RequestException, ValueError, TypeError):
+        return {}
+
+
 def get_upbit_minute_candles(market: str, unit: int = 15, count: int = 40) -> list[dict[str, Any]]:
     try:
         resp = requests.get(

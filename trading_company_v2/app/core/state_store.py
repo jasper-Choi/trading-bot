@@ -672,6 +672,84 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
         db.commit()
 
 
+def load_crypto_rapid_guard_symbols() -> list[str]:
+    init_db()
+    with SessionLocal() as db:
+        paper_symbols = [
+            str(row.symbol)
+            for row in db.execute(
+                select(PaperPositionRecord).where(
+                    PaperPositionRecord.status == "open",
+                    PaperPositionRecord.desk == "crypto",
+                )
+            ).scalars().all()
+            if str(row.symbol or "").strip()
+        ]
+        live_symbols = [
+            str(row.symbol)
+            for row in db.execute(
+                select(PositionRecord).where(PositionRecord.desk == "crypto")
+            ).scalars().all()
+            if str(row.symbol or "").strip()
+        ]
+    return list(dict.fromkeys(paper_symbols + live_symbols))
+
+
+def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
+    """Fast price-only guard for open crypto positions between full strategy cycles."""
+    if not prices:
+        return {"checked": 0, "paper_closed": 0, "live_closed": 0}
+    init_db()
+    checked = 0
+    paper_closed = 0
+    closed_symbols: list[tuple[str, str]] = []
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(PaperPositionRecord).where(
+                PaperPositionRecord.status == "open",
+                PaperPositionRecord.desk == "crypto",
+            )
+        ).scalars().all()
+        for position in rows:
+            current_price = float(prices.get(position.symbol, 0.0) or 0.0)
+            if current_price <= 0 or position.entry_price <= 0:
+                continue
+            checked += 1
+            position.current_price = current_price
+            position.pnl_pct = _paper_net_pnl_pct(position.entry_price, current_price, position.symbol, "rapid")
+            position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
+            target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action)
+            peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
+            trail_giveback = (
+                1.0 if peak_pnl >= 4.0
+                else 0.7 if peak_pnl >= 2.2
+                else 0.5 if peak_pnl >= 1.5
+                else 0.0
+            )
+            if position.pnl_pct >= target_pct:
+                closed_symbols.append((position.symbol, "rapid_target_hit"))
+                _close_position(position, "rapid_target_hit")
+                paper_closed += 1
+            elif position.pnl_pct <= stop_pct:
+                closed_symbols.append((position.symbol, "rapid_stop_hit"))
+                _close_position(position, "rapid_stop_hit")
+                paper_closed += 1
+            elif peak_pnl >= 1.0 and position.pnl_pct <= 0.1:
+                closed_symbols.append((position.symbol, "rapid_breakeven_trail"))
+                _close_position(position, "rapid_breakeven_trail")
+                paper_closed += 1
+            elif trail_giveback and position.pnl_pct <= peak_pnl - trail_giveback:
+                closed_symbols.append((position.symbol, "rapid_trend_trail"))
+                _close_position(position, "rapid_trend_trail")
+                paper_closed += 1
+        db.commit()
+    for symbol, reason in closed_symbols:
+        close_position_by_symbol("crypto", symbol, prices, reason=reason)
+    update_positions_unrealized(prices)
+    live_closed = len(auto_exit_positions(prices, skip_desks=set()))
+    return {"checked": checked, "paper_closed": paper_closed, "live_closed": live_closed}
+
+
 def load_recent_orders(limit: int = 10) -> list[dict]:
     init_db()
     try:

@@ -725,3 +725,22 @@ Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레�
 - Intent:
   - reduce `failed_ignition` losses caused by buying the end of the first candle burst
   - preserve the high-return trend strategy by waiting for the first pullback/reclaim instead of reverting to low-risk inactivity
+
+## 19. Fast Reaction Runtime Patch - Crypto Rapid Guard (2026-04-28)
+
+- Added crypto-only fast runtime controls:
+  - `CRYPTO_FAST_CYCLE_SECONDS=8`
+  - `CRYPTO_RAPID_GUARD_SECONDS=3`
+- In crypto-only mode, the full strategy loop now targets an 8-second sleep interval instead of the old 45-second watch interval.
+- Added a rapid price-only guard between full strategy cycles:
+  - watches only currently open crypto symbols
+  - fetches lightweight Upbit ticker prices
+  - updates open P&L
+  - can close on target, hard stop, breakeven trail, or trend trail without waiting for the next full scan
+- This is still not true HFT/arbitrage infrastructure:
+  - REST ticker polling + Python + Oracle VM is not exchange-colocated execution
+  - the next step for real arbitrage-like reaction speed is a persistent Upbit websocket/tick collector and event-driven execution path
+- Intent:
+  - keep the full-universe strategy scan open
+  - make open-position risk response much faster
+  - prevent profitable spikes or sudden reversals from waiting on a slow full cycle
