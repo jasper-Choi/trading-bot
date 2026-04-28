@@ -699,6 +699,9 @@ Ross Cameron, Raschke Holy Grail, Minervini VCP 등 세계 최고 단기 트레�
   - each candidate now carries `btc_corr_15m`
   - execution caps high-BTC-beta crypto crowding with `CRYPTO_HIGH_CORR_THRESHOLD=0.85`
   - default max high-correlation crypto positions: `CRYPTO_HIGH_CORR_MAX_POSITIONS=2`
+- Changed crypto-only drawdown behavior:
+  - previous global rule blocked all new entries below `-1.5%`
+  - crypto-only mode now keeps entries open until `-6.0%`, relying on throttled risk/ATR/correlation controls instead of going fully idle
 - Intent:
   - reduce late-chase entries after the move has already aged
   - stop four alt positions from behaving like one oversized BTC-beta bet

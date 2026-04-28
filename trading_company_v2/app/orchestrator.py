@@ -719,7 +719,12 @@ class CompanyOrchestrator:
             + float((active_desk_stats.get(desk, {}) or {}).get("unrealized_pnl_pct", 0.0) or 0.0)
             for desk in active_desks
         )
-        provisional_allow_new_entries = state.regime != "STRESSED" and active_combined_pnl > -1.5
+        drawdown_entry_floor = -6.0 if active_desks == {"crypto"} else -1.5
+        provisional_allow_new_entries = state.regime != "STRESSED" and active_combined_pnl > drawdown_entry_floor
+        if active_desks == {"crypto"} and active_combined_pnl <= -1.5 and provisional_allow_new_entries:
+            state.notes.append(
+                f"crypto recovery mode: entries remain open at throttled risk despite {active_combined_pnl:.2f}% active P&L"
+            )
         live_locks = load_active_live_order_locks()
         live_guardrails = _live_execution_guardrails(live_locks)
         execution_risk_budget = state.risk_budget
