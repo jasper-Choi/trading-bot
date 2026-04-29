@@ -16,6 +16,7 @@ STOP_LIKE_EXIT_REASONS = {
     "no_lift_exit",
     "rapid_reversal_loss",
     "reversal_loss_exit",
+    "rapid_repeat_symbol_failure",
     "rapid_flat_timeout",
     "flat_no_lift_exit",
 }
@@ -649,10 +650,19 @@ class ExecutionAgent(BaseAgent):
             rationale=rationale,
         )
 
-    @staticmethod
-    def _crypto_candidate_entry_ok(meta: dict) -> tuple[bool, str]:
+    def _recent_crypto_symbol_failure(self, symbol: str) -> dict | None:
+        for item in self.closed_positions[:20]:
+            if item.get("desk") != "crypto" or item.get("symbol") != symbol:
+                continue
+            pnl = float(item.get("pnl_pct", 0.0) or 0.0)
+            if self._is_stop_like_exit(item) and pnl <= -0.30:
+                return item
+        return None
+
+    def _crypto_candidate_entry_ok(self, meta: dict) -> tuple[bool, str]:
         if not meta:
             return False, "missing candidate-specific signal"
+        symbol = str(meta.get("market", "") or "")
         score = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
         trend_allowed = bool(meta.get("trend_entry_allowed", False))
         trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
@@ -679,6 +689,13 @@ class ExecutionAgent(BaseAgent):
             return False, f"stale signal ({freshness:.2f})"
         if hard_overheat:
             return False, "hard overheat"
+        recent_failure = self._recent_crypto_symbol_failure(symbol)
+        if recent_failure and (score < 0.82 or trend_score < 0.62 or orderbook_bid_ask < 1.15):
+            return (
+                False,
+                "recent failed symbol requires stronger re-entry "
+                f"(score {score:.2f}, trend {trend_score:.2f}, ob {orderbook_bid_ask:.2f}x)",
+            )
         return True, f"eligible combined={score:.2f} trend={trend_score:.2f} ob={orderbook_bid_ask:.2f}x"
 
     @staticmethod

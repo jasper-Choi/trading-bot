@@ -1226,3 +1226,24 @@ python walk_forward.py
 
 - Make the dashboard reflect actual mock trading state.
 - Prevent stale ghost positions from blocking new entries or confusing exposure/PnL.
+
+## 35. Repeat Failed Symbol Guard (2026-04-29)
+
+### Diagnosis
+
+- AVAX was correctly removed as a ghost position, but later re-entered as a new real paper position.
+- The re-entry was allowed with `combined=0.745` even though AVAX had a recent `failed_ignition` loss.
+- That made the dashboard look like AVAX "keeps coming back" and exposed the bot to repeated weak-symbol churn.
+
+### Completed
+
+- Crypto candidates with recent stop-like same-symbol loss now require stronger re-entry:
+  - `combined_score >= 0.82`
+  - `trend_follow_score >= 0.62`
+  - `orderbook_bid_ask_ratio >= 1.15`
+- Added `rapid_repeat_symbol_failure`.
+  - If a recently failed symbol re-enters, never reaches `+0.05%`, and is below `-0.10%` after 4 minutes, it is closed quickly.
+
+### Intent
+
+- Keep broad-market scanning open, but stop repeatedly recycling symbols that already failed unless the new signal is clearly stronger.

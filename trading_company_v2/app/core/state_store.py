@@ -399,6 +399,38 @@ def _crypto_no_lift_exit_reason(minutes_open: float, peak_pnl: float, pnl_pct: f
     return None
 
 
+_STOP_LIKE_PAPER_REASONS = {
+    "stop_hit",
+    "rapid_stop_hit",
+    "early_failure",
+    "failed_ignition",
+    "failed_followthrough",
+    "rapid_failed_start",
+    "rapid_no_lift",
+    "no_lift_exit",
+    "rapid_reversal_loss",
+    "reversal_loss_exit",
+    "rapid_repeat_symbol_failure",
+}
+
+
+def _has_recent_failed_paper_symbol(db: Session, position: PaperPositionRecord) -> bool:
+    prior = db.execute(
+        select(PaperPositionRecord)
+        .where(
+            PaperPositionRecord.desk == position.desk,
+            PaperPositionRecord.symbol == position.symbol,
+            PaperPositionRecord.status == "closed",
+        )
+        .order_by(PaperPositionRecord.id.desc())
+        .limit(3)
+    ).scalars().all()
+    for row in prior:
+        if row.closed_reason in _STOP_LIKE_PAPER_REASONS and float(row.pnl_pct or 0.0) <= -0.30:
+            return True
+    return False
+
+
 def _ensure_schema() -> None:
     inspector = inspect(engine)
     try:
@@ -882,6 +914,15 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             elif minutes_open >= 4.0 and peak_pnl <= 0.05 and position.pnl_pct <= -0.75:
                 closed_symbols.append((position.symbol, "rapid_failed_start"))
                 _close_position(position, "rapid_failed_start")
+                paper_closed += 1
+            elif (
+                minutes_open >= 4.0
+                and peak_pnl <= 0.05
+                and position.pnl_pct <= -0.10
+                and _has_recent_failed_paper_symbol(db, position)
+            ):
+                closed_symbols.append((position.symbol, "rapid_repeat_symbol_failure"))
+                _close_position(position, "rapid_repeat_symbol_failure")
                 paper_closed += 1
             elif no_lift_reason := _crypto_no_lift_exit_reason(minutes_open, peak_pnl, position.pnl_pct, rapid=True):
                 closed_symbols.append((position.symbol, no_lift_reason))
