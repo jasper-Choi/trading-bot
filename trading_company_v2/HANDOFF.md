@@ -465,15 +465,41 @@ Status:
 2. **첫 브레이크아웃 신호 확인** — 한국 장 중 대시보드에서 BK 뱃지 확인
 3. **자본 스케일업** — 첫 swing +4% 완료 후 `UPBIT_PILOT_MAX_KRW` 증액, `UPBIT_PILOT_SINGLE_ORDER_ONLY=false`
 
-## 8. Suggested next work
+## 8. Suggested next work (2026-04-29 기준)
 
-Priority order:
+### 완료된 항목 (이번 Claude 세션)
+- ✅ `backtest/walk_forward.py` — 워크포워드 백테스트 인프라 (Phase 1 완료)
+- ✅ `/scanner` 페이지 + `/scanner-data` API — DartLab 스타일 18코인 스캐너 UI
+- ✅ `crypto_desk_agent.py` — `all_candidates` 전체 18코인 뷰 저장
+- ✅ 대시보드 상단 "📡 스캐너" 버튼 추가
+- ✅ HANDOFF.md 섹션 22 추가 (fast_fail time-based + threshold 내용 포함)
 
-1. **Oracle VM pull** — `ssh ubuntu@134.185.118.144` → `cd /home/ubuntu/trading-bot && git pull` → `sudo systemctl restart trading-loop trading-dashboard`
-2. **대시보드 진입 빈도 확인** — 새 파라미터 배포 후 크립토/한국주식 데스크에서 `planned` 주문 증가 여부
-3. **첫 swing +4% 목표 거래 추적** — 기존 빠른 청산(`momentum_take`) 없이 타깃까지 홀딩하는지 확인
-4. **KIS 실전 전환** — Oracle VM `.env`에 KIS_APP_KEY / KIS_APP_SECRET / KIS_ACCOUNT_NO 등록 후 `KIS_ALLOW_LIVE=true`
-5. ~~**signal_engine.py 브레이크아웃 신호 추가**~~ ✅ 완료 (0.16 참고)
+### Codex 다음 작업 우선순위
+
+**A (권장 1순위): 텔레그램 거래 일지 강화**
+- 이미 텔레그램 봇 연결됨 → 추가 계정 세팅 없이 바로 가능
+- 진입 시: 심볼/사이즈/가격/진입 사유(action path)/combined_score/signal_score 전송
+- 청산 시: 청산가/PnL%/청산 사유/보유시간/peak_pnl 전송
+- 관련 파일: `app/services/notifier.py`, `app/core/state_store.py` (`_close_position`)
+
+**B (2순위): 성과 분석 페이지 강화**
+- `/performance` 엔드포인트 이미 존재 (line ~2319 in main.py)
+- 추가할 것: 시간대별 히트맵, 진입 사유별 승률, PnL 분포, 연속 손익 스트릭
+- 데이터: `cycle_journal`, `closed_positions` SQLite 테이블 활용
+
+**C (3순위): Scanner 가격 + 스파크라인**
+- `/scanner` 페이지에 현재가 컬럼 추가 (upbit ticker REST or WebSocket cache)
+- 15m 미니 캔들 스파크라인 (SVG inline, 최근 8봉)
+- `/scanner-data` API에 `current_price`, `candles_15m_mini` 필드 추가
+
+**D (4순위): walk-forward 실행 → 파라미터 재검토**
+- `cd C:\Users\User\Desktop\backtest && python walk_forward.py` 실행 (약 1-2시간)
+- `walk_forward_result.json` 확인 → 오버핏 여부 및 권장 파라미터 적용
+
+### 나중에 할 것 (준비 필요)
+- Priority 4: Slack/Notion 거래 일지 (계정 세팅 후)
+- KIS 한국주식 실전 (Oracle VM `.env` KIS 자격증명 등록 후)
+- Binance Futures 연동 → LONG+SHORT 양방향 (Phoenix 봇 스타일)
 
 ## 9. Useful commands
 
