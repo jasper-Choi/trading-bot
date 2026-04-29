@@ -1863,6 +1863,8 @@ def load_performance_analytics(limit: int = 500) -> dict:
         for hour, items in hourly_groups.items()
     ]
 
+    daily_performance = _stats_by(closed, lambda row: _local_date_from_iso(row.closed_at))[:30]
+
     buckets = [
         ("<= -2%", None, -2.0),
         ("-2% ~ -1%", -2.0, -1.0),
@@ -1928,6 +1930,7 @@ def load_performance_analytics(limit: int = 500) -> dict:
             "sample_size": len(closed),
         },
         "hourly_heatmap": hourly_heatmap,
+        "daily_performance": daily_performance,
         "entry_reason_stats": _stats_by(closed, lambda row: row.action),
         "exit_reason_stats": _stats_by(closed, lambda row: row.closed_reason),
         "symbol_stats": _stats_by(closed, lambda row: row.symbol)[:20],

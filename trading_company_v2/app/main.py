@@ -2350,11 +2350,11 @@ def _performance_html() -> str:
     *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top left,#183150 0,#08111f 42%,#050914 100%);color:var(--text);font-family:var(--font);line-height:1.5}
     .app{max-width:1180px;margin:0 auto;padding:18px 14px 60px}.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.title h1{margin:0;font-size:1.35rem}.title p{margin:4px 0 0;color:var(--muted);font-size:.86rem}.nav{display:flex;gap:8px;flex-wrap:wrap}.btn{border:1px solid var(--line);border-radius:10px;padding:9px 12px;color:var(--text);background:rgba(17,27,45,.75);text-decoration:none;font-weight:700;font-size:.84rem}
     .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.card{border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,rgba(17,27,45,.94),rgba(9,17,31,.96));box-shadow:0 18px 45px rgba(0,0,0,.25);padding:16px}.metric-label{color:var(--muted);font-size:.78rem}.metric-value{font-family:var(--mono);font-size:1.6rem;font-weight:900;margin-top:6px}.metric-sub{color:var(--muted);font-size:.78rem;margin-top:4px}.green{color:var(--green)}.red{color:var(--red)}.blue{color:var(--blue)}.yellow{color:var(--yellow)}
-    .section{margin-top:14px}.section h2{font-size:1rem;margin:0 0 10px}.wide{grid-column:span 2}.full{grid-column:1/-1}.heat{display:grid;grid-template-columns:repeat(12,1fr);gap:7px}.heat-cell{border:1px solid var(--line);border-radius:11px;padding:8px 6px;min-height:72px;background:rgba(13,22,38,.82)}.heat-hour{font-family:var(--mono);font-size:.72rem;color:var(--muted)}.heat-pnl{font-family:var(--mono);font-weight:900;margin-top:5px}.heat-meta{font-size:.7rem;color:var(--muted)}
+    .section{margin-top:14px}.section h2{font-size:1rem;margin:0 0 10px}.wide{grid-column:span 2}.full{grid-column:1/-1}.heat-scroll{overflow-x:auto;overflow-y:hidden;padding-bottom:8px}.heat{display:grid;grid-template-columns:repeat(24,minmax(82px,1fr));gap:7px;min-width:2050px}.heat-cell{border:1px solid var(--line);border-radius:11px;padding:8px 6px;min-height:72px;background:rgba(13,22,38,.82)}.heat-hour{font-family:var(--mono);font-size:.72rem;color:var(--muted)}.heat-pnl{font-family:var(--mono);font-weight:900;margin-top:5px}.heat-meta{font-size:.7rem;color:var(--muted)}
     .bars{display:flex;flex-direction:column;gap:9px}.bar-row{display:grid;grid-template-columns:100px 1fr 70px;gap:10px;align-items:center;font-size:.82rem}.bar-track{height:12px;border-radius:999px;background:#1c2940;overflow:hidden}.bar-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--blue),var(--green))}.table-wrap{overflow:auto}.tbl{width:100%;border-collapse:collapse;font-size:.82rem}.tbl th,.tbl td{border-bottom:1px solid rgba(36,48,71,.75);padding:9px 7px;text-align:left;white-space:nowrap}.tbl th{color:var(--muted);font-size:.74rem;font-weight:800}.empty{color:var(--muted);padding:16px;border:1px dashed var(--line);border-radius:14px}
     .reason-list{display:flex;flex-direction:column;gap:8px}.reason{display:grid;grid-template-columns:minmax(130px,1fr) 70px 70px 80px;gap:8px;align-items:center;border:1px solid rgba(36,48,71,.75);border-radius:12px;padding:10px;background:rgba(13,22,38,.75);font-size:.82rem}.reason b{overflow:hidden;text-overflow:ellipsis}.status{color:var(--muted);font-size:.78rem}
-    @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.wide{grid-column:1/-1}.heat{grid-template-columns:repeat(6,1fr)}.top{align-items:flex-start;flex-direction:column}.nav{width:100%}.btn{flex:1;text-align:center}}
-    @media(max-width:560px){.grid{grid-template-columns:1fr}.heat{grid-template-columns:repeat(3,1fr)}.metric-value{font-size:1.35rem}.reason{grid-template-columns:1fr 54px 58px 64px}.bar-row{grid-template-columns:80px 1fr 56px}.app{padding:14px 10px 50px}}
+    @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.wide{grid-column:1/-1}.top{align-items:flex-start;flex-direction:column}.nav{width:100%}.btn{flex:1;text-align:center}}
+    @media(max-width:560px){.grid{grid-template-columns:1fr}.metric-value{font-size:1.35rem}.reason{grid-template-columns:1fr 54px 58px 64px}.bar-row{grid-template-columns:80px 1fr 56px}.app{padding:14px 10px 50px}}
   </style>
 </head>
 <body>
@@ -2372,8 +2372,8 @@ def _performance_html() -> str:
     </header>
     <section class="grid" id="metrics"></section>
     <section class="grid section">
-      <div class="card wide"><h2>시간대별 히트맵</h2><div class="heat" id="heatmap"></div></div>
-      <div class="card wide"><h2>PnL 분포</h2><div class="bars" id="distribution"></div></div>
+      <div class="card full"><h2>시간대별 히트맵</h2><div class="heat-scroll"><div class="heat" id="heatmap"></div></div><h2 style="margin-top:16px">일자별 거래 종합 성과</h2><div class="table-wrap" id="daily-table"></div></div>
+      <div class="card full"><h2>PnL 분포</h2><div class="bars" id="distribution"></div></div>
     </section>
     <section class="grid section">
       <div class="card wide"><h2>진입 사유별 승률</h2><div class="reason-list" id="entry-reasons"></div></div>
@@ -2393,11 +2393,12 @@ function kst(iso){try{return new Date(iso).toLocaleString('ko-KR',{timeZone:'Asi
 function metric(label,value,sub,color){return '<div class="card"><div class="metric-label">'+label+'</div><div class="metric-value '+(color||'')+'">'+value+'</div><div class="metric-sub">'+(sub||'')+'</div></div>'}
 function renderMetrics(a){var s=a.summary||{},t=s.today||{};document.getElementById('metrics').innerHTML=[metric('누적 PnL',pct(s.total_pnl_pct),krw(s.total_pnl_krw)+' · '+s.trades+'건',cls(s.total_pnl_pct)),metric('승률',n(s.win_rate).toFixed(1)+'%',s.wins+'승 / '+s.losses+'패','blue'),metric('평균 기대값',pct(s.avg_pnl_pct),'평균 보유 '+n(s.avg_hold_min).toFixed(1)+'분',cls(s.avg_pnl_pct)),metric('오늘 PnL',pct(t.total_pnl_pct),krw(t.total_pnl_krw)+' · '+t.trades+'건',cls(t.total_pnl_pct)),metric('최대 낙폭',pct(s.max_drawdown_pct),'샘플 '+s.sample_size+'건','yellow'),metric('오픈 포지션',String(s.open_positions||0),'현재 보유 중','blue'),metric('최고 거래',pct(s.best_pnl_pct),'최근 표본 기준','green'),metric('최악 거래',pct(s.worst_pnl_pct),'손실 원인 점검 필요','red')].join('')}
 function renderHeat(a){document.getElementById('heatmap').innerHTML=(a.hourly_heatmap||[]).map(function(x){var p=n(x.total_pnl_pct),o=Math.min(.95,Math.max(.08,Math.abs(p)/4)),bg=p>=0?'rgba(57,217,138,'+o+')':'rgba(255,107,107,'+o+')';return '<div class="heat-cell" style="background:'+bg+'"><div class="heat-hour">'+x.label+'</div><div class="heat-pnl '+cls(p)+'">'+pct(p)+'</div><div class="heat-meta">'+x.trades+'건 · '+n(x.win_rate).toFixed(0)+'%</div></div>'}).join('')}
+function renderDaily(a){document.getElementById('daily-table').innerHTML=table(['일자','거래','승률','PnL','금액','평균','보유'],(a.daily_performance||[]).slice(0,14).map(function(x){return '<tr><td>'+x.label+'</td><td>'+x.trades+'건</td><td class="blue">'+n(x.win_rate).toFixed(1)+'%</td><td class="'+cls(x.total_pnl_pct)+'">'+pct(x.total_pnl_pct)+'</td><td class="'+cls(x.total_pnl_krw)+'">'+krw(x.total_pnl_krw)+'</td><td class="'+cls(x.avg_pnl_pct)+'">'+pct(x.avg_pnl_pct)+'</td><td>'+n(x.avg_hold_min).toFixed(1)+'분</td></tr>'}))}
 function renderBars(a){var rows=a.pnl_distribution||[],max=Math.max(1,...rows.map(function(x){return n(x.trades)}));document.getElementById('distribution').innerHTML=rows.map(function(x){var w=Math.max(3,n(x.trades)/max*100);return '<div class="bar-row"><span>'+x.label+'</span><div class="bar-track"><div class="bar-fill" style="width:'+w+'%"></div></div><b>'+x.trades+'건</b></div>'}).join('')||'<div class="empty">분포 데이터 없음</div>'}
 function renderReasons(id,rows){document.getElementById(id).innerHTML=(rows||[]).slice(0,10).map(function(x){return '<div class="reason"><b title="'+x.label+'">'+x.label+'</b><span>'+x.trades+'건</span><span class="blue">'+n(x.win_rate).toFixed(1)+'%</span><span class="'+cls(x.total_pnl_pct)+'">'+pct(x.total_pnl_pct)+'</span></div>'}).join('')||'<div class="empty">집계 데이터 없음</div>'}
 function table(headers,rows){if(!rows.length)return '<div class="empty">표시할 데이터 없음</div>';return '<table class="tbl"><thead><tr>'+headers.map(function(h){return '<th>'+h+'</th>'}).join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table>'}
 function renderTables(a){document.getElementById('open-table').innerHTML=table(['종목','진입','보유','PnL','Peak'],(a.open_positions||[]).map(function(x){return '<tr><td>'+x.symbol+'</td><td>'+x.action+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td>'+pct(x.peak_pnl_pct)+'</td></tr>'}));document.getElementById('closed-table').innerHTML=table(['종목','청산','보유','PnL','금액','시간'],(a.recent_closed||[]).slice(0,20).map(function(x){return '<tr><td>'+x.symbol+'</td><td>'+x.closed_reason+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td class="'+cls(x.pnl_krw)+'">'+krw(x.pnl_krw)+'</td><td>'+kst(x.closed_at)+'</td></tr>'}))}
-async function load(){try{var res=await fetch('/performance-data');var data=await res.json();var a=data.analytics||{};document.getElementById('subtitle').textContent='업데이트 '+kst(a.updated_at)+' · '+(a.timezone||'Asia/Seoul');renderMetrics(a);renderHeat(a);renderBars(a);renderReasons('entry-reasons',a.entry_reason_stats);renderReasons('exit-reasons',a.exit_reason_stats);renderTables(a)}catch(e){document.getElementById('metrics').innerHTML='<div class="card full red">성과 데이터 로딩 실패: '+e.message+'</div>'}}
+async function load(){try{var res=await fetch('/performance-data');var data=await res.json();var a=data.analytics||{};document.getElementById('subtitle').textContent='업데이트 '+kst(a.updated_at)+' · '+(a.timezone||'Asia/Seoul');renderMetrics(a);renderHeat(a);renderDaily(a);renderBars(a);renderReasons('entry-reasons',a.entry_reason_stats);renderReasons('exit-reasons',a.exit_reason_stats);renderTables(a)}catch(e){document.getElementById('metrics').innerHTML='<div class="card full red">성과 데이터 로딩 실패: '+e.message+'</div>'}}
 load();setInterval(load,20000);
 </script>
 </body>
@@ -2977,7 +2978,7 @@ def root() -> str:
 @app.get("/scanner-data")
 def scanner_data() -> dict:
     """전체 스캔 코인 데이터 반환 (스캐너 페이지용)"""
-    state = get_state()
+    state = load_company_state()
     crypto_view = state.market_snapshot.get("crypto_view", {}) if state.market_snapshot else {}
     all_candidates = list(crypto_view.get("all_candidates") or crypto_view.get("candidate_markets") or [])
     scanned_count = int(crypto_view.get("scanned_market_count", len(all_candidates)) or len(all_candidates))
@@ -3369,7 +3370,7 @@ function renderTable(){
 
 // ── 자동발견 섹션 ──
 function discCard(c, tagsHtml){
-  return '<div class="disc-card" onclick="highlightRow(\''+c.market+'\')">'
+  return '<div class="disc-card" data-market="'+String(c.market||'').replace(/"/g,'&quot;')+'" onclick="highlightRow(this.dataset.market)">'
     +'<div class="disc-card-sym">'+sym(c.market)+'</div>'
     +'<div class="disc-card-score">'+sc(c.combined_score).toFixed(3)+' combined</div>'
     +'<div class="disc-card-tags">'+tagsHtml+'</div>'

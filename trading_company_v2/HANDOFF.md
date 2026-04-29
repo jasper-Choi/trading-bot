@@ -908,3 +908,24 @@ python walk_forward.py
 - Make it obvious which entry actions and exit reasons are actually making or losing money.
 - Surface weak time windows and PnL distribution quickly so strategy tuning is driven by observed trade outcomes, not guesswork.
 - Keep this focused on the current paper-position lifecycle until live fill accounting is unified.
+
+## 25. Scanner Loading + Performance Layout Patch (2026-04-29)
+
+### Completed
+
+- Fixed `/scanner-data`.
+  - The scanner endpoint was calling undefined `get_state()`, which returned a server error and left the scanner page stuck on loading.
+  - Replaced it with `load_company_state()`.
+- Fixed scanner discovery-card JavaScript quoting.
+  - Replaced fragile inline quoted `highlightRow('MARKET')` HTML with `data-market` + `highlightRow(this.dataset.market)`.
+  - Verified scanner and performance scripts with `node --check`.
+- Improved `/performance` layout.
+  - Time-of-day heatmap now spans full width and lives inside a horizontal scroll container.
+  - PnL distribution is no longer placed beside the 24-hour heatmap.
+  - Added `daily_performance` analytics and a daily summary table below the heatmap.
+
+### Intent
+
+- Make the scanner reliably render instead of silently failing after API or JavaScript errors.
+- Keep the performance page readable on both desktop and mobile while preserving all 24 hourly cells.
+- Add daily trade outcome visibility so strategy changes can be checked day by day.
