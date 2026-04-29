@@ -1206,3 +1206,23 @@ python walk_forward.py
 - Keep the bot active, but stop letting weak entries bleed capital.
 - Free capital faster for the next momentum candidate.
 - Preserve winners with trailing rules while making losers prove themselves quickly.
+
+## 34. Paper/Shadow Position Sync Patch (2026-04-29)
+
+### Diagnosis
+
+- Dashboard showed `KRW-AVAX`, `KRW-XRP`, and `KRW-ADA` as still held even after their paper positions were closed.
+- Root cause: the dashboard/execution state used the legacy `positions` shadow table, while paper trading truth lived in `paper_positions`.
+- Paper closes did not always delete the matching shadow `positions` row, creating ghost holdings and distorted exposure/cap checks.
+
+### Completed
+
+- `CompanyState.open_positions` now loads from `paper_positions` in paper mode tracking.
+- Dashboard closed/open performance payloads use paper closed/open helpers for the mock trading view.
+- `_close_position()` now deletes the matching shadow `positions` row when a paper position closes.
+- Existing ghost shadows should be pruned on deploy for symbols already closed in `paper_positions`.
+
+### Intent
+
+- Make the dashboard reflect actual mock trading state.
+- Prevent stale ghost positions from blocking new entries or confusing exposure/PnL.

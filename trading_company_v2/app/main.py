@@ -39,6 +39,7 @@ from app.core.state_store import (
     load_closed_positions,
     load_company_state,
     load_open_positions,
+    load_paper_closed_positions,
     load_performance_analytics,
     load_performance_quick_stats,
     load_recent_journal,
@@ -1036,7 +1037,7 @@ def _simulate_decision_snapshot(state: CompanyState, simulated_session: dict) ->
         regime=state.regime,
         market_snapshot=state.market_snapshot,
         open_positions=state.open_positions,
-        closed_positions=load_closed_positions(limit=12),
+        closed_positions=load_paper_closed_positions(limit=12),
         allow_new_entries=state.allow_new_entries,
         risk_budget=state.risk_budget,
     )
@@ -1255,7 +1256,7 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
 def _build_dashboard_payload(state: CompanyState) -> dict:
     active_desks = set((state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
     closed_positions = [
-        item for item in load_closed_positions(limit=40)
+        item for item in load_paper_closed_positions(limit=40)
         if str(item.get("desk") or "") in active_desks
     ][:20]
     open_positions = [
@@ -1789,7 +1790,7 @@ def us_session_check() -> dict:
         regime=state.regime,
         market_snapshot={"us_leaders": us_payload.get("leaders", [])},
         open_positions=[item for item in state.open_positions if item.get("desk") == "us"],
-        closed_positions=load_closed_positions(limit=12),
+        closed_positions=load_paper_closed_positions(limit=12),
         daily_summary=state.daily_summary,
         allow_new_entries=state.allow_new_entries,
         risk_budget=state.risk_budget,

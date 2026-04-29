@@ -9,7 +9,7 @@ import pytz
 import requests
 from sqlalchemy import JSON, Boolean, Float, Integer, String, create_engine, event, inspect, select, text
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, object_session, sessionmaker
 
 from app.config import settings
 from app.core.models import AgentSnapshot, ClosedPosition, CompanyState, CycleJournalEntry, PaperOrder, Position, utcnow_iso
@@ -523,6 +523,16 @@ def _close_position(position: PaperPositionRecord, reason: str) -> None:
     else:
         position.exit_price = position.current_price
     position.closed_reason = reason
+    session = object_session(position)
+    if session is not None:
+        shadow = session.execute(
+            select(PositionRecord).where(
+                PositionRecord.desk == position.desk,
+                PositionRecord.symbol == position.symbol,
+            )
+        ).scalar_one_or_none()
+        if shadow is not None:
+            session.delete(shadow)
     _notify_trade_exit(_paper_trade_payload(position), reason)
 
 
@@ -581,7 +591,7 @@ def load_company_state() -> CompanyState:
             daily_summary=load_daily_summary(),
             performance_stats=load_performance_quick_stats(),
             execution_log=load_recent_execution_log(limit=10),
-            open_positions=[p.model_dump() for p in load_open_positions()],
+            open_positions=load_paper_open_positions(),
             recent_journal=load_recent_journal(limit=8),
         )
     except OperationalError:
@@ -1457,6 +1467,75 @@ def load_open_positions() -> list[Position]:
                     unrealized_pnl_pct=row.unrealized_pnl_pct,
                     opened_at=row.opened_at,
                 )
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_paper_open_positions(limit: int = 20) -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "open")
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(limit)
+            ).scalars().all()
+            return [
+                {
+                    "id": row.id,
+                    "desk": row.desk,
+                    "symbol": row.symbol,
+                    "entry_price": row.entry_price,
+                    "current_price": row.current_price,
+                    "notional_pct": _size_to_notional(row.size),
+                    "size": row.size,
+                    "action": row.action,
+                    "pnl_pct": row.pnl_pct,
+                    "unrealized_pnl_pct": row.pnl_pct,
+                    "peak_pnl_pct": row.peak_pnl_pct,
+                    "cycles_open": row.cycles_open,
+                    "opened_at": row.opened_at,
+                    "focus": row.focus,
+                }
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_paper_closed_positions(limit: int = 50) -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "closed")
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(limit)
+            ).scalars().all()
+            return [
+                {
+                    "id": row.id,
+                    "desk": row.desk,
+                    "symbol": row.symbol,
+                    "entry_price": row.entry_price,
+                    "exit_price": row.exit_price,
+                    "notional_pct": _size_to_notional(row.size),
+                    "size": row.size,
+                    "action": row.action,
+                    "pnl_pct": row.pnl_pct,
+                    "realized_pnl_pct": row.pnl_pct,
+                    "won": row.pnl_pct > 0,
+                    "opened_at": row.opened_at,
+                    "closed_at": row.closed_at,
+                    "closed_reason": row.closed_reason or "",
+                    "focus": row.focus,
+                }
                 for row in rows
             ]
     except OperationalError:
