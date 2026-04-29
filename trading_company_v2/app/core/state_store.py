@@ -840,6 +840,14 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
             trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
             protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+            minutes_open = 0.0
+            try:
+                opened_dt = datetime.fromisoformat(str(position.opened_at).replace("Z", "+00:00"))
+                if opened_dt.tzinfo is None:
+                    opened_dt = opened_dt.replace(tzinfo=timezone.utc)
+                minutes_open = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
+            except (ValueError, TypeError):
+                minutes_open = 0.0
             if position.pnl_pct >= target_pct:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
@@ -847,6 +855,10 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             elif position.pnl_pct <= stop_pct:
                 closed_symbols.append((position.symbol, "rapid_stop_hit"))
                 _close_position(position, "rapid_stop_hit")
+                paper_closed += 1
+            elif minutes_open >= 4.0 and peak_pnl <= 0.05 and position.pnl_pct <= -0.75:
+                closed_symbols.append((position.symbol, "rapid_failed_start"))
+                _close_position(position, "rapid_failed_start")
                 paper_closed += 1
             elif trail_giveback and position.pnl_pct <= protect_level:
                 reason = "rapid_profit_protect" if peak_pnl < 1.8 else "rapid_trend_trail"

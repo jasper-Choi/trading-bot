@@ -11,6 +11,7 @@ STOP_LIKE_EXIT_REASONS = {
     "early_failure",
     "failed_ignition",
     "failed_followthrough",
+    "rapid_failed_start",
 }
 
 
@@ -645,7 +646,7 @@ class ExecutionAgent(BaseAgent):
     @staticmethod
     def _crypto_candidate_entry_ok(meta: dict) -> tuple[bool, str]:
         if not meta:
-            return True, "no candidate meta; fallback to primary plan"
+            return False, "missing candidate-specific signal"
         score = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
         trend_allowed = bool(meta.get("trend_entry_allowed", False))
         trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
@@ -682,6 +683,10 @@ class ExecutionAgent(BaseAgent):
         mapped["symbol"] = str(meta.get("market", mapped.get("symbol", "")) or mapped.get("symbol", ""))
         mapped["signal_score"] = float(meta.get("combined_score", meta.get("signal_score", mapped.get("signal_score", 0.0))) or 0.0)
         mapped["desk_bias"] = str(meta.get("bias", mapped.get("desk_bias", "balanced")) or "balanced")
+        mapped["focus"] = (
+            f"{mapped['symbol']} candidate-specific multi-coin entry "
+            f"(combined {mapped['signal_score']:.2f})"
+        )
         passthrough_keys = (
             "discovery_score", "change_rate", "volume_24h_krw",
             "recent_change_pct", "burst_change_pct", "ema_gap_pct", "pullback_gap_pct", "range_4_pct", "rsi",

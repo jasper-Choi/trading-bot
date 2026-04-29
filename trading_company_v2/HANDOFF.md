@@ -1151,3 +1151,29 @@ python walk_forward.py
 - Allow several coins to be entered during broad crypto momentum instead of forcing a single leader.
 - Preserve signal quality by requiring each coin to pass its own growth-mode checks.
 - Increase turnover and compounding opportunity without blindly buying every scanner candidate.
+
+## 32. Failed Start Guard Patch (2026-04-29)
+
+### Diagnosis
+
+- After multi-coin growth mode opened positions, several crypto positions immediately sat at negative PnL with `peak_pnl_pct = 0.0`.
+- Recent order logs also showed secondary candidates with `combined_score = 0.0`.
+  - Root cause: the multi-order fallback allowed candidates missing `candidate_markets` metadata.
+  - That could create idle/no-score orders and confusing focus text inherited from the lead coin.
+
+### Completed
+
+- Candidate-specific multi-coin entries now reject candidates with missing metadata.
+  - No more fallback pass for crypto candidates without their own scanner/score payload.
+- Candidate-specific entries now rewrite `focus`.
+  - Focus now identifies the actual candidate symbol and its own combined score.
+- Added `rapid_failed_start`.
+  - If a crypto position is open at least 4 minutes, never reached `+0.05%`, and falls to `<= -0.75%`, it is closed quickly.
+  - This cuts dead-on-arrival entries before they drift into larger stops.
+- `rapid_failed_start` is treated as stop-like in execution scoring.
+
+### Intent
+
+- Stop the bot from holding positions that immediately prove the entry timing was wrong.
+- Keep active multi-coin trading, but remove no-score/fallback candidates.
+- Reduce immediate capital bleed while preserving fast trend-following participation.
