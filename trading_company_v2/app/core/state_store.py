@@ -1920,6 +1920,47 @@ def load_performance_analytics(limit: int = 500) -> dict:
         for row in reversed(open_rows[-20:])
     ]
 
+    # Equity curve: date-sorted cumulative PnL (up to 60 trading days)
+    daily_by_date = sorted(
+        _stats_by(closed, lambda row: _local_date_from_iso(row.closed_at)),
+        key=lambda x: str(x.get("label", "")),
+    )
+    equity_curve: list[dict] = []
+    cumulative = 0.0
+    for day in daily_by_date[-60:]:
+        cumulative += float(day.get("total_pnl_pct", 0.0))
+        equity_curve.append(
+            {
+                "date": str(day.get("label", "")),
+                "cumulative_pnl_pct": round(cumulative, 2),
+                "daily_pnl_pct": day.get("total_pnl_pct", 0.0),
+                "trades": day.get("trades", 0),
+            }
+        )
+
+    # Win/loss streak analysis from time-ordered closed rows
+    tmp_streak = 0
+    tmp_type: str | None = None
+    longest_win = 0
+    longest_loss = 0
+    for row in closed:
+        rt = "win" if float(row.pnl_pct or 0.0) > 0 else "loss"
+        if rt == tmp_type:
+            tmp_streak += 1
+        else:
+            tmp_type = rt
+            tmp_streak = 1
+        if rt == "win":
+            longest_win = max(longest_win, tmp_streak)
+        else:
+            longest_loss = max(longest_loss, tmp_streak)
+    streak_info = {
+        "current_streak": tmp_streak,
+        "current_type": tmp_type or "none",
+        "longest_win_streak": longest_win,
+        "longest_loss_streak": longest_loss,
+    }
+
     return {
         "updated_at": utcnow_iso(),
         "timezone": settings.timezone,
@@ -1938,4 +1979,6 @@ def load_performance_analytics(limit: int = 500) -> dict:
         "pnl_distribution": pnl_distribution,
         "open_positions": open_positions,
         "recent_closed": recent_closed,
+        "equity_curve": equity_curve,
+        "streak_info": streak_info,
     }
