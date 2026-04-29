@@ -887,3 +887,24 @@ python walk_forward.py
 - Alerts are tied to the `paper_positions` lifecycle because the dashboard and current performance accounting are paper-position centric.
 - This gives one entry alert and one exit alert per bot position without double-alerting the parallel live/paper ledgers.
 - If live broker fill alerts are needed later, add a separate live-fill journal off `live_order_log` to avoid duplicate Telegram messages for the same trade.
+
+## 24. Performance Analytics Page Patch (2026-04-29)
+
+### Completed
+
+- Added `load_performance_analytics()` in `app/core/state_store.py`.
+  - Aggregates closed paper positions into all-time summary, today summary, hourly heatmap, entry-action stats, exit-reason stats, symbol stats, PnL distribution, open positions, and recent closed trades.
+  - Uses KST-aware timestamp parsing so the hourly heatmap matches the operator's Korea-time dashboard view.
+  - Estimates KRW PnL from `PAPER_CAPITAL_KRW * size_x * pnl_pct`.
+- Added `/performance-data`.
+  - Returns both existing quick stats and the new analytics payload for future frontend/mobile reuse.
+- Upgraded `/performance`.
+  - Default route now renders a mobile-responsive HTML performance page.
+  - `?format=json` remains available for the previous JSON-style diagnostics payload plus analytics.
+- Added a dashboard topbar link to `/performance`.
+
+### Intent
+
+- Make it obvious which entry actions and exit reasons are actually making or losing money.
+- Surface weak time windows and PnL distribution quickly so strategy tuning is driven by observed trade outcomes, not guesswork.
+- Keep this focused on the current paper-position lifecycle until live fill accounting is unified.

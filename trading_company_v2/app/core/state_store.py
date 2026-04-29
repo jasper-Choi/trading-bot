@@ -218,6 +218,19 @@ def _local_date_from_iso(value: str) -> str:
         return value[:10]
 
 
+def _local_datetime_from_iso(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_local_timezone())
+
+
 def _today_local_date() -> str:
     return datetime.now(_local_timezone()).date().isoformat()
 
@@ -1756,3 +1769,169 @@ def load_performance_quick_stats() -> dict:
             "open_positions": 0,
             "total_unrealized_pnl_pct": 0.0,
         }
+
+
+def load_performance_analytics(limit: int = 500) -> dict:
+    """Paper-position analytics for the operator performance page."""
+    init_db()
+
+    def _row_pnl_krw(row: PaperPositionRecord) -> int:
+        capital = float(settings.paper_capital_krw)
+        return round(capital * _size_to_notional(row.size) * float(row.pnl_pct or 0.0) / 100)
+
+    def _holding_minutes(row: PaperPositionRecord) -> int:
+        opened = _local_datetime_from_iso(row.opened_at)
+        closed = _local_datetime_from_iso(row.closed_at)
+        if not opened:
+            return 0
+        end = closed or datetime.now(_local_timezone())
+        return max(0, round((end - opened).total_seconds() / 60))
+
+    def _group_stats(rows: list[PaperPositionRecord]) -> dict:
+        total = len(rows)
+        wins = sum(1 for row in rows if float(row.pnl_pct or 0.0) > 0)
+        pnl_values = [float(row.pnl_pct or 0.0) for row in rows]
+        total_pnl = round(sum(pnl_values), 2)
+        total_krw = sum(_row_pnl_krw(row) for row in rows)
+        return {
+            "trades": total,
+            "wins": wins,
+            "losses": total - wins,
+            "win_rate": round(wins / total * 100, 1) if total else 0.0,
+            "total_pnl_pct": total_pnl,
+            "total_pnl_krw": total_krw,
+            "avg_pnl_pct": round(total_pnl / total, 2) if total else 0.0,
+            "avg_hold_min": round(sum(_holding_minutes(row) for row in rows) / total, 1) if total else 0.0,
+            "best_pnl_pct": round(max(pnl_values), 2) if pnl_values else 0.0,
+            "worst_pnl_pct": round(min(pnl_values), 2) if pnl_values else 0.0,
+        }
+
+    def _stats_by(rows: list[PaperPositionRecord], key_fn) -> list[dict]:
+        grouped: dict[str, list[PaperPositionRecord]] = {}
+        for row in rows:
+            key = str(key_fn(row) or "unknown").strip() or "unknown"
+            grouped.setdefault(key, []).append(row)
+        return [
+            {"label": key, **_group_stats(items)}
+            for key, items in sorted(
+                grouped.items(),
+                key=lambda item: (len(item[1]), sum(float(row.pnl_pct or 0.0) for row in item[1])),
+                reverse=True,
+            )
+        ]
+
+    def _max_drawdown(rows: list[PaperPositionRecord]) -> float:
+        equity = 100.0
+        peak = 100.0
+        max_dd = 0.0
+        for row in rows:
+            equity += float(row.pnl_pct or 0.0)
+            peak = max(peak, equity)
+            if peak > 0:
+                max_dd = min(max_dd, (equity - peak) / peak * 100)
+        return round(max_dd, 2)
+
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(limit)
+            ).scalars().all()
+    except OperationalError:
+        rebuild_db()
+        rows = []
+
+    ordered = list(reversed(rows))
+    closed = [row for row in ordered if row.status == "closed"]
+    open_rows = [row for row in ordered if row.status == "open"]
+    today = _today_local_date()
+    closed_today = [row for row in closed if _local_date_from_iso(row.closed_at) == today]
+
+    hourly_groups: dict[int, list[PaperPositionRecord]] = {hour: [] for hour in range(24)}
+    for row in closed:
+        opened = _local_datetime_from_iso(row.opened_at)
+        if opened:
+            hourly_groups[opened.hour].append(row)
+
+    hourly_heatmap = [
+        {
+            "hour": hour,
+            "label": f"{hour:02d}:00",
+            **_group_stats(items),
+        }
+        for hour, items in hourly_groups.items()
+    ]
+
+    buckets = [
+        ("<= -2%", None, -2.0),
+        ("-2% ~ -1%", -2.0, -1.0),
+        ("-1% ~ 0%", -1.0, 0.0),
+        ("0% ~ 1%", 0.0, 1.0),
+        ("1% ~ 2%", 1.0, 2.0),
+        (">= 2%", 2.0, None),
+    ]
+    pnl_distribution = []
+    for label, lower, upper in buckets:
+        bucket_rows = [
+            row for row in closed
+            if (lower is None or float(row.pnl_pct or 0.0) >= lower)
+            and (upper is None or float(row.pnl_pct or 0.0) < upper)
+        ]
+        pnl_distribution.append({"label": label, **_group_stats(bucket_rows)})
+
+    recent_closed = [
+        {
+            "id": row.id,
+            "symbol": row.symbol,
+            "action": row.action,
+            "size": row.size,
+            "opened_at": row.opened_at,
+            "closed_at": row.closed_at,
+            "holding_minutes": _holding_minutes(row),
+            "entry_price": row.entry_price,
+            "exit_price": row.exit_price,
+            "pnl_pct": round(float(row.pnl_pct or 0.0), 2),
+            "pnl_krw": _row_pnl_krw(row),
+            "peak_pnl_pct": round(float(row.peak_pnl_pct or 0.0), 2),
+            "closed_reason": row.closed_reason or "unknown",
+            "focus": row.focus,
+        }
+        for row in reversed(closed[-50:])
+    ]
+    open_positions = [
+        {
+            "id": row.id,
+            "symbol": row.symbol,
+            "action": row.action,
+            "size": row.size,
+            "opened_at": row.opened_at,
+            "holding_minutes": _holding_minutes(row),
+            "entry_price": row.entry_price,
+            "current_price": row.current_price,
+            "pnl_pct": round(float(row.pnl_pct or 0.0), 2),
+            "pnl_krw": _row_pnl_krw(row),
+            "peak_pnl_pct": round(float(row.peak_pnl_pct or 0.0), 2),
+            "focus": row.focus,
+        }
+        for row in reversed(open_rows[-20:])
+    ]
+
+    return {
+        "updated_at": utcnow_iso(),
+        "timezone": settings.timezone,
+        "summary": {
+            **_group_stats(closed),
+            "today": _group_stats(closed_today),
+            "open_positions": len(open_rows),
+            "max_drawdown_pct": _max_drawdown(closed),
+            "sample_size": len(closed),
+        },
+        "hourly_heatmap": hourly_heatmap,
+        "entry_reason_stats": _stats_by(closed, lambda row: row.action),
+        "exit_reason_stats": _stats_by(closed, lambda row: row.closed_reason),
+        "symbol_stats": _stats_by(closed, lambda row: row.symbol)[:20],
+        "pnl_distribution": pnl_distribution,
+        "open_positions": open_positions,
+        "recent_closed": recent_closed,
+    }
