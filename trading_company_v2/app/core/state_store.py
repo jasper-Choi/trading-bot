@@ -445,20 +445,41 @@ def _build_cycle_signal_meta(paper_orders: list[PaperOrder]) -> dict[str, dict]:
     return meta_by_symbol
 
 
-def _crypto_trend_exit_reason(meta: dict, pnl_pct: float) -> str | None:
-    """Translate bearish trend triggers into exits for open crypto positions."""
+def _crypto_trend_exit_reason(meta: dict, pnl_pct: float, minutes_open: float = 0.0) -> str | None:
+    """Translate bearish trend triggers into exits for open crypto positions.
+
+    Minimum hold times prevent noise exits from 8-second cycle oscillation around EMA
+    boundaries.  A position that just entered should not be closed by the same trend
+    signal that fired the entry — the trend gate is for ENTRIES, not for exits.
+
+    Hold-time ladder:
+      CHoCH/BOS structural reversal : 2 min  (strong market-structure signal)
+      Stream reversal                : 3 min  (15-second window — very noisy)
+      Confirmed downtrend            : 3 min  (15m EMA-based, lags near boundary)
+      RSI bearish divergence         : 3 min  (chart-based, not price-action)
+      Trend invalid (weak + no-allow): 4 min  AND pnl <= -0.20% (give trade time,
+                                               exclude pure fee/slippage exits)
+    """
     if not meta:
         return None
     trend_alignment = str(meta.get("trend_alignment", "") or "")
     trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
     trend_allowed = bool(meta.get("trend_entry_allowed", False))
-    if bool(meta.get("choch_bearish", False)) or bool(meta.get("bos_bearish", False)) or bool(meta.get("stream_reversal", False)):
+    # Strong structural reversal — meaningful market-structure signal; 2 min minimum
+    if minutes_open >= 2.0 and (bool(meta.get("choch_bearish", False)) or bool(meta.get("bos_bearish", False))):
         return "trend_reversal_exit"
-    if trend_alignment == "downtrend":
+    # Stream reversal is a 15-second metric — very noisy; 3 min + not well in profit
+    if minutes_open >= 3.0 and bool(meta.get("stream_reversal", False)) and pnl_pct <= 0.20:
+        return "trend_reversal_exit"
+    # Confirmed 15m downtrend: 3 min minimum so the EMA can't flip back in noise
+    if minutes_open >= 3.0 and trend_alignment == "downtrend":
         return "downtrend_exit"
-    if bool(meta.get("rsi_bearish_divergence", False)) and pnl_pct <= 0.25:
+    # RSI bearish divergence: 3 min minimum
+    if minutes_open >= 3.0 and bool(meta.get("rsi_bearish_divergence", False)) and pnl_pct <= 0.25:
         return "bearish_divergence_exit"
-    if not trend_allowed and trend_score < 0.40 and pnl_pct <= 0.10:
+    # Trend invalid: 4 min minimum AND position clearly failing (not just fee/slippage)
+    # pnl <= -0.20% filters out -0.10~-0.15% fee-level exits that were 65% of all losses
+    if minutes_open >= 4.0 and not trend_allowed and trend_score < 0.35 and pnl_pct <= -0.20:
         return "trend_invalid_exit"
     return None
 
@@ -825,7 +846,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 # against fast-cycle noise and ensures "failed ignition" really means failed.
                 elif (no_lift_reason := _crypto_no_lift_exit_reason(minutes_open, peak_pnl, position.pnl_pct)):
                     _close_position(position, no_lift_reason)
-                elif trend_exit_reason := _crypto_trend_exit_reason(cycle_signal_meta.get(position.symbol, {}), position.pnl_pct):
+                elif trend_exit_reason := _crypto_trend_exit_reason(cycle_signal_meta.get(position.symbol, {}), position.pnl_pct, minutes_open):
                     _close_position(position, trend_exit_reason)
                 elif minutes_open >= fast_fail_minutes and position.pnl_pct <= -0.60 and peak_pnl <= 0.10:
                     _close_position(position, "failed_ignition")
