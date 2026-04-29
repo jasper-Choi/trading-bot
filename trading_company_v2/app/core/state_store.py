@@ -388,6 +388,15 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
     return 0.0, 0.0
 
 
+def _crypto_no_lift_exit_reason(minutes_open: float, peak_pnl: float, pnl_pct: float, rapid: bool = False) -> str | None:
+    """Close crypto entries that never prove momentum."""
+    if minutes_open >= 10.0 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+        return "rapid_no_lift" if rapid else "no_lift_exit"
+    if minutes_open >= 18.0 and peak_pnl <= 0.10 and pnl_pct <= 0.05:
+        return "rapid_flat_timeout" if rapid else "flat_no_lift_exit"
+    return None
+
+
 def _ensure_schema() -> None:
     inspector = inspect(engine)
     try:
@@ -737,7 +746,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 # Time-based failed_ignition: only fire after the intended 24-min window AND
                 # only when the position never showed life (peak <= 0.10%). This protects
                 # against fast-cycle noise and ensures "failed ignition" really means failed.
-                elif minutes_open >= fast_fail_minutes and position.pnl_pct <= -0.80 and peak_pnl <= 0.10:
+                elif (no_lift_reason := _crypto_no_lift_exit_reason(minutes_open, peak_pnl, position.pnl_pct)):
+                    _close_position(position, no_lift_reason)
+                elif minutes_open >= fast_fail_minutes and position.pnl_pct <= -0.60 and peak_pnl <= 0.10:
                     _close_position(position, "failed_ignition")
                 elif trail_giveback and position.pnl_pct <= protect_level:
                     _close_position(position, "profit_protect" if peak_pnl < 1.8 else "trend_trail")
@@ -859,6 +870,10 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             elif minutes_open >= 4.0 and peak_pnl <= 0.05 and position.pnl_pct <= -0.75:
                 closed_symbols.append((position.symbol, "rapid_failed_start"))
                 _close_position(position, "rapid_failed_start")
+                paper_closed += 1
+            elif no_lift_reason := _crypto_no_lift_exit_reason(minutes_open, peak_pnl, position.pnl_pct, rapid=True):
+                closed_symbols.append((position.symbol, no_lift_reason))
+                _close_position(position, no_lift_reason)
                 paper_closed += 1
             elif trail_giveback and position.pnl_pct <= protect_level:
                 reason = "rapid_profit_protect" if peak_pnl < 1.8 else "rapid_trend_trail"

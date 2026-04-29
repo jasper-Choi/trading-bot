@@ -1177,3 +1177,28 @@ python walk_forward.py
 - Stop the bot from holding positions that immediately prove the entry timing was wrong.
 - Keep active multi-coin trading, but remove no-score/fallback candidates.
 - Reduce immediate capital bleed while preserving fast trend-following participation.
+
+## 33. Crypto No-Lift Exit Patch (2026-04-29)
+
+### Diagnosis
+
+- AVAX was not an active holding; it was already closed as `failed_ignition` with `-0.73%`.
+- The active loss pattern was dead-start positions:
+  - positions opened, never reached even a small positive peak, then sat around `-0.3%` to `-0.6%`
+  - previous `rapid_failed_start` waited until `-0.75%`, which was too slow for active trend trading
+
+### Completed
+
+- Added no-lift crypto exits.
+  - `rapid_no_lift`: close after 10 minutes if peak PnL stayed `<= +0.05%` and current PnL is `<= -0.30%`.
+  - `no_lift_exit`: same rule in the regular position sync path.
+  - `rapid_flat_timeout` / `flat_no_lift_exit`: close after 18 minutes if peak stayed `<= +0.10%` and current PnL is not above `+0.05%`.
+- Tightened failed ignition.
+  - Crypto `failed_ignition` now fires at `<= -0.60%` after the fast-fail window if the position never reached `+0.10%`.
+- Execution scoring treats the new no-lift exits as stop-like, so weak symbols/paths are penalized faster.
+
+### Intent
+
+- Keep the bot active, but stop letting weak entries bleed capital.
+- Free capital faster for the next momentum candidate.
+- Preserve winners with trailing rules while making losers prove themselves quickly.
