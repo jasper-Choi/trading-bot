@@ -5,6 +5,15 @@ from app.config import settings
 from app.core.models import AgentResult, PaperOrder
 
 
+STOP_LIKE_EXIT_REASONS = {
+    "stop_hit",
+    "rapid_stop_hit",
+    "early_failure",
+    "failed_ignition",
+    "failed_followthrough",
+}
+
+
 class ExecutionAgent(BaseAgent):
     def __init__(self):
         super().__init__("execution_agent")
@@ -43,6 +52,13 @@ class ExecutionAgent(BaseAgent):
             return float(size.replace("x", ""))
         except ValueError:
             return 0.0
+
+    @staticmethod
+    def _is_stop_like_exit(item: dict) -> bool:
+        reason = str(item.get("closed_reason", "") or "")
+        if reason in STOP_LIKE_EXIT_REASONS:
+            return True
+        return reason == "stale_exit" and float(item.get("pnl_pct", 0.0) or 0.0) <= -0.5
 
     def _desk_open_notional(self, desk: str) -> float:
         return round(
@@ -170,11 +186,7 @@ class ExecutionAgent(BaseAgent):
         ]
         if len(recent) < 3:
             return False
-        stop_like = sum(
-            1
-            for item in recent[:5]
-            if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}
-        )
+        stop_like = sum(1 for item in recent[:5] if self._is_stop_like_exit(item))
         pnl_total = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent[:5])
         # With -2.5% stop per trade, 2 stops = -5%; block after -5% cumulative or 2 stops
         return stop_like >= 2 or pnl_total <= -5.0
@@ -204,11 +216,7 @@ class ExecutionAgent(BaseAgent):
         realized = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent)
         wins = sum(1 for item in recent if float(item.get("pnl_pct", 0.0) or 0.0) > 0)
         losses = sum(1 for item in recent if float(item.get("pnl_pct", 0.0) or 0.0) < 0)
-        stop_like = sum(
-            1
-            for item in recent
-            if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}
-        )
+        stop_like = sum(1 for item in recent if self._is_stop_like_exit(item))
         # Chronic drawdown: 3 full stops worth of loss with very low win rate
         if desk == "us":
             return wins == 0 and losses >= 4 and realized <= -6.0    # 3 × -2%
@@ -268,8 +276,7 @@ class ExecutionAgent(BaseAgent):
         stop_like_count = 0
         stop_like_pnl = 0.0
         for item in recent:
-            reason = str(item.get("closed_reason", "") or "")
-            if reason in {"stop_hit", "early_failure"}:
+            if self._is_stop_like_exit(item):
                 stop_like_count += 1
                 stop_like_pnl += float(item.get("pnl_pct", 0.0) or 0.0)
         # Calibrated to new stops: -2% crypto/us, -2.5% korea
@@ -293,8 +300,7 @@ class ExecutionAgent(BaseAgent):
         stop_like_count = 0
         stop_like_pnl = 0.0
         for item in recent[:4]:
-            reason = str(item.get("closed_reason", "") or "")
-            if reason in {"stop_hit", "early_failure"}:
+            if self._is_stop_like_exit(item):
                 stop_like_count += 1
                 stop_like_pnl += float(item.get("pnl_pct", 0.0) or 0.0)
         # Per-symbol: 2 stops OR cumulative -4% (2 full stops) = high pressure
@@ -328,7 +334,7 @@ class ExecutionAgent(BaseAgent):
             else:
                 losses += 1
             closed_reason = str(item.get("closed_reason", "") or "")
-            if closed_reason in {"stop_hit", "early_failure"}:
+            if self._is_stop_like_exit(item):
                 penalty += 0.45
             elif closed_reason == "stale_exit":
                 penalty += 0.2
@@ -364,7 +370,7 @@ class ExecutionAgent(BaseAgent):
                 wins += 1
             elif pnl < 0:
                 losses += 1
-            if str(item.get("closed_reason", "") or "") in {"stop_hit", "early_failure"}:
+            if self._is_stop_like_exit(item):
                 stop_like += 1
 
         score = round((wins * 0.55) - (losses * 0.7) + (weighted_pnl * 0.18) - (stop_like * 0.35), 2)

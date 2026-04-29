@@ -949,3 +949,40 @@ python walk_forward.py
 - Make the scanner show not only scores but also live tradable price context.
 - Let the operator visually see whether a high-scoring coin is accelerating, pulling back, or fading before clicking deeper.
 - Keep the implementation lightweight until the next step introduces richer per-symbol drilldown charts.
+
+## 27. Crypto PnL Protection Patch (2026-04-29)
+
+### Diagnosis
+
+- Oracle paper-position sample before this patch:
+  - 14 closed positions, 2 wins / 12 losses, total PnL `-7.76%`.
+  - Crypto losses were dominated by `failed_ignition` and negative `stale_exit`.
+  - Two crypto winners reached meaningful peaks but gave most of it back:
+    - `KRW-PRL`: peak `+1.06%` -> closed `+0.04%`.
+    - `KRW-SPK`: peak `+1.48%` -> closed `+0.05%`.
+- Conclusion:
+  - The bot was correctly catching some fast moves, but profit protection activated too late.
+  - Execution risk scoring did not treat `failed_ignition` as stop-like, so weak ignition patterns were under-penalized.
+
+### Completed
+
+- Added `_crypto_trail_rules()` in `app/core/state_store.py`.
+  - Peak `>= +1.0%`: protect via `max(+0.35%, peak - 0.45%)`.
+  - Peak `>= +1.8%`: protect via `max(+0.70%, peak - 0.65%)`.
+  - Peak `>= +3.0%`: protect via `max(+1.20%, peak - 0.90%)`.
+  - Peak `>= +5.0%`: protect via `max(+2.20%, peak - 1.20%)`.
+- Applied the same protection rules to:
+  - full-cycle `sync_paper_positions()`
+  - sub-minute `rapid_guard_crypto_positions()`
+- Added `profit_protect` / `rapid_profit_protect` close reasons for smaller fast winners.
+- Added `failed_followthrough` close reason:
+  - If crypto peak reached at least `+0.65%`, then after 8 minutes falls to `<= -0.15%`, close instead of letting it drift into a larger failed ignition.
+- Updated `ExecutionAgent` stop-like classification.
+  - Stop-like now includes `stop_hit`, `rapid_stop_hit`, `early_failure`, `failed_ignition`, and `failed_followthrough`.
+  - Negative `stale_exit <= -0.5%` is also treated as stop-like for pressure scoring.
+
+### Intent
+
+- Keep high-return trend targets open, but stop giving back early +1% moves to near-breakeven.
+- Penalize weak ignition patterns earlier so the bot does not repeatedly enter the same low-quality setup.
+- Improve expectancy by reducing average loss and preserving partial wins without moving to futures leverage yet.

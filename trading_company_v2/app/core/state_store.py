@@ -365,6 +365,19 @@ def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
     return 4.0, -2.0, 150
 
 
+def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
+    """Return (giveback_pct, floor_pct) for crypto profit protection."""
+    if peak_pnl >= 5.0:
+        return 1.20, 2.20
+    if peak_pnl >= 3.0:
+        return 0.90, 1.20
+    if peak_pnl >= 1.8:
+        return 0.65, 0.70
+    if peak_pnl >= 1.0:
+        return 0.45, 0.35
+    return 0.0, 0.0
+
+
 def _ensure_schema() -> None:
     inspector = inspect(engine)
     try:
@@ -705,16 +718,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 fast_fail_cycle = 20
             if position.desk == "crypto":
                 peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
-                # Tighter trailing: lock in profit faster at each tier
-                # peak >=1.5%: trail at 0.5% giveback (new tier)
-                # peak >=2.2%: trail at 0.7% giveback (was 1.0%)
-                # peak >=4.0%: trail at 1.0% giveback (was 1.4%)
-                trail_giveback = (
-                    1.0 if peak_pnl >= 4.0
-                    else 0.7 if peak_pnl >= 2.2
-                    else 0.5 if peak_pnl >= 1.5
-                    else 0.0
-                )
+                trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
+                protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
                 if position.pnl_pct >= target_pct:
                     _close_position(position, "target_hit")
                 elif position.pnl_pct <= stop_pct:
@@ -724,10 +729,10 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 # against fast-cycle noise and ensures "failed ignition" really means failed.
                 elif minutes_open >= fast_fail_minutes and position.pnl_pct <= -0.80 and peak_pnl <= 0.10:
                     _close_position(position, "failed_ignition")
-                elif peak_pnl >= 1.0 and position.pnl_pct <= 0.1:
-                    _close_position(position, "breakeven_trail")
-                elif trail_giveback and position.pnl_pct <= peak_pnl - trail_giveback:
-                    _close_position(position, "trend_trail")
+                elif trail_giveback and position.pnl_pct <= protect_level:
+                    _close_position(position, "profit_protect" if peak_pnl < 1.8 else "trend_trail")
+                elif peak_pnl >= 0.65 and minutes_open >= 8.0 and position.pnl_pct <= -0.15:
+                    _close_position(position, "failed_followthrough")
                 elif position.cycles_open >= max_cycles and position.pnl_pct < 0.8:
                     _close_position(position, "time_exit")
                 continue
@@ -823,12 +828,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
             target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action)
             peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
-            trail_giveback = (
-                1.0 if peak_pnl >= 4.0
-                else 0.7 if peak_pnl >= 2.2
-                else 0.5 if peak_pnl >= 1.5
-                else 0.0
-            )
+            trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
+            protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
             if position.pnl_pct >= target_pct:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
@@ -837,13 +838,10 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 closed_symbols.append((position.symbol, "rapid_stop_hit"))
                 _close_position(position, "rapid_stop_hit")
                 paper_closed += 1
-            elif peak_pnl >= 1.0 and position.pnl_pct <= 0.1:
-                closed_symbols.append((position.symbol, "rapid_breakeven_trail"))
-                _close_position(position, "rapid_breakeven_trail")
-                paper_closed += 1
-            elif trail_giveback and position.pnl_pct <= peak_pnl - trail_giveback:
-                closed_symbols.append((position.symbol, "rapid_trend_trail"))
-                _close_position(position, "rapid_trend_trail")
+            elif trail_giveback and position.pnl_pct <= protect_level:
+                reason = "rapid_profit_protect" if peak_pnl < 1.8 else "rapid_trend_trail"
+                closed_symbols.append((position.symbol, reason))
+                _close_position(position, reason)
                 paper_closed += 1
         db.commit()
     for symbol, reason in closed_symbols:
