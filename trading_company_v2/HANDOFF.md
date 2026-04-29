@@ -1022,3 +1022,48 @@ python walk_forward.py
 - Make the bot a clearer chart trend-following system instead of a loose hybrid momentum scanner.
 - Keep fast response speed, but only react aggressively in the direction of a confirmed 15m trend.
 - Reduce failed-ignition trades caused by chasing 1m/orderbook bounces inside weak or non-trending chart structure.
+
+## 29. Crypto Entry Gate Simplification Patch (2026-04-29)
+
+### Diagnosis
+
+- `signal_score` inside `build_crypto_plan()` is already the CryptoDeskAgent `combined_score`.
+- That combined score already includes chart/swing signal, trend-follow score, 1m micro timing, orderbook pressure, BTC backdrop, discovery/weight, and freshness adjustment.
+- The recommendation layer was re-checking many of the same sub-signals with strict `AND` gates.
+  - Example failure mode: combined score can be high, but entry still becomes `watchlist_only` because one of micro/volume/stream/breakout gates is not perfect.
+- Result:
+  - Too few trades.
+  - Late entries after waiting for every confirmation.
+  - Poor bot value versus fast manual trading.
+
+### Completed
+
+- Simplified `direct_entry_ok`.
+  - Removed duplicate requirements for `clean_momentum_window`, stream ignition, and breakout confirmation.
+  - Now trusts composite score when:
+    - `signal_score >= 0.63`
+    - chart trend is allowed
+    - trend score is at least `0.50`
+    - orderbook bid/ask is not hostile (`>= 0.98`)
+    - no bearish RSI divergence
+- Added `combined_score_ok` fallback.
+  - Allows moderate-confidence entries from `signal_score >= 0.58`.
+  - Uses smaller sizing (`0.40x` to `0.65x`) so the bot becomes more active without treating every setup as a full-conviction trade.
+  - Bypasses the volume gate because volume/micro are already embedded in the composite score.
+- Updated direct-entry sizing.
+  - `>= 0.80`: `0.90x`
+  - `>= 0.72`: `0.78x`
+  - `>= 0.65`: `0.65x`
+  - else: `0.52x`
+- Kept hard safety rails:
+  - stressed regime blocks entries
+  - hard overheat still blocks most chase entries
+  - bearish RSI divergence blocks entries
+  - chart trend must still be `trend_long` or `pullback_long`
+  - execution/risk layer still enforces exposure and duplicate-position limits
+
+### Intent
+
+- Make the bot trade like an active trend-following trader instead of a passive checklist engine.
+- Let the composite model make decisions instead of forcing it to pass every individual sub-signal again.
+- Increase trade frequency while keeping the minimum structural protections that prevent random long entries in weak markets.

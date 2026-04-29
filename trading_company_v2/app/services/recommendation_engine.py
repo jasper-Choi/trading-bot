@@ -286,18 +286,30 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and not late_chase_risk
         and not hard_overheat
     )
-    # direct_entry_ok: the bot's core purpose — if CryptoDeskAgent's combined_score is high,
-    # don't re-run the same gates. Catch the moment immediately.
+    # direct_entry_ok: signal_score here IS the combined_score from CryptoDeskAgent —
+    # it already weights signal×0.34 + trend×0.14 + micro×0.24 + ob×0.17 + btc×0.08.
+    # Do NOT re-gate on clean_momentum_window/stream/breakout — those are already baked in.
+    # Just confirm: composite is high + orderbook tilted + trend direction correct.
     direct_entry_ok = (
         signal_score >= 0.63
-        and (clean_momentum_window or strong_late_breakout_exception or stream_entry_ok)
-        and orderbook_bid_ask >= 1.02
+        and orderbook_bid_ask >= 0.98
         and trend_entry_allowed
-        and trend_follow_score >= 0.56
+        and trend_follow_score >= 0.50
+        and not rsi_bearish_divergence
+    )
+    # combined_score_ok: lower-conviction path for moderate composite readings.
+    # Fires when combined_score is meaningful but below the direct_entry_ok threshold,
+    # or when orderbook is near-neutral. Smaller default size.
+    combined_score_ok = (
+        signal_score >= 0.58
+        and trend_entry_allowed
+        and trend_follow_score >= 0.44
+        and orderbook_bid_ask >= 0.96
         and not rsi_bearish_divergence
     )
     # Volume gate: pullback/trend paths bypass — quiet volume during pullback is expected.
-    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and not trend_pullback_ok and stance != "DEFENSE":
+    # combined_score_ok and direct_entry_ok also bypass: the composite already embeds volume/micro.
+    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and not trend_pullback_ok and not combined_score_ok and stance != "DEFENSE":
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -340,26 +352,29 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             ],
         }
 
-    # Direct entry: combined_score is the signal — enter now without extra gate chains
+    # Direct entry: combined_score is the signal — enter now without extra gate chains.
+    # Size scales with composite conviction.
     if direct_entry_ok and stance != "DEFENSE" and not hard_overheat:
-        if signal_score >= 0.76:
+        if signal_score >= 0.80:
             entry_size = "0.90x"
-        elif signal_score >= 0.70:
-            entry_size = "0.75x"
+        elif signal_score >= 0.72:
+            entry_size = "0.78x"
+        elif signal_score >= 0.65:
+            entry_size = "0.65x"
         else:
-            entry_size = "0.58x"
+            entry_size = "0.52x"
         if soft_overheat:
             entry_size = "0.38x"
         return {
             "action": "probe_longs",
             "size": entry_size,
-            "focus": f"{lead_market or 'KRW-BTC'} direct momentum entry — combined signal {signal_score:.2f}.",
+            "focus": f"{lead_market or 'KRW-BTC'} direct entry — combined {signal_score:.2f} trend {trend_alignment}.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [
-                f"direct entry: combined={signal_score:.2f} micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x",
-                f"clean momentum window: move3={micro_move_3:.2f}% move10={micro_move_10:.2f}% vwap_gap={micro_vwap_gap:.2f}% range5={micro_range_5:.2f}%",
-                f"stream: score={stream_score:.2f} move15={stream_move_15:.2f}% ticks15={stream_ticks_15} buy={stream_buy_ratio:.0%}",
+                f"direct entry: combined={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment} ob={orderbook_bid_ask:.2f}x",
+                f"micro={micro_score:.2f} move3={micro_move_3:.2f}% vwap_gap={micro_vwap_gap:.2f}%",
+                f"stream: score={stream_score:.2f} move15={stream_move_15:.2f}% buy={stream_buy_ratio:.0%}",
                 trend_note, ignition_note, support_note,
             ],
         }
@@ -392,6 +407,30 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [trend_note, ignition_note, support_note, "RSI is treated as momentum context, not an automatic sell signal."],
+        }
+
+    # Combined-score fallback: fires when ignition/direct paths didn't match but composite
+    # score is still meaningful. This is the primary path for moderate-confidence setups.
+    if combined_score_ok and stance != "DEFENSE" and not hard_overheat:
+        if signal_score >= 0.72:
+            entry_size = "0.65x"
+        elif signal_score >= 0.65:
+            entry_size = "0.52x"
+        else:
+            entry_size = "0.40x"
+        if soft_overheat:
+            entry_size = "0.28x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"{lead_market or 'KRW-BTC'} composite signal entry — combined {signal_score:.2f}.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"combined_score_ok: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment} ob={orderbook_bid_ask:.2f}x",
+                f"micro={micro_score:.2f} stream={stream_score:.2f}",
+                ignition_note, trend_note,
+            ],
         }
 
     if soft_overheat and discovery_entry_ok and stance != "DEFENSE":
