@@ -1110,3 +1110,44 @@ python walk_forward.py
 - Convert the system from "avoid mistakes first" to "trade valid trend edges actively, then size down when edge is weak."
 - Increase turnover enough for compounding to be possible while still preserving hard protection against stressed regimes, extreme overheating, and non-trending charts.
 - This does not guarantee profits or a timeline to 100M KRW; it makes the system structurally capable of higher turnover and faster compounding if the edge proves positive.
+
+## 31. Candidate-Specific Multi-Coin Entry Patch (2026-04-29)
+
+### Diagnosis
+
+- The execution layer could create multiple orders from `candidate_symbols`, but it cloned the leader coin plan into secondary candidates.
+- That raised two problems:
+  - Good: multi-symbol entry became possible.
+  - Bad: a weaker secondary coin could inherit the leader's composite score and enter without passing its own trend/orderbook checks.
+
+### Completed
+
+- Added candidate-specific crypto eligibility before multi-order creation.
+  - Each secondary coin must pass:
+    - `combined_score >= 0.58`
+    - `trend_entry_allowed == true`
+    - `trend_follow_score >= 0.44`
+    - `orderbook_bid_ask_ratio >= 0.96`
+    - no bearish RSI divergence
+    - signal freshness above `0.55`
+    - no hard overheat
+- Added candidate-specific plan overrides.
+  - Secondary entries now receive their own:
+    - combined score
+    - trend fields
+    - micro fields
+    - stream fields
+    - orderbook fields
+    - ATR sizing fields
+    - correlation/freshness fields
+    - pullback/ICT/breakout context
+- Weak candidates are skipped with explicit rationale.
+- Crypto multi-entry sizing now avoids over-dilution.
+  - When multiple eligible coins exist, per-order base sizing divides by at most `3`, with a minimum `0.18x` before risk-budget scaling.
+  - Exposure caps still prevent unlimited stacking.
+
+### Intent
+
+- Allow several coins to be entered during broad crypto momentum instead of forcing a single leader.
+- Preserve signal quality by requiring each coin to pass its own growth-mode checks.
+- Increase turnover and compounding opportunity without blindly buying every scanner candidate.

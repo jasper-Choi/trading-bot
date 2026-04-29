@@ -642,6 +642,79 @@ class ExecutionAgent(BaseAgent):
             rationale=rationale,
         )
 
+    @staticmethod
+    def _crypto_candidate_entry_ok(meta: dict) -> tuple[bool, str]:
+        if not meta:
+            return True, "no candidate meta; fallback to primary plan"
+        score = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
+        trend_allowed = bool(meta.get("trend_entry_allowed", False))
+        trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
+        orderbook_bid_ask = float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
+        freshness = float(meta.get("signal_freshness", 1.0) or 1.0)
+        recent_change = float(meta.get("recent_change_pct", 0.0) or 0.0)
+        burst_change = float(meta.get("burst_change_pct", 0.0) or 0.0)
+        ema_gap = float(meta.get("ema_gap_pct", 0.0) or 0.0)
+        rsi_value = meta.get("rsi")
+        try:
+            rsi_float = float(rsi_value) if rsi_value is not None else 0.0
+        except (TypeError, ValueError):
+            rsi_float = 0.0
+        hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or rsi_float >= 92.0
+        if score < 0.58:
+            return False, f"combined score too low ({score:.2f})"
+        if not trend_allowed or trend_score < 0.44:
+            return False, f"trend gate failed ({meta.get('trend_alignment', 'unknown')} {trend_score:.2f})"
+        if orderbook_bid_ask < 0.96:
+            return False, f"orderbook not supportive ({orderbook_bid_ask:.2f}x)"
+        if bool(meta.get("rsi_bearish_divergence", False)):
+            return False, "bearish RSI divergence"
+        if freshness <= 0.55:
+            return False, f"stale signal ({freshness:.2f})"
+        if hard_overheat:
+            return False, "hard overheat"
+        return True, f"eligible combined={score:.2f} trend={trend_score:.2f} ob={orderbook_bid_ask:.2f}x"
+
+    @staticmethod
+    def _apply_crypto_candidate_meta(plan: dict, meta: dict) -> dict:
+        if not meta:
+            return plan
+        mapped = dict(plan)
+        mapped["symbol"] = str(meta.get("market", mapped.get("symbol", "")) or mapped.get("symbol", ""))
+        mapped["signal_score"] = float(meta.get("combined_score", meta.get("signal_score", mapped.get("signal_score", 0.0))) or 0.0)
+        mapped["desk_bias"] = str(meta.get("bias", mapped.get("desk_bias", "balanced")) or "balanced")
+        passthrough_keys = (
+            "discovery_score", "change_rate", "volume_24h_krw",
+            "recent_change_pct", "burst_change_pct", "ema_gap_pct", "pullback_gap_pct", "range_4_pct", "rsi",
+            "micro_score", "micro_ready", "micro_bias", "micro_reasons", "micro_vol_ratio",
+            "micro_move_3_pct", "micro_move_10_pct", "micro_vwap_gap_pct", "micro_range_5_pct", "micro_exhausted",
+            "stream_fresh", "stream_score", "stream_ignition", "stream_reversal", "stream_age_seconds",
+            "stream_move_5s_pct", "stream_move_15s_pct", "stream_move_60s_pct", "stream_ticks_15s",
+            "stream_buy_ratio_15s", "stream_reasons",
+            "orderbook_score", "orderbook_ready", "orderbook_bid_ask_ratio", "orderbook_spread_pct",
+            "orderbook_imbalance", "orderbook_reasons",
+            "atr_size_multiplier", "atr_pct", "volatility_tier", "atr_sizing_reason",
+            "btc_corr_15m", "signal_freshness", "signal_age_minutes", "freshness_reason",
+            "breakout_confirmed", "breakout_partial", "breakout_count", "vol_ratio", "breakout_score",
+            "trend_follow_score", "trend_alignment", "trend_entry_allowed", "trend_slope_pct",
+            "trend_extension_pct", "trend_reasons",
+            "rsi_quality_ok", "rsi_reset_confirmed", "rsi_bearish_divergence", "rsi_extreme",
+            "ict_score", "kill_zone_active", "kill_zone_name", "ssl_sweep_confirmed",
+            "choch_bullish", "choch_bearish", "bos_bullish", "bos_bearish", "ict_bullish_count",
+            "ict_structure", "pullback_detected", "pullback_score", "spike_pct_15m",
+            "retrace_from_high_pct", "vol_contracted_on_pullback",
+        )
+        for key in passthrough_keys:
+            if key in meta:
+                mapped[key] = meta[key]
+        notes = list(mapped.get("notes", []) or [])
+        notes.append(
+            f"candidate-specific signal: {mapped['symbol']} combined={mapped.get('signal_score', 0.0):.2f} "
+            f"trend={mapped.get('trend_follow_score', 0.0):.2f} "
+            f"ob={mapped.get('orderbook_bid_ask_ratio', 0.0):.2f}x"
+        )
+        mapped["notes"] = notes
+        return mapped
+
     def _multi_orders(self, desk: str, plan: dict) -> list[dict]:
         """Generate up to max_positions concurrent orders per desk from ranked candidates."""
         action = str(plan.get("action", ""))
@@ -665,16 +738,37 @@ class ExecutionAgent(BaseAgent):
         if len(all_candidates) <= 1:
             return [self._plan_to_order(desk, plan).model_dump()]
 
-        # Divide base size evenly across concurrent slots
-        base_notional = self._size_to_notional(str(plan.get("size", "0.00x")))
-        n_intended = min(slots, len(all_candidates))
-        per_order_notional = round(base_notional / n_intended, 2) if n_intended > 1 else base_notional
-        per_order_size = f"{per_order_notional:.2f}x"
         candidate_meta = {
             str(item.get("market", "")).strip(): item
             for item in (plan.get("candidate_markets") or [])
             if str(item.get("market", "")).strip()
         }
+        skipped_candidates: list[str] = []
+        if desk == "crypto" and candidate_meta:
+            eligible_candidates = []
+            for candidate in all_candidates:
+                ok, reason = self._crypto_candidate_entry_ok(candidate_meta.get(candidate, {}))
+                if ok:
+                    eligible_candidates.append(candidate)
+                else:
+                    skipped_candidates.append(f"{candidate}: {reason}")
+            all_candidates = eligible_candidates
+            if not all_candidates:
+                blocked_plan = dict(plan)
+                blocked_plan["action"] = "watchlist_only"
+                blocked_plan["size"] = "0.00x"
+                blocked_plan["focus"] = "Crypto candidates failed per-symbol growth-mode eligibility."
+                blocked_plan["notes"] = list(plan.get("notes", []) or []) + skipped_candidates[:6]
+                return [self._plan_to_order(desk, blocked_plan).model_dump()]
+
+        # Divide base size evenly across eligible concurrent slots.
+        base_notional = self._size_to_notional(str(plan.get("size", "0.00x")))
+        n_intended = min(slots, len(all_candidates))
+        if desk == "crypto" and n_intended > 1:
+            per_order_notional = round(max(base_notional / min(n_intended, 3), 0.18), 2)
+        else:
+            per_order_notional = round(base_notional / n_intended, 2) if n_intended > 1 else base_notional
+        per_order_size = f"{per_order_notional:.2f}x"
 
         orders: list[dict] = []
         planned_count = 0
@@ -689,6 +783,14 @@ class ExecutionAgent(BaseAgent):
             single_plan["candidate_symbols"] = []
             single_plan["size"] = per_order_size
             meta = candidate_meta.get(candidate, {})
+            if desk == "crypto":
+                single_plan = self._apply_crypto_candidate_meta(single_plan, meta)
+                single_plan["candidate_symbols"] = []
+                single_plan["size"] = per_order_size
+                if skipped_candidates:
+                    single_plan["notes"] = list(single_plan.get("notes", []) or []) + [
+                        f"skipped weaker candidates: {'; '.join(skipped_candidates[:3])}"
+                    ]
             for key in (
                 "atr_size_multiplier",
                 "atr_pct",
