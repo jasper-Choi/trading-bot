@@ -76,6 +76,12 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         3,
     )
     flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02 or stream_ignition
+    launch_confirmed = (
+        (micro_score >= 0.55 and micro_vol_ratio >= 1.1)
+        or stream_score >= 0.55
+        or stream_ignition
+        or (breakout_count >= 2 and vol_ratio >= 1.4)
+    )
     # research_support removed from ignition_ready: historical backtest weight shouldn't block fresh movers.
     # CryptoDeskAgent already integrated all signals into combined_score — trust it here.
     ignition_ready = trend_ignition_score >= 0.56 and flow_support and trend_entry_allowed
@@ -167,6 +173,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and trend_follow_score >= 0.72
         and signal_score >= 0.65
         and orderbook_bid_ask >= 1.02
+        and (micro_score >= 0.42 or stream_score >= 0.45 or breakout_count >= 2)
         and not rsi_bearish_divergence
         and not late_chase_risk
         and not hard_overheat
@@ -291,24 +298,25 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # Do NOT re-gate on clean_momentum_window/stream/breakout — those are already baked in.
     # Just confirm: composite is high + orderbook tilted + trend direction correct.
     direct_entry_ok = (
-        signal_score >= 0.63
-        and orderbook_bid_ask >= 0.98
+        signal_score >= 0.76
+        and orderbook_bid_ask >= 1.08
         and trend_entry_allowed
-        and trend_follow_score >= 0.50
+        and trend_follow_score >= 0.58
+        and launch_confirmed
         and not rsi_bearish_divergence
     )
     # combined_score_ok: lower-conviction path for moderate composite readings.
     # Fires when combined_score is meaningful but below the direct_entry_ok threshold,
     # or when orderbook is near-neutral. Smaller default size.
     combined_score_ok = (
-        signal_score >= 0.58
+        signal_score >= 0.82
         and trend_entry_allowed
-        and trend_follow_score >= 0.44
-        and orderbook_bid_ask >= 0.96
+        and trend_follow_score >= 0.62
+        and orderbook_bid_ask >= 1.12
+        and launch_confirmed
         and not rsi_bearish_divergence
     )
-    # Volume gate: pullback/trend paths bypass — quiet volume during pullback is expected.
-    # combined_score_ok and direct_entry_ok also bypass: the composite already embeds volume/micro.
+    # Volume gate: pullback/trend paths bypass only after launch confirmation.
     if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and not trend_pullback_ok and not combined_score_ok and stance != "DEFENSE":
         return {
             "action": "watchlist_only",

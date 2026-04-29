@@ -1247,3 +1247,38 @@ python walk_forward.py
 ### Intent
 
 - Keep broad-market scanning open, but stop repeatedly recycling symbols that already failed unless the new signal is clearly stronger.
+
+## 36. Launch Confirmation Gate (2026-04-29)
+
+### Diagnosis
+
+- Crypto closed stats were extremely poor: 21 recent closed trades, 2 wins / 19 losses, total `-13.30%`.
+- Most losing entries had a high composite score but weak real-time confirmation:
+  - `micro_score` often `0.20`
+  - `stream_score` often `0.0` to `0.4`
+  - entries were triggered by scanner/orderbook/composite before actual price launch
+- This produced repeated `rapid_failed_start`, `rapid_no_lift`, and `failed_ignition` exits.
+
+### Completed
+
+- Added launch confirmation before direct/composite crypto entries.
+  - Requires one of:
+    - `micro_score >= 0.55` and `micro_vol_ratio >= 1.1`
+    - `stream_score >= 0.55`
+    - `stream_ignition`
+    - `breakout_count >= 2` and `vol_ratio >= 1.4`
+- Tightened direct entry:
+  - `combined >= 0.76`
+  - `trend_follow_score >= 0.58`
+  - `orderbook_bid_ask_ratio >= 1.08`
+- Tightened composite fallback:
+  - `combined >= 0.82`
+  - `trend_follow_score >= 0.62`
+  - `orderbook_bid_ask_ratio >= 1.12`
+- Candidate-specific execution now rejects high composite candidates unless launch is confirmed.
+
+### Intent
+
+- Stop entering just because a coin looks good on a scanner.
+- Enter only when the move is actually starting on 1m/tick/volume confirmation.
+- Reduce losing trade count first; increase frequency later only after the win rate recovers.

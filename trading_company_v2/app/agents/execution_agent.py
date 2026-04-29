@@ -666,6 +666,12 @@ class ExecutionAgent(BaseAgent):
         score = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
         trend_allowed = bool(meta.get("trend_entry_allowed", False))
         trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
+        micro_score = float(meta.get("micro_score", 0.0) or 0.0)
+        stream_score = float(meta.get("stream_score", 0.0) or 0.0)
+        micro_vol_ratio = float(meta.get("micro_vol_ratio", 0.0) or 0.0)
+        breakout_count = int(meta.get("breakout_count", 0) or 0)
+        vol_ratio = float(meta.get("vol_ratio", 0.0) or 0.0)
+        pullback_score = float(meta.get("pullback_score", 0.0) or 0.0)
         orderbook_bid_ask = float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
         freshness = float(meta.get("signal_freshness", 1.0) or 1.0)
         recent_change = float(meta.get("recent_change_pct", 0.0) or 0.0)
@@ -677,12 +683,25 @@ class ExecutionAgent(BaseAgent):
         except (TypeError, ValueError):
             rsi_float = 0.0
         hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or rsi_float >= 92.0
-        if score < 0.58:
+        launch_confirmed = (
+            (micro_score >= 0.55 and micro_vol_ratio >= 1.1)
+            or stream_score >= 0.55
+            or bool(meta.get("stream_ignition", False))
+            or (breakout_count >= 2 and vol_ratio >= 1.4)
+            or (pullback_score >= 0.75 and micro_score >= 0.42)
+        )
+        if score < 0.76:
             return False, f"combined score too low ({score:.2f})"
-        if not trend_allowed or trend_score < 0.44:
+        if not trend_allowed or trend_score < 0.58:
             return False, f"trend gate failed ({meta.get('trend_alignment', 'unknown')} {trend_score:.2f})"
-        if orderbook_bid_ask < 0.96:
+        if orderbook_bid_ask < 1.08:
             return False, f"orderbook not supportive ({orderbook_bid_ask:.2f}x)"
+        if not launch_confirmed:
+            return (
+                False,
+                "launch not confirmed "
+                f"(micro {micro_score:.2f}, stream {stream_score:.2f}, breakout {breakout_count}, vol {vol_ratio:.1f}x)",
+            )
         if bool(meta.get("rsi_bearish_divergence", False)):
             return False, "bearish RSI divergence"
         if freshness <= 0.55:
