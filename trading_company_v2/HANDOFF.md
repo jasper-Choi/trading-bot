@@ -1306,3 +1306,43 @@ python walk_forward.py
 ### Intent
 
 - Make the strategy match the intended model: enter on confirmed bullish trend trigger, exit when the bullish trend trigger fails or flips bearish.
+
+## 38. Clean Trade Data Baseline Reset (2026-04-29)
+
+### Completed
+
+- Oracle VM trade/performance tables were backed up and reset so the dashboard measures the new trend-trigger strategy from a clean baseline.
+- Reset timestamp:
+  - UTC: `2026-04-29T07:12:48+00:00`
+  - KST: `2026-04-29 16:12:48`
+- Backup created before deletion:
+  - `/home/ubuntu/trading-bot/trading_company_v2/data/backups/trading_company_v2_pre_reset_2026-04-29T071248+0000.db`
+- Tables cleared:
+  - `paper_positions`
+  - `paper_orders`
+  - `cycle_journal`
+  - `positions`
+  - `closed_positions`
+  - `live_order_log`
+
+### Verification
+
+- Services restarted and confirmed active:
+  - `trading-loop`
+  - `trading-dashboard`
+- After restart, the DB started fresh:
+  - `paper_positions`: `0`
+  - `closed_positions`: `0`
+  - `live_order_log`: `0`
+  - `cycle_journal`: `1` new cycle
+  - `paper_orders`: `1` new post-reset order
+- First post-reset order was `watchlist_only`, so no new position had opened immediately after reset.
+
+### Intent
+
+- Ignore pre-fix losing trades when evaluating the new strategy.
+- From this point forward, track only trades generated after:
+  - launch-confirmed entries
+  - trend-trigger metadata persistence
+  - bearish trend-trigger exits
+- Use the next 20-30 post-reset trades as the first real sample for win rate, average PnL, and exit-reason analysis.
