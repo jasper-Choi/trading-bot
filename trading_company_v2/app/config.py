@@ -38,7 +38,7 @@ class Settings:
     paper_slippage_min_bps: float = float(os.environ.get("PAPER_SLIPPAGE_MIN_BPS", "5"))
     paper_slippage_max_bps: float = float(os.environ.get("PAPER_SLIPPAGE_MAX_BPS", "15"))
     crypto_high_corr_threshold: float = float(os.environ.get("CRYPTO_HIGH_CORR_THRESHOLD", "0.85"))
-    crypto_high_corr_max_positions: int = int(os.environ.get("CRYPTO_HIGH_CORR_MAX_POSITIONS", "2"))
+    crypto_high_corr_max_positions: int = int(os.environ.get("CRYPTO_HIGH_CORR_MAX_POSITIONS", "4"))
     crypto_signal_stale_minutes: float = float(os.environ.get("CRYPTO_SIGNAL_STALE_MINUTES", "6"))
     live_capital_krw: int = int(os.environ.get("LIVE_CAPITAL_KRW", "0"))
     upbit_pilot_max_krw: int = int(os.environ.get("UPBIT_PILOT_MAX_KRW", "2500000"))

@@ -1067,3 +1067,46 @@ python walk_forward.py
 - Make the bot trade like an active trend-following trader instead of a passive checklist engine.
 - Let the composite model make decisions instead of forcing it to pass every individual sub-signal again.
 - Increase trade frequency while keeping the minimum structural protections that prevent random long entries in weak markets.
+
+## 30. Crypto Growth Mode Execution Patch (2026-04-29)
+
+### Goal
+
+- Project target: grow the starting seed toward `100M KRW` through active crypto trend-following first.
+- The bot must behave more like an active trader:
+  - frequent entries when composite score is valid
+  - faster re-entry after small losses
+  - fewer hard blocks from duplicated risk checks
+  - still no blind entries in weak chart structure
+
+### Completed
+
+- Relaxed crypto correlation crowding.
+  - Default `CRYPTO_HIGH_CORR_MAX_POSITIONS` changed from `2` to `4`.
+  - `.env.example` documents `CRYPTO_HIGH_CORR_MAX_POSITIONS=4`.
+- Expanded crypto execution capacity.
+  - Crypto desk limits changed from `4 positions / 2.0x` to `5 positions / 2.4x`.
+  - Crypto-only gross notional cap changed:
+    - high budget: `1.65x -> 2.05x`
+    - medium budget: `1.15x -> 1.45x`
+    - low budget: `0.75x -> 1.0x`
+- Relaxed stale signal blocking.
+  - Crypto stale block threshold changed from freshness `<= 0.70` to `<= 0.55`.
+  - Reason: CryptoDeskAgent already freshness-adjusts combined score; execution should not double-block it.
+- Changed crypto loss behavior from hard-block to smaller-probe mode.
+  - Small/scratch losses no longer freeze same-symbol crypto re-entry.
+  - Same-symbol crypto cooldown now requires a stop-like loss of at least `-1.0%`.
+  - Repeated-loss block for crypto now requires at least `3` losses and `<= -3.0%` cumulative recent loss.
+  - Desk-level high stop pressure no longer hard-blocks crypto-only growth mode; it throttles/downgrades instead.
+  - Symbol high stop pressure downgrades crypto entries to `selective_probe` instead of `stand_by`.
+- Relaxed crypto-only risk budget caps.
+  - Balanced cap: `0.40 -> 0.48`.
+  - Negative PnL cap: `0.30 -> 0.36`.
+  - Losses > wins / drawdown cap: `0.20 -> 0.28`.
+  - Exposure warning/block moved to `1.65x / 2.05x`.
+
+### Intent
+
+- Convert the system from "avoid mistakes first" to "trade valid trend edges actively, then size down when edge is weak."
+- Increase turnover enough for compounding to be possible while still preserving hard protection against stressed regimes, extreme overheating, and non-trending charts.
+- This does not guarantee profits or a timeline to 100M KRW; it makes the system structurally capable of higher turnover and faster compounding if the edge proves positive.

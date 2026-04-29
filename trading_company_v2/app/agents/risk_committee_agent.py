@@ -55,20 +55,21 @@ class RiskCommitteeAgent(BaseAgent):
             note = f"crypto recovery mode keeps entries open at throttled risk ({combined_pnl:.2f}% active P&L)"
             if note not in state.notes:
                 state.notes.append(note)
+        crypto_growth_mode = active_desks == {"crypto"}
         if state.stance == "OFFENSE":
-            state.risk_budget = min(state.risk_budget, 0.65)
+            state.risk_budget = min(state.risk_budget, 0.72 if crypto_growth_mode else 0.65)
         elif state.stance == "DEFENSE":
-            state.risk_budget = min(state.risk_budget, 0.25)
+            state.risk_budget = min(state.risk_budget, 0.30 if crypto_growth_mode else 0.25)
         else:
-            state.risk_budget = min(state.risk_budget, 0.4)
+            state.risk_budget = min(state.risk_budget, 0.48 if crypto_growth_mode else 0.4)
         if combined_pnl < 0:
-            state.risk_budget = min(state.risk_budget, 0.3)
+            state.risk_budget = min(state.risk_budget, 0.36 if crypto_growth_mode else 0.3)
         if combined_pnl <= -0.75 or losses > wins:
-            state.risk_budget = min(state.risk_budget, 0.2)
-        exposure_warn = 1.35 if active_desks == {"crypto"} else 0.9
-        exposure_block = 1.65 if active_desks == {"crypto"} else 1.05
+            state.risk_budget = min(state.risk_budget, 0.28 if crypto_growth_mode else 0.2)
+        exposure_warn = 1.65 if crypto_growth_mode else 0.9
+        exposure_block = 2.05 if crypto_growth_mode else 1.05
         if gross_open_notional >= exposure_warn:
-            state.risk_budget = min(state.risk_budget, 0.18)
+            state.risk_budget = min(state.risk_budget, 0.24 if crypto_growth_mode else 0.18)
         if gross_open_notional >= exposure_block:
             state.allow_new_entries = False
         if compounding_mode in {"drift_up", "measured_press", "press_advantage"} and state.allow_new_entries:
@@ -76,7 +77,7 @@ class RiskCommitteeAgent(BaseAgent):
             boosted_budget = min(state.risk_budget * global_multiplier, compounding_cap)
             state.risk_budget = round(max(state.risk_budget, boosted_budget), 2)
         if compounding_mode == "capital_protect":
-            state.risk_budget = min(state.risk_budget, 0.18)
+            state.risk_budget = min(state.risk_budget, 0.22 if crypto_growth_mode else 0.18)
         # ── 연패 후 사이징 축소 ──────────────────────────────────────────
         # 3연패부터 risk_budget을 10%씩 감산 (최대 45% 감산, floor 55%)
         # 연승이 다시 나오면 다음 사이클에서 자동 해제됨

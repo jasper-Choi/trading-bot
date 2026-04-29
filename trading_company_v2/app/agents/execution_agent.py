@@ -96,10 +96,9 @@ class ExecutionAgent(BaseAgent):
     @staticmethod
     def _desk_limits(desk: str) -> tuple[int, float]:
         # (max_concurrent_positions, max_desk_notional_x)
-        # Crypto: 2 positions allowed to build portfolio; cap at 1.2x (2 × 0.6x)
-        # Korea/US: 2 positions, 1.0x cap
+        # Crypto growth mode needs more concurrent probes; risk_budget still scales each order.
         if desk == "crypto":
-            return 4, 2.0  # enter all valid signals (was limited to 2 — wrong for profit max)
+            return 5, 2.4
         if desk == "us":
             return 3, 1.5
         return 3, 1.5
@@ -143,7 +142,12 @@ class ExecutionAgent(BaseAgent):
         for item in recent:
             if item.get("desk") != desk or item.get("symbol") != symbol:
                 continue
-            if float(item.get("pnl_pct", 0.0) or 0.0) <= 0:
+            pnl = float(item.get("pnl_pct", 0.0) or 0.0)
+            if desk == "crypto":
+                if self._is_stop_like_exit(item) and pnl <= -1.0:
+                    return True
+                continue
+            if pnl <= 0:
                 return True
         return False
 
@@ -167,12 +171,17 @@ class ExecutionAgent(BaseAgent):
         if not symbol:
             return False
         losses = 0
+        pnl_total = 0.0
         for item in self.closed_positions[:8]:
             if item.get("desk") != desk or item.get("symbol") != symbol:
                 continue
-            if float(item.get("pnl_pct", 0.0) or 0.0) <= 0:
+            pnl = float(item.get("pnl_pct", 0.0) or 0.0)
+            if pnl <= 0:
                 losses += 1
-            if losses >= 2:
+                pnl_total += pnl
+            if desk == "crypto" and losses >= 3 and pnl_total <= -3.0:
+                return True
+            if desk != "crypto" and losses >= 2:
                 return True
         return False
 
@@ -450,8 +459,12 @@ class ExecutionAgent(BaseAgent):
             action = "selective_probe"
             downgrade_notes.append(f"{desk} desk risk pattern downgraded attack_opening_drive to selective_probe")
         if action in {"probe_longs", "selective_probe"} and symbol_stop_pressure == "high":
-            action = "stand_by"
-            downgrade_notes.append(f"{symbol} stop pressure high, stand aside this cycle")
+            if desk == "crypto":
+                action = "selective_probe"
+                downgrade_notes.append(f"{symbol} stop pressure high, crypto growth mode keeps a smaller probe")
+            else:
+                action = "stand_by"
+                downgrade_notes.append(f"{symbol} stop pressure high, stand aside this cycle")
         elif action == "probe_longs" and desk_stop_pressure == "high":
             action = "selective_probe"
             downgrade_notes.append(f"{desk} desk stop pressure high, reduced to selective_probe")
@@ -475,7 +488,11 @@ class ExecutionAgent(BaseAgent):
         desk_recovery_ready = self._desk_recovery_ready(desk)
         desk_offense_block = not bool(desk_offense.get("entry_allowed", True)) and action in actionable_entries
         symbol_edge_block = not bool(symbol_edge.get("entry_allowed", True)) and action in actionable_entries
-        blocked_by_stop_pressure = desk_stop_pressure == "high" and action in actionable_entries
+        blocked_by_stop_pressure = (
+            desk_stop_pressure == "high"
+            and action in actionable_entries
+            and not (desk == "crypto" and settings.active_desk_set == {"crypto"})
+        )
         blocked_by_risk = not self.allow_new_entries and action in actionable_entries
         blocked_by_desk_drawdown = (desk_chronic_drawdown or desk_performance_lock) and action in actionable_entries
         desk_open_count = self._desk_open_count(desk)
@@ -483,7 +500,7 @@ class ExecutionAgent(BaseAgent):
         gross_open_notional = self._gross_open_notional()
         max_positions, max_desk_notional = self._desk_limits(desk)
         if settings.active_desk_set == {"crypto"}:
-            total_notional_cap = 1.65 if self.risk_budget >= 0.4 else 1.15 if self.risk_budget >= 0.25 else 0.75
+            total_notional_cap = 2.05 if self.risk_budget >= 0.4 else 1.45 if self.risk_budget >= 0.25 else 1.0
         else:
             total_notional_cap = 1.05 if self.risk_budget >= 0.4 else 0.8 if self.risk_budget >= 0.25 else 0.55
         desk_position_cap_hit = desk_open_count >= max_positions
@@ -495,7 +512,7 @@ class ExecutionAgent(BaseAgent):
             and btc_corr_15m >= float(settings.crypto_high_corr_threshold)
             and self._crypto_high_corr_open_count() >= int(settings.crypto_high_corr_max_positions)
         ) or bool(plan.get("force_high_corr_cap", False))
-        stale_signal_block = desk == "crypto" and action in actionable_entries and signal_freshness <= 0.70
+        stale_signal_block = desk == "crypto" and action in actionable_entries and signal_freshness <= 0.55
         exit_status = "planned" if action in actionable_exits and existing_open else "idle"
         meta = {
             "symbol": symbol,
