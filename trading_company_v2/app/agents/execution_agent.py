@@ -724,6 +724,34 @@ class ExecutionAgent(BaseAgent):
         mapped["notes"] = notes
         return mapped
 
+    def _single_crypto_candidate_order(
+        self,
+        desk: str,
+        plan: dict,
+        candidates: list[str],
+        candidate_meta: dict[str, dict],
+        skipped_candidates: list[str],
+    ) -> dict:
+        single_plan = dict(plan)
+        if desk == "crypto":
+            symbol = next(
+                (candidate for candidate in candidates if not self._has_open_position(desk, candidate)),
+                candidates[0] if candidates else str(plan.get("symbol", "")).strip(),
+            )
+            single_plan["symbol"] = symbol
+            single_plan["candidate_symbols"] = []
+            if candidate_meta and symbol in candidate_meta:
+                single_plan = self._apply_crypto_candidate_meta(single_plan, candidate_meta[symbol])
+            elif plan.get("candidate_symbols"):
+                notes = list(single_plan.get("notes", []) or [])
+                notes.append("candidate rotation disabled: missing candidate-specific metadata")
+                single_plan["notes"] = notes
+            if skipped_candidates:
+                single_plan["notes"] = list(single_plan.get("notes", []) or []) + [
+                    f"skipped weaker candidates: {'; '.join(skipped_candidates[:3])}"
+                ]
+        return self._plan_to_order(desk, single_plan).model_dump()
+
     def _multi_orders(self, desk: str, plan: dict) -> list[dict]:
         """Generate up to max_positions concurrent orders per desk from ranked candidates."""
         action = str(plan.get("action", ""))
@@ -734,9 +762,6 @@ class ExecutionAgent(BaseAgent):
         already_open = self._desk_open_count(desk)
         slots = max_positions - already_open
 
-        if slots <= 1:
-            return [self._plan_to_order(desk, plan).model_dump()]
-
         primary = str(plan.get("symbol", "")).strip()
         all_candidates: list[str] = [primary] if primary else []
         for item in plan.get("candidate_symbols", []) or []:
@@ -744,31 +769,35 @@ class ExecutionAgent(BaseAgent):
             if s and s not in all_candidates:
                 all_candidates.append(s)
 
-        if len(all_candidates) <= 1:
-            return [self._plan_to_order(desk, plan).model_dump()]
-
         candidate_meta = {
             str(item.get("market", "")).strip(): item
             for item in (plan.get("candidate_markets") or [])
             if str(item.get("market", "")).strip()
         }
         skipped_candidates: list[str] = []
-        if desk == "crypto" and candidate_meta:
-            eligible_candidates = []
-            for candidate in all_candidates:
-                ok, reason = self._crypto_candidate_entry_ok(candidate_meta.get(candidate, {}))
-                if ok:
-                    eligible_candidates.append(candidate)
-                else:
-                    skipped_candidates.append(f"{candidate}: {reason}")
-            all_candidates = eligible_candidates
-            if not all_candidates:
-                blocked_plan = dict(plan)
-                blocked_plan["action"] = "watchlist_only"
-                blocked_plan["size"] = "0.00x"
-                blocked_plan["focus"] = "Crypto candidates failed per-symbol growth-mode eligibility."
-                blocked_plan["notes"] = list(plan.get("notes", []) or []) + skipped_candidates[:6]
-                return [self._plan_to_order(desk, blocked_plan).model_dump()]
+        if desk == "crypto":
+            if candidate_meta:
+                eligible_candidates = []
+                for candidate in all_candidates:
+                    ok, reason = self._crypto_candidate_entry_ok(candidate_meta.get(candidate, {}))
+                    if ok:
+                        eligible_candidates.append(candidate)
+                    else:
+                        skipped_candidates.append(f"{candidate}: {reason}")
+                all_candidates = eligible_candidates
+                if not all_candidates:
+                    blocked_plan = dict(plan)
+                    blocked_plan["action"] = "watchlist_only"
+                    blocked_plan["size"] = "0.00x"
+                    blocked_plan["focus"] = "Crypto candidates failed per-symbol growth-mode eligibility."
+                    blocked_plan["candidate_symbols"] = []
+                    blocked_plan["notes"] = list(plan.get("notes", []) or []) + skipped_candidates[:6]
+                    return [self._plan_to_order(desk, blocked_plan).model_dump()]
+            elif plan.get("candidate_symbols"):
+                all_candidates = [primary] if primary else []
+
+        if slots <= 1 or len(all_candidates) <= 1:
+            return [self._single_crypto_candidate_order(desk, plan, all_candidates, candidate_meta, skipped_candidates)]
 
         # Divide base size evenly across eligible concurrent slots.
         base_notional = self._size_to_notional(str(plan.get("size", "0.00x")))

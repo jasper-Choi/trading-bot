@@ -1196,6 +1196,9 @@ python walk_forward.py
 - Tightened failed ignition.
   - Crypto `failed_ignition` now fires at `<= -0.60%` after the fast-fail window if the position never reached `+0.10%`.
 - Execution scoring treats the new no-lift exits as stop-like, so weak symbols/paths are penalized faster.
+- Closed the last no-score rotation path.
+  - When only one crypto slot is left, execution now still filters candidates through candidate-specific metadata.
+  - If candidate metadata is missing, candidate rotation is disabled instead of rotating into a `combined_score=0.0` symbol.
 
 ### Intent
 
