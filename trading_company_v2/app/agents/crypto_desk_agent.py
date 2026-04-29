@@ -334,6 +334,7 @@ class CryptoDeskAgent(BaseAgent):
                 "backtest_weights": weights,
                 "candidate_symbols": candidate_markets[:6],
                 "candidate_markets": ranked_candidates[:6],
+                "all_candidates": ranked_candidates,  # full 18-coin scanner data
                 "scanned_market_count": len(all_markets),
                 "discovery_universe_count": len(discovery_candidates),
                 "direction_bias": direction_signal.get("bias", "balanced"),

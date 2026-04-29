@@ -2561,6 +2561,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     </div>
     <div class="topbar-right">
       <span class="time-stamp">업데이트 <span id="update-time">--:--</span></span>
+      <a class="btn btn-ghost" href="/scanner" style="text-decoration:none">📡 스캐너</a>
       <button class="btn btn-ghost" onclick="loadData()">새로고침</button>
       <button class="btn btn-primary" id="cycle-btn" onclick="runCycle()">사이클 실행</button>
     </div>
@@ -2883,6 +2884,520 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
 </script>
 </body>
 </html>"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def root() -> str:
+    return _embedded_dashboard_html()
+
+
+# ─────────────────────────────────────────────────────────────────
+#  스캐너 API + 페이지
+# ─────────────────────────────────────────────────────────────────
+@app.get("/scanner-data")
+def scanner_data() -> dict:
+    """전체 스캔 코인 데이터 반환 (스캐너 페이지용)"""
+    state = get_state()
+    crypto_view = state.market_snapshot.get("crypto_view", {}) if state.market_snapshot else {}
+    all_candidates = list(crypto_view.get("all_candidates") or crypto_view.get("candidate_markets") or [])
+    scanned_count = int(crypto_view.get("scanned_market_count", len(all_candidates)) or len(all_candidates))
+    direction_bias = str(crypto_view.get("direction_bias", "balanced") or "balanced")
+    direction_score = float(crypto_view.get("direction_score", 0.5) or 0.5)
+    from datetime import datetime, timezone
+    return {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "scanned_count": scanned_count,
+        "direction_bias": direction_bias,
+        "direction_score": round(direction_score, 3),
+        "candidates": all_candidates,
+    }
+
+
+def _scanner_html() -> str:
+    return """<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>코인 스캐너</title>
+  <style>
+    :root{
+      --bg:#0d1117;--surface:rgba(22,27,34,.95);--border:rgba(48,54,61,1);--border-sub:rgba(48,54,61,.5);
+      --text:#e6edf3;--muted:#7d8590;
+      --green:#3fb950;--green-bg:rgba(63,185,80,.12);--green-bd:rgba(63,185,80,.35);
+      --red:#f85149;--red-bg:rgba(248,81,73,.12);--red-bd:rgba(248,81,73,.35);
+      --blue:#58a6ff;--blue-bg:rgba(88,166,255,.10);--blue-bd:rgba(88,166,255,.3);
+      --yellow:#d29922;--yellow-bg:rgba(210,153,34,.12);--yellow-bd:rgba(210,153,34,.3);
+      --purple:#bc8cff;--purple-bg:rgba(188,140,255,.12);--purple-bd:rgba(188,140,255,.3);
+      --cyan:#39d0d0;--cyan-bg:rgba(57,208,208,.10);--cyan-bd:rgba(57,208,208,.28);
+      --font:'Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+      --mono:'D2Coding','Consolas',monospace;
+    }
+    *{box-sizing:border-box}html,body{margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh;-webkit-font-smoothing:antialiased}
+    .wrap{max-width:1300px;margin:0 auto;padding:14px 16px 80px}
+
+    /* ── 헤더 ── */
+    .hdr{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+         padding:12px 16px;border:1px solid var(--border);border-radius:12px;
+         background:rgba(22,27,34,.9);margin-bottom:14px}
+    .hdr-left{display:flex;align-items:center;gap:10px}
+    .hdr-title{font-size:1rem;font-weight:700;color:var(--text)}
+    .hdr-sub{font-size:.75rem;color:var(--muted);font-family:var(--mono)}
+    .hdr-right{display:flex;align-items:center;gap:8px}
+    .back-btn{font-size:.78rem;padding:5px 12px;border:1px solid var(--border);border-radius:8px;
+              background:transparent;color:var(--muted);cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
+    .back-btn:hover{border-color:var(--blue-bd);color:var(--blue)}
+    .refresh-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+    /* ── 시장 개요 바 ── */
+    .market-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+    .mbar-card{flex:1;min-width:120px;padding:10px 14px;border:1px solid var(--border-sub);border-radius:10px;
+               background:rgba(255,255,255,.03)}
+    .mbar-label{font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:3px}
+    .mbar-val{font-size:.95rem;font-weight:700}
+    .mbar-val.bull{color:var(--green)}.mbar-val.bear{color:var(--red)}.mbar-val.neutral{color:var(--muted)}
+
+    /* ── 필터 칩 ── */
+    .filter-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+    .filter-label{font-size:.72rem;color:var(--muted);margin-right:2px}
+    .chip{padding:5px 12px;border-radius:999px;border:1px solid var(--border);font-size:.76rem;font-weight:600;
+          cursor:pointer;background:transparent;color:var(--muted);transition:all .15s}
+    .chip:hover{border-color:var(--blue-bd);color:var(--blue)}
+    .chip.active{background:var(--blue-bg);border-color:var(--blue-bd);color:var(--blue)}
+    .chip.c-offense{}.chip.c-offense.active{background:var(--green-bg);border-color:var(--green-bd);color:var(--green)}
+    .chip.c-defense.active{background:var(--red-bg);border-color:var(--red-bd);color:var(--red)}
+    .chip.c-breakout.active{background:var(--yellow-bg);border-color:var(--yellow-bd);color:var(--yellow)}
+    .chip.c-pullback.active{background:var(--purple-bg);border-color:var(--purple-bd);color:var(--purple)}
+    .chip.c-ict.active{background:var(--cyan-bg);border-color:var(--cyan-bd);color:var(--cyan)}
+    .chip.c-stream.active{background:rgba(255,210,80,.10);border-color:rgba(255,210,80,.3);color:#ffd250}
+
+    /* ── 정렬 안내 ── */
+    .sort-hint{font-size:.7rem;color:var(--muted);margin-bottom:8px}
+    .sort-hint span{color:var(--blue);font-weight:600}
+
+    /* ── 테이블 래퍼 ── */
+    .tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;background:rgba(22,27,34,.9)}
+    table{width:100%;border-collapse:collapse;font-size:.8rem}
+    thead tr{border-bottom:1px solid var(--border)}
+    th{padding:10px 10px;text-align:left;font-size:.7rem;color:var(--muted);text-transform:uppercase;
+       letter-spacing:.06em;white-space:nowrap;cursor:pointer;user-select:none;position:sticky;top:0;
+       background:rgba(22,27,34,.98);z-index:2}
+    th:hover{color:var(--blue)}
+    th.sorted-asc::after{content:' ↑';color:var(--blue)}
+    th.sorted-desc::after{content:' ↓';color:var(--blue)}
+    td{padding:9px 10px;border-bottom:1px solid var(--border-sub);white-space:nowrap;vertical-align:middle}
+    tr:last-child td{border-bottom:none}
+    tr.hidden{display:none}
+    tr.rank-1{background:rgba(63,185,80,.06);border-left:2px solid var(--green)}
+    tr.rank-2{background:rgba(88,166,255,.04)}
+    tr.rank-3{background:rgba(88,166,255,.025)}
+    tr:hover td{background:rgba(255,255,255,.025)}
+
+    /* ── 스코어 바 ── */
+    .score-wrap{display:flex;align-items:center;gap:6px}
+    .score-bar{width:52px;height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;flex-shrink:0}
+    .score-fill{height:100%;border-radius:3px;transition:width .3s}
+    .score-num{font-family:var(--mono);font-size:.78rem;font-weight:600;min-width:34px}
+    .score-num.hi{color:var(--green)}.score-num.mid{color:var(--yellow)}.score-num.lo{color:var(--muted)}
+
+    /* ── 심볼 셀 ── */
+    .sym-cell{display:flex;align-items:center;gap:7px}
+    .rank-badge{font-size:.65rem;font-weight:800;width:18px;height:18px;border-radius:50%;
+                display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .rank-badge.r1{background:var(--green);color:#000}
+    .rank-badge.r2{background:rgba(88,166,255,.7);color:#000}
+    .rank-badge.r3{background:rgba(255,255,255,.2);color:var(--text)}
+    .rank-badge.rN{background:rgba(255,255,255,.05);color:var(--muted)}
+    .sym-name{font-weight:700;font-size:.86rem}
+    .sym-pair{font-size:.68rem;color:var(--muted)}
+    .sym-change{font-family:var(--mono);font-size:.72rem}
+    .sym-change.pos{color:var(--green)}.sym-change.neg{color:var(--red)}.sym-change.flat{color:var(--muted)}
+
+    /* ── 상태 뱃지 ── */
+    .badge-row{display:flex;gap:3px;flex-wrap:wrap}
+    .sbadge{font-size:.62rem;font-weight:700;padding:2px 6px;border-radius:4px;white-space:nowrap}
+    .sbadge.ignition{background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd)}
+    .sbadge.breakout{background:var(--yellow-bg);color:var(--yellow);border:1px solid var(--yellow-bd)}
+    .sbadge.pullback{background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-bd)}
+    .sbadge.ict{background:var(--cyan-bg);color:var(--cyan);border:1px solid var(--cyan-bd)}
+    .sbadge.stream{background:rgba(255,210,80,.12);color:#ffd250;border:1px solid rgba(255,210,80,.3)}
+    .sbadge.reversal{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd)}
+    .sbadge.ob{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-bd)}
+    .sbadge.exhaust{background:rgba(255,100,100,.1);color:#f87;border:1px solid rgba(255,100,100,.25)}
+
+    /* ── Bias 태그 ── */
+    .bias-tag{font-size:.68rem;font-weight:700;padding:2px 7px;border-radius:5px}
+    .bias-tag.offense{background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd)}
+    .bias-tag.defense{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd)}
+    .bias-tag.balanced{background:rgba(255,255,255,.06);color:var(--muted);border:1px solid var(--border-sub)}
+
+    /* ── RSI 셀 ── */
+    .rsi-val{font-family:var(--mono);font-size:.78rem;font-weight:600}
+    .rsi-val.hot{color:var(--red)}.rsi-val.warm{color:var(--yellow)}.rsi-val.cool{color:var(--green)}.rsi-val.flat{color:var(--muted)}
+
+    /* ── 자동발견 섹션 ── */
+    .discovery-section{margin-top:18px}
+    .disc-title{font-size:.8rem;font-weight:700;color:var(--muted);text-transform:uppercase;
+                letter-spacing:.08em;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+    .disc-count{font-size:.68rem;font-weight:600;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.08)}
+    .disc-grid{display:flex;gap:8px;flex-wrap:wrap}
+    .disc-card{flex:1;min-width:140px;max-width:200px;padding:10px 12px;border-radius:10px;
+               border:1px solid var(--border-sub);background:rgba(255,255,255,.025);cursor:pointer}
+    .disc-card:hover{border-color:var(--blue-bd);background:rgba(88,166,255,.06)}
+    .disc-card-sym{font-size:.85rem;font-weight:700;margin-bottom:4px}
+    .disc-card-score{font-size:.75rem;color:var(--muted);font-family:var(--mono)}
+    .disc-card-tags{display:flex;gap:4px;flex-wrap:wrap;margin-top:5px}
+
+    /* ── 하단 여백 ── */
+    .spacer{height:40px}
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 헤더 -->
+  <div class="hdr">
+    <div class="hdr-left">
+      <div class="refresh-dot" id="rdot"></div>
+      <div>
+        <div class="hdr-title">📡 코인 스캐너</div>
+        <div class="hdr-sub" id="hdr-sub">로딩 중…</div>
+      </div>
+    </div>
+    <div class="hdr-right">
+      <a class="back-btn" href="/">← 대시보드</a>
+    </div>
+  </div>
+
+  <!-- 시장 개요 바 -->
+  <div class="market-bar" id="market-bar">
+    <div class="mbar-card"><div class="mbar-label">방향</div><div class="mbar-val neutral" id="mb-dir">—</div></div>
+    <div class="mbar-card"><div class="mbar-label">스캔 코인</div><div class="mbar-val neutral" id="mb-cnt">—</div></div>
+    <div class="mbar-card"><div class="mbar-label">공세 코인</div><div class="mbar-val" id="mb-off">—</div></div>
+    <div class="mbar-card"><div class="mbar-label">브레이크아웃</div><div class="mbar-val" id="mb-bk">—</div></div>
+    <div class="mbar-card"><div class="mbar-label">눌림목</div><div class="mbar-val" id="mb-pb">—</div></div>
+    <div class="mbar-card"><div class="mbar-label">스트림 점화</div><div class="mbar-val" id="mb-si">—</div></div>
+  </div>
+
+  <!-- 필터 칩 -->
+  <div class="filter-row">
+    <span class="filter-label">필터:</span>
+    <button class="chip active" data-f="all" onclick="setFilter('all',this)">전체</button>
+    <button class="chip c-offense" data-f="offense" onclick="setFilter('offense',this)">🟢 공세</button>
+    <button class="chip c-defense" data-f="defense" onclick="setFilter('defense',this)">🔴 방어</button>
+    <button class="chip c-breakout" data-f="breakout" onclick="setFilter('breakout',this)">🚀 브레이크아웃</button>
+    <button class="chip c-pullback" data-f="pullback" onclick="setFilter('pullback',this)">🔄 눌림목</button>
+    <button class="chip c-ict" data-f="ict" onclick="setFilter('ict',this)">🎯 ICT</button>
+    <button class="chip c-stream" data-f="stream" onclick="setFilter('stream',this)">⚡ 스트림</button>
+  </div>
+  <div class="sort-hint">컬럼 클릭으로 정렬 · 현재 정렬: <span id="sort-label">Combined ↓</span></div>
+
+  <!-- 테이블 -->
+  <div class="tbl-wrap">
+    <table id="scan-tbl">
+      <thead>
+        <tr>
+          <th onclick="sortBy('rank')">#</th>
+          <th onclick="sortBy('market')">코인</th>
+          <th onclick="sortBy('combined_score')">Combined</th>
+          <th onclick="sortBy('signal_score')">Signal</th>
+          <th onclick="sortBy('micro_score')">Micro</th>
+          <th onclick="sortBy('orderbook_score')">OB</th>
+          <th onclick="sortBy('stream_score')">Stream</th>
+          <th onclick="sortBy('rsi')">RSI</th>
+          <th onclick="sortBy('vol_ratio')">Vol배율</th>
+          <th onclick="sortBy('atr_pct')">ATR%</th>
+          <th onclick="sortBy('bias')">Bias</th>
+          <th>상태</th>
+        </tr>
+      </thead>
+      <tbody id="scan-body">
+        <tr><td colspan="12" style="text-align:center;padding:30px;color:var(--muted)">로딩 중…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 자동발견 섹션 -->
+  <div class="discovery-section">
+    <div class="disc-title">🚀 브레이크아웃 확정 <span class="disc-count" id="disc-bk-cnt">0</span></div>
+    <div class="disc-grid" id="disc-bk"></div>
+  </div>
+  <div class="discovery-section">
+    <div class="disc-title">🔄 눌림목 진입 <span class="disc-count" id="disc-pb-cnt">0</span></div>
+    <div class="disc-grid" id="disc-pb"></div>
+  </div>
+  <div class="discovery-section">
+    <div class="disc-title">🎯 ICT 구조 <span class="disc-count" id="disc-ict-cnt">0</span></div>
+    <div class="disc-grid" id="disc-ict"></div>
+  </div>
+  <div class="discovery-section">
+    <div class="disc-title">⚡ 스트림 점화 <span class="disc-count" id="disc-si-cnt">0</span></div>
+    <div class="disc-grid" id="disc-si"></div>
+  </div>
+
+  <div class="spacer"></div>
+</div>
+
+<script>
+var _data = [];
+var _sortKey = 'combined_score';
+var _sortAsc = false;
+var _filter = 'all';
+
+// ── 유틸 ──
+function sc(v){ return typeof v==='number'?v:parseFloat(v||0)||0; }
+function rsi(v){ return typeof v==='number'?v:parseFloat(v||0)||50; }
+function sym(m){ return String(m||'').replace('KRW-',''); }
+
+function scoreColor(v){
+  if(v>=0.65) return 'var(--green)';
+  if(v>=0.50) return 'var(--yellow)';
+  if(v>=0.35) return 'var(--muted)';
+  return 'var(--red)';
+}
+function scoreCls(v){
+  if(v>=0.62) return 'hi';
+  if(v>=0.46) return 'mid';
+  return 'lo';
+}
+function scoreBar(v, color){
+  var pct = Math.min(100, Math.round(sc(v)*100));
+  return '<div class="score-wrap">'
+    +'<div class="score-bar"><div class="score-fill" style="width:'+pct+'%;background:'+color+'"></div></div>'
+    +'<span class="score-num '+scoreCls(sc(v))+'">'+sc(v).toFixed(2)+'</span>'
+    +'</div>';
+}
+function rsiCls(v){
+  if(v>=75) return 'hot';
+  if(v>=60) return 'warm';
+  if(v>=42) return 'cool';
+  return 'flat';
+}
+function biasCls(b){ return String(b||'').toLowerCase(); }
+function biasKo(b){
+  if(b==='offense') return '공세';
+  if(b==='defense') return '방어';
+  return '균형';
+}
+
+function getStatuses(c){
+  var tags = [];
+  if(sc(c.combined_score)>=0.62 && c.micro_ready && c.orderbook_ready) tags.push({cls:'ignition',txt:'🔥점화'});
+  if(c.breakout_confirmed) tags.push({cls:'breakout',txt:'🚀BK'});
+  else if(c.breakout_partial) tags.push({cls:'breakout',txt:'🟡BK'});
+  if(c.pullback_detected && sc(c.pullback_score)>=0.60) tags.push({cls:'pullback',txt:'🔄눌림'});
+  if(c.ict_bullish_count>=3) tags.push({cls:'ict',txt:'🎯ICT'+c.ict_bullish_count});
+  if(c.stream_ignition) tags.push({cls:'stream',txt:'⚡점화'});
+  else if(c.stream_fresh && sc(c.stream_score)>=0.5) tags.push({cls:'stream',txt:'⚡활성'});
+  if(c.stream_reversal) tags.push({cls:'reversal',txt:'↩반전'});
+  if(c.orderbook_ready) tags.push({cls:'ob',txt:'🟢OB'});
+  if(c.micro_exhausted) tags.push({cls:'exhaust',txt:'⚠소진'});
+  return tags;
+}
+
+function passesFilter(c){
+  if(_filter==='all') return true;
+  if(_filter==='offense') return String(c.bias||'').toLowerCase()==='offense';
+  if(_filter==='defense') return String(c.bias||'').toLowerCase()==='defense';
+  if(_filter==='breakout') return c.breakout_confirmed || c.breakout_partial;
+  if(_filter==='pullback') return c.pullback_detected && sc(c.pullback_score)>=0.50;
+  if(_filter==='ict') return (c.ict_bullish_count||0)>=2;
+  if(_filter==='stream') return c.stream_ignition || (c.stream_fresh && sc(c.stream_score)>=0.4);
+  return true;
+}
+
+// ── 정렬 ──
+function sortBy(key){
+  if(_sortKey===key){ _sortAsc=!_sortAsc; }
+  else { _sortKey=key; _sortAsc=(key==='market'||key==='bias'||key==='rank'); }
+  renderTable();
+}
+function sortedData(){
+  return _data.slice().sort(function(a,b){
+    var va, vb;
+    if(_sortKey==='market'){ va=sym(a.market); vb=sym(b.market); return _sortAsc?(va>vb?1:-1):(vb>va?1:-1); }
+    if(_sortKey==='bias'){ va=String(a.bias||''); vb=String(b.bias||''); return _sortAsc?(va>vb?1:-1):(vb>va?1:-1); }
+    if(_sortKey==='rsi'){ va=rsi(a.rsi); vb=rsi(b.rsi); }
+    else { va=sc(a[_sortKey]); vb=sc(b[_sortKey]); }
+    return _sortAsc?(va-vb):(vb-va);
+  });
+}
+
+// ── 필터 ──
+function setFilter(f, btn){
+  _filter=f;
+  document.querySelectorAll('.chip').forEach(function(c){ c.classList.remove('active'); });
+  btn.classList.add('active');
+  renderTable();
+}
+
+// ── 테이블 렌더 ──
+function renderTable(){
+  var sorted = sortedData();
+  var body = document.getElementById('scan-body');
+  var rows = '';
+  var visCount = 0;
+  sorted.forEach(function(c, idx){
+    var rank = idx+1;
+    var show = passesFilter(c);
+    if(show) visCount++;
+    var rkCls = rank===1?'rank-1':rank===2?'rank-2':rank===3?'rank-3':'';
+    var hidCls = show?'':' hidden';
+    var rkBadgeCls = rank===1?'r1':rank===2?'r2':rank===3?'r3':'rN';
+    var chg = sc(c.change_rate)*100;
+    var chgCls = chg>0.3?'pos':chg<-0.3?'neg':'flat';
+    var chgTxt = (chg>0?'+':'')+chg.toFixed(2)+'%';
+    var rsiV = rsi(c.rsi);
+    var statuses = getStatuses(c);
+    var statusHtml = statuses.map(function(s){ return '<span class="sbadge '+s.cls+'">'+s.txt+'</span>'; }).join('');
+    var biasB = String(c.bias||'').toLowerCase();
+
+    rows += '<tr class="'+rkCls+hidCls+'" data-market="'+c.market+'">'
+      +'<td><div class="rank-badge '+rkBadgeCls+'">'+rank+'</div></td>'
+      +'<td><div class="sym-cell">'
+        +'<div><div class="sym-name">'+sym(c.market)+'</div>'
+        +'<div class="sym-pair" style="display:flex;gap:4px;align-items:center">'
+          +'<span style="color:var(--muted);font-size:.65rem">KRW</span>'
+          +'<span class="sym-change '+chgCls+'">'+chgTxt+'</span>'
+        +'</div></div>'
+      +'</div></td>'
+      +'<td>'+scoreBar(c.combined_score,'linear-gradient(90deg,var(--blue),var(--green))')+'</td>'
+      +'<td>'+scoreBar(c.signal_score, scoreColor(sc(c.signal_score)))+'</td>'
+      +'<td>'+scoreBar(c.micro_score,  scoreColor(sc(c.micro_score)))+'</td>'
+      +'<td>'+scoreBar(c.orderbook_score, scoreColor(sc(c.orderbook_score)))+'</td>'
+      +'<td>'+scoreBar(c.stream_score, '#ffd250')+'</td>'
+      +'<td><span class="rsi-val '+rsiCls(rsiV)+'">'+(isNaN(rsiV)?'—':rsiV.toFixed(0))+'</span></td>'
+      +'<td><span style="font-family:var(--mono);font-size:.78rem">'+sc(c.vol_ratio).toFixed(1)+'x</span></td>'
+      +'<td><span style="font-family:var(--mono);font-size:.78rem;color:var(--muted)">'+sc(c.atr_pct).toFixed(2)+'%</span></td>'
+      +'<td><span class="bias-tag '+biasB+'">'+biasKo(biasB)+'</span></td>'
+      +'<td><div class="badge-row">'+statusHtml+'</div></td>'
+      +'</tr>';
+  });
+
+  body.innerHTML = rows || '<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--muted)">조건에 맞는 코인 없음</td></tr>';
+
+  // 정렬 헤더 표시
+  document.querySelectorAll('th').forEach(function(th){ th.className=''; });
+  var ths = document.querySelectorAll('thead th');
+  var keyMap = {rank:0,market:1,combined_score:2,signal_score:3,micro_score:4,orderbook_score:5,stream_score:6,rsi:7,vol_ratio:8,atr_pct:9,bias:10};
+  var idx2 = keyMap[_sortKey];
+  if(idx2!==undefined) ths[idx2].className = _sortAsc?'sorted-asc':'sorted-desc';
+  document.getElementById('sort-label').textContent = (_sortKey||'combined_score') + (_sortAsc?' ↑':' ↓');
+}
+
+// ── 자동발견 섹션 ──
+function discCard(c, tagsHtml){
+  return '<div class="disc-card" onclick="highlightRow(\''+c.market+'\')">'
+    +'<div class="disc-card-sym">'+sym(c.market)+'</div>'
+    +'<div class="disc-card-score">'+sc(c.combined_score).toFixed(3)+' combined</div>'
+    +'<div class="disc-card-tags">'+tagsHtml+'</div>'
+    +'</div>';
+}
+
+function renderDiscovery(){
+  var bkList=[], pbList=[], ictList=[], siList=[];
+  _data.forEach(function(c){
+    if(c.breakout_confirmed) bkList.push(c);
+    if(c.pullback_detected && sc(c.pullback_score)>=0.55) pbList.push(c);
+    if((c.ict_bullish_count||0)>=3) ictList.push(c);
+    if(c.stream_ignition) siList.push(c);
+  });
+  function renderList(id, cntId, list, tagsF){
+    var el=document.getElementById(id), cnt=document.getElementById(cntId);
+    cnt.textContent=list.length;
+    if(!list.length){ el.innerHTML='<div style="font-size:.75rem;color:var(--muted);padding:6px 0">해당 없음</div>'; return; }
+    el.innerHTML = list.slice(0,8).map(function(c){ return discCard(c, tagsF(c)); }).join('');
+  }
+  renderList('disc-bk','disc-bk-cnt',bkList,function(c){
+    return '<span class="sbadge breakout">BK'+c.breakout_count+'/4</span>'
+      +'<span class="sbadge ob" style="font-size:.6rem">vol '+sc(c.vol_ratio).toFixed(1)+'x</span>';
+  });
+  renderList('disc-pb','disc-pb-cnt',pbList,function(c){
+    return '<span class="sbadge pullback">눌림 '+sc(c.pullback_score).toFixed(2)+'</span>';
+  });
+  renderList('disc-ict','disc-ict-cnt',ictList,function(c){
+    return '<span class="sbadge ict">'+String(c.ict_structure||'').slice(0,8)+'</span>'
+      +'<span class="sbadge ict" style="font-size:.6rem">ICT'+c.ict_bullish_count+'</span>';
+  });
+  renderList('disc-si','disc-si-cnt',siList,function(c){
+    return '<span class="sbadge stream">⚡'+sc(c.stream_move_15s_pct).toFixed(3)+'%/15s</span>';
+  });
+}
+
+// ── 시장 개요 ──
+function renderMarketBar(meta){
+  var dirEl = document.getElementById('mb-dir');
+  var dir = String(meta.direction_bias||'balanced').toLowerCase();
+  dirEl.textContent = dir==='offense'?'📈 공세':dir==='defense'?'📉 방어':'⚖ 균형';
+  dirEl.className = 'mbar-val '+(dir==='offense'?'bull':dir==='defense'?'bear':'neutral');
+  document.getElementById('mb-cnt').textContent = meta.scanned_count+'개';
+
+  var offCnt = _data.filter(function(c){ return String(c.bias||'').toLowerCase()==='offense'; }).length;
+  var bkCnt  = _data.filter(function(c){ return c.breakout_confirmed; }).length;
+  var pbCnt  = _data.filter(function(c){ return c.pullback_detected && sc(c.pullback_score)>=0.55; }).length;
+  var siCnt  = _data.filter(function(c){ return c.stream_ignition; }).length;
+
+  var mbOff = document.getElementById('mb-off');
+  mbOff.textContent = offCnt+'개';
+  mbOff.className = 'mbar-val '+(offCnt>0?'bull':'neutral');
+
+  var mbBk = document.getElementById('mb-bk');
+  mbBk.textContent = bkCnt+'개';
+  mbBk.className = 'mbar-val '+(bkCnt>0?'bull':'neutral');
+
+  var mbPb = document.getElementById('mb-pb');
+  mbPb.textContent = pbCnt+'개';
+  mbPb.className = 'mbar-val '+(pbCnt>0?'bull':'neutral');
+
+  var mbSi = document.getElementById('mb-si');
+  mbSi.textContent = siCnt+'개';
+  mbSi.className = 'mbar-val '+(siCnt>0?'bull':'neutral');
+}
+
+function highlightRow(market){
+  document.querySelectorAll('#scan-body tr').forEach(function(r){ r.style.outline=''; });
+  var el = document.querySelector('[data-market="'+market+'"]');
+  if(el){ el.style.outline='1px solid var(--blue)'; el.scrollIntoView({behavior:'smooth',block:'center'}); }
+}
+
+function toKST(isoStr){
+  if(!isoStr) return '—';
+  try{
+    var d=new Date(isoStr);
+    return d.toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }catch(e){ return isoStr; }
+}
+
+// ── 메인 로드 ──
+async function loadScanner(){
+  try{
+    var res = await fetch('/scanner-data');
+    var json = await res.json();
+    _data = json.candidates || [];
+    document.getElementById('hdr-sub').textContent =
+      toKST(json.updated_at)+' KST · '+_data.length+'개 코인 스캔';
+    renderMarketBar(json);
+    renderTable();
+    renderDiscovery();
+    document.getElementById('rdot').style.background='var(--green)';
+  }catch(e){
+    document.getElementById('hdr-sub').textContent = '로딩 실패: '+e.message;
+    document.getElementById('rdot').style.background='var(--red)';
+  }
+}
+
+loadScanner();
+setInterval(loadScanner, 10000);
+</script>
+</body>
+</html>"""
+
+
+@app.get("/scanner", response_class=HTMLResponse)
+def scanner_page() -> str:
+    return _scanner_html()
 
 
 @app.get("/", response_class=HTMLResponse)
