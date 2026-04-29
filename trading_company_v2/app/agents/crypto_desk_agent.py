@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from app.agents.base import BaseAgent
 from app.config import settings
 from app.core.models import AgentResult
+from app.core.state_store import load_symbol_score_adjustments
 from app.services.atr_sizing import summarize_atr_sizing
 from app.services.backtest_advisor import get_crypto_weights
 from app.services.market_gateway import (
@@ -134,6 +135,11 @@ class CryptoDeskAgent(BaseAgent):
             fetch_results = list(executor.map(_fetch_market, all_markets))
 
         direction_score = float(direction_signal.get("score", 0.5) or 0.5)
+        # Per-symbol score penalty based on recent trade history
+        try:
+            symbol_penalties = load_symbol_score_adjustments()
+        except Exception:
+            symbol_penalties = {}
         ranked_candidates: list[dict] = []
         for market, weight, signal, micro, orderbook, atr_sizing, stream in fetch_results:
             trend_follow_score = float(signal.get("trend_follow_score", 0.0) or 0.0)
@@ -169,6 +175,10 @@ class CryptoDeskAgent(BaseAgent):
                 combined_score = min(1.0, round(combined_score + 0.04, 3))
             if bool(stream.get("stream_reversal", False)):
                 combined_score = max(0.0, round(combined_score - 0.08, 3))
+            # Apply per-symbol penalty from recent performance history
+            sym_penalty = symbol_penalties.get(market, 0.0)
+            if sym_penalty > 0:
+                combined_score = max(0.0, round(combined_score - sym_penalty, 3))
             ranked_candidates.append(
                 {
                     "market": market,

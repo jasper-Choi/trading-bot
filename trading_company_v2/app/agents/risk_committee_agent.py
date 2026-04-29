@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from app.agents.base import BaseAgent
 from app.config import settings
 from app.core.models import AgentResult, CompanyState
+from app.core.state_store import load_current_loss_streak, load_hourly_win_rates
+
+_KST = ZoneInfo("Asia/Seoul")
 
 
 class RiskCommitteeAgent(BaseAgent):
@@ -71,6 +77,38 @@ class RiskCommitteeAgent(BaseAgent):
             state.risk_budget = round(max(state.risk_budget, boosted_budget), 2)
         if compounding_mode == "capital_protect":
             state.risk_budget = min(state.risk_budget, 0.18)
+        # ── 연패 후 사이징 축소 ──────────────────────────────────────────
+        # 3연패부터 risk_budget을 10%씩 감산 (최대 45% 감산, floor 55%)
+        # 연승이 다시 나오면 다음 사이클에서 자동 해제됨
+        try:
+            loss_streak = load_current_loss_streak(desk="crypto")
+        except Exception:
+            loss_streak = 0
+        if loss_streak >= 3:
+            streak_mult = max(0.55, 1.0 - (loss_streak - 2) * 0.10)
+            state.risk_budget = round(state.risk_budget * streak_mult, 2)
+            streak_note = f"risk budget reduced to {streak_mult:.0%} after {loss_streak}-loss streak"
+            if streak_note not in state.notes:
+                state.notes.append(streak_note)
+
+        # ── 시간대별 소프트 필터 ────────────────────────────────────────
+        # 최근 30일 기준으로 현재 시간대 승률이 35% 미만 + 샘플 5건 이상이면
+        # risk_budget을 15% 소프트 감산 (하드 블록 아님 — 시장은 매일 다름)
+        try:
+            current_hour = datetime.now(_KST).hour
+            hourly_stats = load_hourly_win_rates(desk="crypto", days=30)
+            hour_data = hourly_stats.get(current_hour)
+            if hour_data and hour_data["win_rate"] < 0.35 and hour_data["trades"] >= 5:
+                state.risk_budget = round(state.risk_budget * 0.85, 2)
+                hour_note = (
+                    f"risk budget -15% (hour {current_hour:02d}:xx win_rate "
+                    f"{hour_data['win_rate']:.0%} over {hour_data['trades']} trades)"
+                )
+                if hour_note not in state.notes:
+                    state.notes.append(hour_note)
+        except Exception:
+            pass
+
         if "risk committee enforcing conservative defaults" not in state.notes:
             state.notes.append("risk committee enforcing conservative defaults")
         if compounding_mode in {"drift_up", "measured_press", "press_advantage"}:
@@ -83,8 +121,14 @@ class RiskCommitteeAgent(BaseAgent):
                 state.notes.append(note)
         if gross_open_notional >= exposure_warn and "risk committee reduced sizing due to gross exposure" not in state.notes:
             state.notes.append("risk committee reduced sizing due to gross exposure")
-        # Purge stale block notes when entries are now allowed — prevents old block
-        # notes from persisting in state.notes across day boundaries or after recovery.
+        # Purge stale adaptive notes every cycle so they don't accumulate.
+        # Streak notes: removed when streak recovers (< 3). Hourly notes: always
+        # removed and re-added fresh (the text changes each cycle as conditions change).
+        state.notes = [
+            n for n in state.notes
+            if not (n.startswith("risk budget reduced") and loss_streak < 3)
+            and not n.startswith("risk budget -15% (hour")
+        ]
         _stale_block_notes = {
             "new entries blocked after daily drawdown or exposure breach",
             "new entries blocked under stressed regime",

@@ -366,7 +366,15 @@ def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
 
 
 def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
-    """Return (giveback_pct, floor_pct) for crypto profit protection."""
+    """Return (giveback_pct, floor_pct) for crypto profit protection.
+
+    Tiers (partial-profit-capture style):
+      peak >= 5.0%  → floor 2.20%  (let big winners breathe)
+      peak >= 3.0%  → floor 1.20%
+      peak >= 1.8%  → floor 0.70%
+      peak >= 1.0%  → floor 0.35%  (lock in ≥0.35% once +1% seen)
+      peak >= 0.80% → floor 0.12%  (near breakeven lock once +0.8% seen)
+    """
     if peak_pnl >= 5.0:
         return 1.20, 2.20
     if peak_pnl >= 3.0:
@@ -375,6 +383,8 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
         return 0.65, 0.70
     if peak_pnl >= 1.0:
         return 0.45, 0.35
+    if peak_pnl >= 0.80:
+        return 0.40, 0.12  # once +0.8% seen: floor at breakeven+, exit around +0.40%
     return 0.0, 0.0
 
 
@@ -704,7 +714,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             except (ValueError, TypeError):
                 minutes_open = float(position.cycles_open) * 0.75  # fallback ~45s/cycle assumption
             if position.desk == "crypto":
-                fast_fail_minutes = 24.0  # was 12 cycles × 2min — restore intended 24min hold-through window
+                fast_fail_minutes = 16.0  # 24→16: cut failed ignitions faster; trail rules protect winners
             elif position.desk == "korea":
                 fast_fail_minutes = 30.0 if position.action == "attack_opening_drive" else 45.0
             else:
@@ -1770,6 +1780,124 @@ def load_performance_quick_stats() -> dict:
             "open_positions": 0,
             "total_unrealized_pnl_pct": 0.0,
         }
+
+
+def load_symbol_score_adjustments(window: int = 60) -> dict[str, float]:
+    """Per-symbol combined_score penalty based on recent closed crypto trades.
+
+    Penalty accumulates for:
+    - Negative avg PnL          → +0.04
+    - Win rate < 30% (≥3 trades)→ +0.04
+    - 2+ consecutive recent losses → +0.04
+    - 3+ consecutive recent losses → +0.04 (stacks with above)
+    Max penalty per symbol: 0.12  (caps combined_score reduction)
+    """
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "closed", PaperPositionRecord.desk == "crypto")
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(window)
+            ).scalars().all()
+    except OperationalError:
+        return {}
+
+    symbol_groups: dict[str, list[float]] = {}
+    for row in rows:
+        sym = str(row.symbol or "").strip()
+        if sym:
+            symbol_groups.setdefault(sym, []).append(float(row.pnl_pct or 0.0))
+
+    adjustments: dict[str, float] = {}
+    for symbol, pnl_list in symbol_groups.items():
+        if len(pnl_list) < 2:
+            continue  # not enough data to judge
+        avg_pnl = sum(pnl_list) / len(pnl_list)
+        wins = sum(1 for p in pnl_list if p > 0)
+        win_rate = wins / len(pnl_list)
+        # pnl_list is newest-first (ORDER BY id DESC)
+        consecutive_losses = 0
+        for p in pnl_list:
+            if p <= 0:
+                consecutive_losses += 1
+            else:
+                break
+        penalty = 0.0
+        if avg_pnl < -0.5:
+            penalty += 0.04
+        if win_rate < 0.30 and len(pnl_list) >= 3:
+            penalty += 0.04
+        if consecutive_losses >= 2:
+            penalty += 0.04
+        if consecutive_losses >= 3:
+            penalty += 0.04
+        if penalty > 0:
+            adjustments[symbol] = min(round(penalty, 3), 0.12)
+    return adjustments
+
+
+def load_current_loss_streak(desk: str = "crypto", lookback: int = 15) -> int:
+    """Returns current consecutive loss streak for a desk (0 = last trade was a win or no trades)."""
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "closed", PaperPositionRecord.desk == desk)
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(lookback)
+            ).scalars().all()
+    except OperationalError:
+        return 0
+    streak = 0
+    for row in rows:  # newest-first
+        if float(row.pnl_pct or 0.0) <= 0:
+            streak += 1
+        else:
+            break
+    return streak
+
+
+def load_hourly_win_rates(desk: str = "crypto", days: int = 30) -> dict[int, dict]:
+    """Returns per-hour stats {hour: {win_rate, trades}} from the last `days` days.
+    Only hours with trades >= 5 are returned (insufficient sample otherwise).
+    """
+    init_db()
+    cutoff_date = (datetime.now(_local_timezone()) - timedelta(days=days)).date()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "closed", PaperPositionRecord.desk == desk)
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(500)
+            ).scalars().all()
+    except OperationalError:
+        return {}
+
+    hour_groups: dict[int, list[float]] = {}
+    for row in rows:
+        opened = _local_datetime_from_iso(row.opened_at)
+        if not opened:
+            continue
+        row_date = opened.date()
+        if row_date < cutoff_date:
+            continue
+        hour_groups.setdefault(opened.hour, []).append(float(row.pnl_pct or 0.0))
+
+    result: dict[int, dict] = {}
+    for hour, pnl_list in hour_groups.items():
+        if len(pnl_list) < 5:
+            continue  # too few trades — don't make assumptions
+        wins = sum(1 for p in pnl_list if p > 0)
+        result[hour] = {
+            "trades": len(pnl_list),
+            "win_rate": round(wins / len(pnl_list), 3),
+            "avg_pnl": round(sum(pnl_list) / len(pnl_list), 3),
+        }
+    return result
 
 
 def load_performance_analytics(limit: int = 500) -> dict:
