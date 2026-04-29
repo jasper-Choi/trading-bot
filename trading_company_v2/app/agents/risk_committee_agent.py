@@ -83,7 +83,15 @@ class RiskCommitteeAgent(BaseAgent):
                 state.notes.append(note)
         if gross_open_notional >= exposure_warn and "risk committee reduced sizing due to gross exposure" not in state.notes:
             state.notes.append("risk committee reduced sizing due to gross exposure")
-        if not state.allow_new_entries and "new entries blocked under stressed regime" not in state.notes:
+        # Purge stale block notes when entries are now allowed — prevents old block
+        # notes from persisting in state.notes across day boundaries or after recovery.
+        _stale_block_notes = {
+            "new entries blocked after daily drawdown or exposure breach",
+            "new entries blocked under stressed regime",
+        }
+        if state.allow_new_entries:
+            state.notes = [n for n in state.notes if n not in _stale_block_notes]
+        else:
             block_reason = (
                 "new entries blocked under stressed regime"
                 if state.regime == "STRESSED"

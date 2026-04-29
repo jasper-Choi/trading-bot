@@ -1002,7 +1002,10 @@ def load_daily_summary() -> dict:
             cumulative_losses = sum(1 for row in all_closed if row.pnl_pct <= 0)
             cumulative_closed = len(all_closed)
             cumulative_win_rate = round((cumulative_wins / cumulative_closed) * 100, 1) if cumulative_closed else 0.0
-            desk_stats = _build_desk_stats(positions)
+            # desk_stats must use TODAY's closed + ALL currently-open positions.
+            # Bug: passing all-time `positions` caused cumulative realized_pnl to
+            # exceed the -6% drawdown floor, permanently blocking new entries.
+            desk_stats = _build_desk_stats(closed_today + open_positions)
             gross_open_notional = round(sum(_size_to_notional(row.size) for row in open_positions), 2)
             base_capital = float(settings.paper_capital_krw)
             # Effective capital grows with cumulative P&L (compounding)
