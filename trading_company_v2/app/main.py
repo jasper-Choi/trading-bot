@@ -2324,17 +2324,30 @@ def telegram_test() -> dict:
 
 @app.get("/performance-data")
 def performance_data() -> dict:
-    state = load_company_state()
-    bot_status = {
-        "regime": state.regime or "UNKNOWN",
-        "stance": state.stance or "NEUTRAL",
-        "allow_new_entries": bool(state.allow_new_entries),
-        "risk_budget": float(state.risk_budget or 0.0),
-        "cycle": int(state.cycle or 0),
-    }
+    try:
+        state = load_company_state()
+        bot_status = {
+            "regime": state.regime or "UNKNOWN",
+            "stance": state.stance or "NEUTRAL",
+            "allow_new_entries": bool(state.allow_new_entries),
+            "risk_budget": float(state.risk_budget or 0.0),
+            "cycle": int(state.cycle or 0),
+        }
+    except Exception:
+        bot_status = {
+            "regime": "UNKNOWN",
+            "stance": "NEUTRAL",
+            "allow_new_entries": False,
+            "risk_budget": 0.0,
+            "cycle": 0,
+        }
+    try:
+        analytics = load_performance_analytics()
+    except Exception as exc:  # noqa: BLE001
+        analytics = {"error": str(exc), "updated_at": None, "summary": {}}
     return {
         "quick_stats": load_performance_quick_stats(),
-        "analytics": load_performance_analytics(),
+        "analytics": analytics,
         "bot_status": bot_status,
     }
 

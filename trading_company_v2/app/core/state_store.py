@@ -1940,7 +1940,7 @@ def load_performance_analytics(limit: int = 500) -> dict:
 
     # Win/loss streak analysis from time-ordered closed rows
     tmp_streak = 0
-    tmp_type: str | None = None
+    tmp_type = None  # "win" | "loss" | None
     longest_win = 0
     longest_loss = 0
     for row in closed:
