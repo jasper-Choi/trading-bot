@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import time
 from base64 import b64decode
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 _SESSION_COOKIE = "tcsession"
@@ -47,7 +49,7 @@ from app.services.kis_broker import get_account_positions as get_kis_account_pos
 from app.services.kis_broker import get_order as get_kis_order
 from app.services.kis_broker import normalize_order_state as normalize_kis_order_state
 from app.services.broker_router import normalize_execution_mode
-from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_us_daily_prices, get_us_data_status
+from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_upbit_ticker_prices, get_us_daily_prices, get_us_data_status
 from app.services.recommendation_engine import build_crypto_plan, build_korea_plan, build_us_plan
 from app.services.upbit_broker import get_account_positions as get_upbit_account_positions
 from app.services.upbit_broker import get_order as get_upbit_order
@@ -64,6 +66,9 @@ from app.service_manager import (
 
 app = FastAPI(title="Trading Company V2", version="0.1.0")
 orchestrator = CompanyOrchestrator()
+_SCANNER_CHART_CACHE: dict[str, dict] = {}
+_SCANNER_CHART_TTL_SECONDS = 75.0
+_SCANNER_CHART_COUNT = 24
 
 
 def _safe_parse_utc(value: str) -> datetime | None:
@@ -2975,6 +2980,53 @@ def root() -> str:
 # ─────────────────────────────────────────────────────────────────
 #  스캐너 API + 페이지
 # ─────────────────────────────────────────────────────────────────
+def _scanner_price_change_pct(raw_value: object) -> float:
+    try:
+        value = float(raw_value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return round(value if abs(value) > 1.0 else value * 100, 2)
+
+
+def _scanner_chart_payload(market: str) -> dict:
+    symbol = str(market or "").strip()
+    if not symbol:
+        return {"candles_15m": [], "sparkline": [], "sparkline_change_pct": 0.0, "chart_cached": False}
+    now = time.time()
+    cached = _SCANNER_CHART_CACHE.get(symbol) or {}
+    if cached and now - float(cached.get("fetched_at", 0.0) or 0.0) < _SCANNER_CHART_TTL_SECONDS:
+        return {
+            "candles_15m": cached.get("candles_15m", []),
+            "sparkline": cached.get("sparkline", []),
+            "sparkline_change_pct": cached.get("sparkline_change_pct", 0.0),
+            "chart_cached": True,
+        }
+    candles = get_upbit_15m_candles(symbol, count=_SCANNER_CHART_COUNT)
+    compact = [
+        {
+            "t": item.get("date", ""),
+            "o": round(float(item.get("open", 0.0) or 0.0), 8),
+            "h": round(float(item.get("high", 0.0) or 0.0), 8),
+            "l": round(float(item.get("low", 0.0) or 0.0), 8),
+            "c": round(float(item.get("close", 0.0) or 0.0), 8),
+        }
+        for item in candles
+        if float(item.get("close", 0.0) or 0.0) > 0
+    ][-_SCANNER_CHART_COUNT:]
+    closes = [item["c"] for item in compact]
+    change_pct = 0.0
+    if len(closes) >= 2 and closes[0] > 0:
+        change_pct = round((closes[-1] - closes[0]) / closes[0] * 100, 2)
+    payload = {
+        "candles_15m": compact,
+        "sparkline": closes,
+        "sparkline_change_pct": change_pct,
+        "chart_cached": False,
+    }
+    _SCANNER_CHART_CACHE[symbol] = {"fetched_at": now, **payload}
+    return payload
+
+
 @app.get("/scanner-data")
 def scanner_data() -> dict:
     """전체 스캔 코인 데이터 반환 (스캐너 페이지용)"""
@@ -2985,12 +3037,30 @@ def scanner_data() -> dict:
     direction_bias = str(crypto_view.get("direction_bias", "balanced") or "balanced")
     direction_score = float(crypto_view.get("direction_score", 0.5) or 0.5)
     from datetime import datetime, timezone
+    markets = [str(item.get("market") or "").strip() for item in all_candidates if isinstance(item, dict)]
+    price_map = get_upbit_ticker_prices(markets)
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        chart_map = dict(zip(markets, executor.map(_scanner_chart_payload, markets))) if markets else {}
+    enriched_candidates = []
+    for item in all_candidates:
+        if not isinstance(item, dict):
+            continue
+        market = str(item.get("market") or "").strip()
+        row = dict(item)
+        current_price = float(price_map.get(market) or row.get("trade_price") or row.get("current_price") or 0.0)
+        row["current_price"] = current_price
+        row["trade_price"] = current_price
+        row["price_change_pct"] = _scanner_price_change_pct(row.get("change_rate", 0.0))
+        row.update(chart_map.get(market) or _scanner_chart_payload(market))
+        enriched_candidates.append(row)
     return {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "scanned_count": scanned_count,
         "direction_bias": direction_bias,
         "direction_score": round(direction_score, 3),
-        "candidates": all_candidates,
+        "price_source": "upbit_ws_cache_or_rest",
+        "chart_ttl_seconds": _SCANNER_CHART_TTL_SECONDS,
+        "candidates": enriched_candidates,
     }
 
 
@@ -3095,6 +3165,16 @@ def _scanner_html() -> str:
     .sym-pair{font-size:.68rem;color:var(--muted)}
     .sym-change{font-family:var(--mono);font-size:.72rem}
     .sym-change.pos{color:var(--green)}.sym-change.neg{color:var(--red)}.sym-change.flat{color:var(--muted)}
+    .price-cell{font-family:var(--mono);font-weight:800;font-size:.82rem}
+    .price-sub{font-family:var(--mono);font-size:.66rem;color:var(--muted);margin-top:2px}
+    .mini-chart{width:128px;height:42px;display:block}
+    .mini-chart-wrap{display:flex;align-items:center;gap:8px;min-width:170px}
+    .mini-chart-change{font-family:var(--mono);font-size:.72rem;font-weight:800;min-width:44px}
+    .mini-chart-empty{font-size:.72rem;color:var(--muted)}
+    .candle-up{fill:rgba(63,185,80,.78);stroke:rgba(63,185,80,.9)}
+    .candle-down{fill:rgba(248,81,73,.72);stroke:rgba(248,81,73,.9)}
+    .candle-wick{stroke:rgba(230,237,243,.42);stroke-width:1}
+    .spark-line{fill:none;stroke:var(--blue);stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 
     /* ── 상태 뱃지 ── */
     .badge-row{display:flex;gap:3px;flex-wrap:wrap}
@@ -3182,6 +3262,8 @@ def _scanner_html() -> str:
         <tr>
           <th onclick="sortBy('rank')">#</th>
           <th onclick="sortBy('market')">코인</th>
+          <th onclick="sortBy('current_price')">현재가</th>
+          <th onclick="sortBy('sparkline_change_pct')">15m 차트</th>
           <th onclick="sortBy('combined_score')">Combined</th>
           <th onclick="sortBy('signal_score')">Signal</th>
           <th onclick="sortBy('micro_score')">Micro</th>
@@ -3195,7 +3277,7 @@ def _scanner_html() -> str:
         </tr>
       </thead>
       <tbody id="scan-body">
-        <tr><td colspan="12" style="text-align:center;padding:30px;color:var(--muted)">로딩 중…</td></tr>
+        <tr><td colspan="14" style="text-align:center;padding:30px;color:var(--muted)">로딩 중…</td></tr>
       </tbody>
     </table>
   </div>
@@ -3231,6 +3313,15 @@ var _filter = 'all';
 function sc(v){ return typeof v==='number'?v:parseFloat(v||0)||0; }
 function rsi(v){ return typeof v==='number'?v:parseFloat(v||0)||50; }
 function sym(m){ return String(m||'').replace('KRW-',''); }
+function fmtPrice(v){
+  v=sc(v);
+  if(v>=1000000) return Math.round(v).toLocaleString('ko-KR');
+  if(v>=1000) return v.toLocaleString('ko-KR',{maximumFractionDigits:0});
+  if(v>=100) return v.toLocaleString('ko-KR',{maximumFractionDigits:1});
+  if(v>=10) return v.toLocaleString('ko-KR',{maximumFractionDigits:2});
+  return v.toLocaleString('ko-KR',{maximumFractionDigits:4});
+}
+function pctText(v){ v=sc(v); return (v>0?'+':'')+v.toFixed(2)+'%'; }
 
 function scoreColor(v){
   if(v>=0.65) return 'var(--green)';
@@ -3249,6 +3340,26 @@ function scoreBar(v, color){
     +'<div class="score-bar"><div class="score-fill" style="width:'+pct+'%;background:'+color+'"></div></div>'
     +'<span class="score-num '+scoreCls(sc(v))+'">'+sc(v).toFixed(2)+'</span>'
     +'</div>';
+}
+function miniChart(c){
+  var candles=(c.candles_15m||[]).slice(-24);
+  if(!candles.length) return '<div class="mini-chart-empty">15m 데이터 없음</div>';
+  var w=128,h=42,pad=3;
+  var highs=candles.map(function(x){return sc(x.h)}), lows=candles.map(function(x){return sc(x.l)}), closes=candles.map(function(x){return sc(x.c)});
+  var hi=Math.max.apply(null,highs), lo=Math.min.apply(null,lows), rng=(hi-lo)||1;
+  function x(i){return pad+(i/(Math.max(1,candles.length-1)))*(w-pad*2)}
+  function y(v){return pad+((hi-v)/rng)*(h-pad*2)}
+  var cw=Math.max(2,Math.min(5,(w-pad*2)/candles.length*.55));
+  var parts='';
+  candles.forEach(function(row,i){
+    var xx=x(i), yo=y(sc(row.o)), yc=y(sc(row.c)), yh=y(sc(row.h)), yl=y(sc(row.l));
+    var up=sc(row.c)>=sc(row.o), top=Math.min(yo,yc), bh=Math.max(1,Math.abs(yc-yo));
+    parts+='<line class="candle-wick" x1="'+xx.toFixed(1)+'" y1="'+yh.toFixed(1)+'" x2="'+xx.toFixed(1)+'" y2="'+yl.toFixed(1)+'"></line>';
+    parts+='<rect class="'+(up?'candle-up':'candle-down')+'" x="'+(xx-cw/2).toFixed(1)+'" y="'+top.toFixed(1)+'" width="'+cw.toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="1"></rect>';
+  });
+  var line=closes.map(function(v,i){return x(i).toFixed(1)+','+y(v).toFixed(1)}).join(' ');
+  var ch=sc(c.sparkline_change_pct), chCls=ch>0?'pos':ch<0?'neg':'flat';
+  return '<div class="mini-chart-wrap"><svg class="mini-chart" viewBox="0 0 '+w+' '+h+'" aria-label="15분 미니 차트">'+parts+'<polyline class="spark-line" points="'+line+'"></polyline></svg><span class="mini-chart-change '+chCls+'">'+pctText(ch)+'</span></div>';
 }
 function rsiCls(v){
   if(v>=75) return 'hot';
@@ -3327,9 +3438,9 @@ function renderTable(){
     var rkCls = rank===1?'rank-1':rank===2?'rank-2':rank===3?'rank-3':'';
     var hidCls = show?'':' hidden';
     var rkBadgeCls = rank===1?'r1':rank===2?'r2':rank===3?'r3':'rN';
-    var chg = sc(c.change_rate)*100;
+    var chg = c.price_change_pct!=null?sc(c.price_change_pct):sc(c.change_rate)*100;
     var chgCls = chg>0.3?'pos':chg<-0.3?'neg':'flat';
-    var chgTxt = (chg>0?'+':'')+chg.toFixed(2)+'%';
+    var chgTxt = pctText(chg);
     var rsiV = rsi(c.rsi);
     var statuses = getStatuses(c);
     var statusHtml = statuses.map(function(s){ return '<span class="sbadge '+s.cls+'">'+s.txt+'</span>'; }).join('');
@@ -3344,6 +3455,8 @@ function renderTable(){
           +'<span class="sym-change '+chgCls+'">'+chgTxt+'</span>'
         +'</div></div>'
       +'</div></td>'
+      +'<td><div class="price-cell">'+fmtPrice(c.current_price||c.trade_price)+'</div><div class="price-sub">KRW · 실시간</div></td>'
+      +'<td>'+miniChart(c)+'</td>'
       +'<td>'+scoreBar(c.combined_score,'linear-gradient(90deg,var(--blue),var(--green))')+'</td>'
       +'<td>'+scoreBar(c.signal_score, scoreColor(sc(c.signal_score)))+'</td>'
       +'<td>'+scoreBar(c.micro_score,  scoreColor(sc(c.micro_score)))+'</td>'
@@ -3357,12 +3470,12 @@ function renderTable(){
       +'</tr>';
   });
 
-  body.innerHTML = rows || '<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--muted)">조건에 맞는 코인 없음</td></tr>';
+  body.innerHTML = rows || '<tr><td colspan="14" style="text-align:center;padding:24px;color:var(--muted)">조건에 맞는 코인 없음</td></tr>';
 
   // 정렬 헤더 표시
   document.querySelectorAll('th').forEach(function(th){ th.className=''; });
   var ths = document.querySelectorAll('thead th');
-  var keyMap = {rank:0,market:1,combined_score:2,signal_score:3,micro_score:4,orderbook_score:5,stream_score:6,rsi:7,vol_ratio:8,atr_pct:9,bias:10};
+  var keyMap = {rank:0,market:1,current_price:2,sparkline_change_pct:3,combined_score:4,signal_score:5,micro_score:6,orderbook_score:7,stream_score:8,rsi:9,vol_ratio:10,atr_pct:11,bias:12};
   var idx2 = keyMap[_sortKey];
   if(idx2!==undefined) ths[idx2].className = _sortAsc?'sorted-asc':'sorted-desc';
   document.getElementById('sort-label').textContent = (_sortKey||'combined_score') + (_sortAsc?' ↑':' ↓');

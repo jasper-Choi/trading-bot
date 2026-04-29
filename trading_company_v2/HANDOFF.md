@@ -929,3 +929,23 @@ python walk_forward.py
 - Make the scanner reliably render instead of silently failing after API or JavaScript errors.
 - Keep the performance page readable on both desktop and mobile while preserving all 24 hourly cells.
 - Add daily trade outcome visibility so strategy changes can be checked day by day.
+
+## 26. Scanner Price + 15m Mini Chart Patch (2026-04-29)
+
+### Completed
+
+- Enhanced `/scanner-data`.
+  - Adds live `current_price` / `trade_price` for each scanner candidate using Upbit websocket cache first, REST fallback second.
+  - Adds normalized `price_change_pct` so the UI no longer has to guess whether `change_rate` is decimal or percent.
+  - Adds `candles_15m`, `sparkline`, and `sparkline_change_pct` for each candidate.
+  - Uses a 75-second in-process chart cache and 6-worker parallel fetch so 10-second browser refreshes do not spam candle requests.
+- Enhanced `/scanner` UI.
+  - Added `현재가` column.
+  - Added `15m 차트` column with compact candlestick bars plus a sparkline overlay.
+  - Added sorting support for current price and 15m chart change.
+
+### Intent
+
+- Make the scanner show not only scores but also live tradable price context.
+- Let the operator visually see whether a high-scoring coin is accelerating, pulling back, or fading before clicking deeper.
+- Keep the implementation lightweight until the next step introduces richer per-symbol drilldown charts.
