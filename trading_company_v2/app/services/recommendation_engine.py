@@ -90,14 +90,15 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         f"slope={trend_slope_pct:.2f}% extension={trend_extension_pct:.2f}%"
     )
     # Pullback entry: prior spike + EMA-zone retracement + volume contraction
-    # Better entry price and tighter stop than chasing raw momentum
+    # Better entry price and tighter stop than chasing raw momentum.
+    # micro_score threshold lowered 0.38→0.28: pullbacks naturally have soft 1m momentum.
     pullback_entry_ok = (
         pullback_detected
         and pullback_score >= 0.55
         and trend_entry_allowed
         and trend_follow_score >= 0.52
         and signal_score >= 0.40
-        and micro_score >= 0.38
+        and micro_score >= 0.28
         and (orderbook_score >= 0.44 or orderbook_bid_ask >= 1.0)
         and not rsi_bearish_divergence
     )
@@ -157,6 +158,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
     soft_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 85.0)
+    # Trend-pullback entry: 15m EMA structure shows pullback_long but signal_engine
+    # spike+retrace pattern may not be detected. Allow entry when trend confidence is
+    # very high + orderbook shows buyers — no volume/micro gate (pullback = soft by design).
+    trend_pullback_ok = (
+        trend_alignment == "pullback_long"
+        and trend_entry_allowed
+        and trend_follow_score >= 0.72
+        and signal_score >= 0.65
+        and orderbook_bid_ask >= 1.02
+        and not rsi_bearish_divergence
+        and not late_chase_risk
+        and not hard_overheat
+    )
     if hard_overheat and not (signal_score >= 0.68 and micro_score >= 0.50 and flow_support):
         return {
             "action": "watchlist_only",
@@ -282,8 +296,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and trend_follow_score >= 0.56
         and not rsi_bearish_divergence
     )
-    # Volume gate: direct_entry_ok (high combined score) also bypasses
-    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and stance != "DEFENSE":
+    # Volume gate: pullback/trend paths bypass — quiet volume during pullback is expected.
+    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and not trend_pullback_ok and stance != "DEFENSE":
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -307,6 +321,23 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [pullback_note, trend_note, ignition_note, support_note],
+        }
+
+    # Trend-pullback entry: 15m structure confirmed pullback_long, high signal, strong orderbook.
+    # Conservative size — we're catching a dip without full momentum confirmation.
+    if trend_pullback_ok and stance != "DEFENSE":
+        entry_size = "0.58x" if signal_score >= 0.75 else "0.45x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"{lead_market or 'KRW-BTC'} trend pullback entry — 15m structure bullish, dip buying near EMA.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                trend_note,
+                f"trend_pullback: signal={signal_score:.2f} ob={orderbook_bid_ask:.2f}x trend={trend_follow_score:.2f}",
+                ignition_note,
+            ],
         }
 
     # Direct entry: combined_score is the signal — enter now without extra gate chains
