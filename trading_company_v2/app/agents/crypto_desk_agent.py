@@ -136,15 +136,24 @@ class CryptoDeskAgent(BaseAgent):
         direction_score = float(direction_signal.get("score", 0.5) or 0.5)
         ranked_candidates: list[dict] = []
         for market, weight, signal, micro, orderbook, atr_sizing, stream in fetch_results:
+            trend_follow_score = float(signal.get("trend_follow_score", 0.0) or 0.0)
+            trend_alignment = str(signal.get("trend_alignment", "unknown") or "unknown")
             combined_score = round(
-                # Orderbook weight raised: it's the most real-time signal we have
-                (float(signal.get("score", 0.5) or 0.5) * 0.38)
-                + (float(micro.get("micro_score", 0.0) or 0.0) * 0.26)
-                + (float(orderbook.get("orderbook_score", 0.0) or 0.0) * 0.18)
-                + (direction_score * 0.12)
-                + (float(weight or 0.0) * 0.06),
+                # Trade in the chart trend direction first; use micro/orderbook for timing.
+                (float(signal.get("score", 0.5) or 0.5) * 0.34)
+                + (trend_follow_score * 0.14)
+                + (float(micro.get("micro_score", 0.0) or 0.0) * 0.24)
+                + (float(orderbook.get("orderbook_score", 0.0) or 0.0) * 0.17)
+                + (direction_score * 0.08)
+                + (float(weight or 0.0) * 0.03),
                 3,
             )
+            if trend_alignment == "downtrend":
+                combined_score = max(0.0, round(combined_score - 0.14, 3))
+            elif trend_alignment == "range":
+                combined_score = max(0.0, round(combined_score - 0.06, 3))
+            elif trend_alignment == "late_extension":
+                combined_score = max(0.0, round(combined_score - 0.04, 3))
             freshness = float(signal.get("signal_freshness", 1.0) or 1.0)
             if freshness < 1.0:
                 combined_score = round(combined_score * freshness, 3)
@@ -217,6 +226,14 @@ class CryptoDeskAgent(BaseAgent):
                     "breakout_count": int(signal.get("breakout_count", 0) or 0),
                     "vol_ratio": float(signal.get("vol_ratio", 0.0) or 0.0),
                     "breakout_score": float(signal.get("breakout_score", 0.0) or 0.0),
+                    "trend_follow_score": trend_follow_score,
+                    "trend_alignment": trend_alignment,
+                    "trend_entry_allowed": bool(signal.get("trend_entry_allowed", False)),
+                    "ema_stack_bullish": bool(signal.get("ema_stack_bullish", False)),
+                    "price_above_trend_ema": bool(signal.get("price_above_trend_ema", False)),
+                    "trend_slope_pct": float(signal.get("trend_slope_pct", 0.0) or 0.0),
+                    "trend_extension_pct": float(signal.get("trend_extension_pct", 0.0) or 0.0),
+                    "trend_reasons": list(signal.get("trend_reasons", [])),
                     "rsi_quality_ok": bool(signal.get("rsi_quality_ok", True)),
                     "rsi_reset_confirmed": bool(signal.get("rsi_reset_confirmed", False)),
                     "rsi_bearish_divergence": bool(signal.get("rsi_bearish_divergence", False)),
@@ -262,6 +279,10 @@ class CryptoDeskAgent(BaseAgent):
             "orderbook_score": 0.0,
             "orderbook_ready": False,
             "orderbook_reasons": [],
+            "trend_follow_score": 0.0,
+            "trend_alignment": "unknown",
+            "trend_entry_allowed": False,
+            "trend_reasons": [],
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -344,6 +365,14 @@ class CryptoDeskAgent(BaseAgent):
                 "breakout_count": int(leader.get("breakout_count", 0) or 0),
                 "vol_ratio": float(leader.get("vol_ratio", 0.0) or 0.0),
                 "breakout_score": float(leader.get("breakout_score", 0.0) or 0.0),
+                "trend_follow_score": float(leader.get("trend_follow_score", 0.0) or 0.0),
+                "trend_alignment": str(leader.get("trend_alignment", "unknown") or "unknown"),
+                "trend_entry_allowed": bool(leader.get("trend_entry_allowed", False)),
+                "ema_stack_bullish": bool(leader.get("ema_stack_bullish", False)),
+                "price_above_trend_ema": bool(leader.get("price_above_trend_ema", False)),
+                "trend_slope_pct": float(leader.get("trend_slope_pct", 0.0) or 0.0),
+                "trend_extension_pct": float(leader.get("trend_extension_pct", 0.0) or 0.0),
+                "trend_reasons": list(leader.get("trend_reasons", [])),
                 "rsi_quality_ok": bool(leader.get("rsi_quality_ok", True)),
                 "rsi_reset_confirmed": bool(leader.get("rsi_reset_confirmed", False)),
                 "rsi_bearish_divergence": bool(leader.get("rsi_bearish_divergence", False)),

@@ -57,32 +57,45 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     spike_pct_15m = float(payload.get("spike_pct_15m", 0.0) or 0.0)
     retrace_from_high_pct = float(payload.get("retrace_from_high_pct", 0.0) or 0.0)
     vol_contracted_on_pullback = bool(payload.get("vol_contracted_on_pullback", False))
+    trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
+    trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
+    trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
+    trend_slope_pct = float(payload.get("trend_slope_pct", 0.0) or 0.0)
+    trend_extension_pct = float(payload.get("trend_extension_pct", 0.0) or 0.0)
     trend_ignition_score = round(
         min(
             1.0,
-            min(max(signal_score, 0.0), 1.0) * 0.32
-            + min(max(micro_score, 0.0), 1.0) * 0.25
-            + min(max(orderbook_score, 0.0), 1.0) * 0.15
-            + min(max(discovery_score, 0.0), 1.0) * 0.10
-            + min(max(vol_ratio / 3.0, 0.0), 1.0) * 0.10
-            + min(max(stream_score, 0.0), 1.0) * 0.08,
+            min(max(signal_score, 0.0), 1.0) * 0.24
+            + min(max(trend_follow_score, 0.0), 1.0) * 0.22
+            + min(max(micro_score, 0.0), 1.0) * 0.20
+            + min(max(orderbook_score, 0.0), 1.0) * 0.13
+            + min(max(discovery_score, 0.0), 1.0) * 0.07
+            + min(max(vol_ratio / 3.0, 0.0), 1.0) * 0.08
+            + min(max(stream_score, 0.0), 1.0) * 0.06
         ),
         3,
     )
     flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02 or stream_ignition
     # research_support removed from ignition_ready: historical backtest weight shouldn't block fresh movers.
     # CryptoDeskAgent already integrated all signals into combined_score — trust it here.
-    ignition_ready = trend_ignition_score >= 0.50 and flow_support
+    ignition_ready = trend_ignition_score >= 0.56 and flow_support and trend_entry_allowed
     ignition_note = (
-        f"trend_ignition={trend_ignition_score:.2f} / micro={micro_score:.2f} "
+        f"trend_ignition={trend_ignition_score:.2f} / chart={trend_follow_score:.2f} {trend_alignment} "
+        f"/ micro={micro_score:.2f} "
         f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / stream={stream_score:.2f} "
         f"({stream_move_15:.2f}%/15s) / breakout={breakout_count}/4"
+    )
+    trend_note = (
+        f"chart trend gate: {trend_alignment} score={trend_follow_score:.2f} "
+        f"slope={trend_slope_pct:.2f}% extension={trend_extension_pct:.2f}%"
     )
     # Pullback entry: prior spike + EMA-zone retracement + volume contraction
     # Better entry price and tighter stop than chasing raw momentum
     pullback_entry_ok = (
         pullback_detected
         and pullback_score >= 0.55
+        and trend_entry_allowed
+        and trend_follow_score >= 0.52
         and signal_score >= 0.40
         and micro_score >= 0.38
         and (orderbook_score >= 0.44 or orderbook_bid_ask >= 1.0)
@@ -119,6 +132,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and stream_ticks_15 >= 2
         and stream_buy_ratio >= 0.48
         and orderbook_bid_ask >= 0.98
+        and trend_entry_allowed
+        and trend_follow_score >= 0.52
         and not stream_reversal
         and not late_chase_risk
     )
@@ -127,6 +142,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and micro_ready
         and orderbook_bid_ask >= 1.15
         and micro_vwap_gap <= 2.8
+        and trend_entry_allowed
+        and trend_follow_score >= 0.58
     )
 
     if regime == "STRESSED":
@@ -181,6 +198,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [f"recent {recent_change:.2f}% / burst {burst_change:.2f}% triggered protection."],
         }
+    if not trend_entry_allowed:
+        return {
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": f"{lead_market or 'KRW-BTC'} chart trend is not aligned for a long entry.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                trend_note,
+                "Fast 1m/stream triggers are only allowed inside a 15m uptrend or first-pullback structure.",
+                ignition_note,
+            ],
+        }
     if late_chase_risk and not (pullback_entry_ok or strong_late_breakout_exception):
         return {
             "action": "watchlist_only",
@@ -227,6 +257,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and micro_vol_ratio >= 1.1
         and micro_move_3 >= -1.5
         and orderbook_bid_ask >= 1.0
+        and trend_entry_allowed
+        and trend_follow_score >= 0.52
     )
     # discovery_entry_ok: removed research_support gate — backtest history shouldn't block fresh opportunities.
     # 2026-04-29: signal 0.52 → 0.56, micro 0.44 → 0.46, ob 0.98 → 1.0 after data showed
@@ -235,6 +267,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         signal_score >= 0.56
         and micro_score >= 0.46
         and orderbook_bid_ask >= 1.0
+        and trend_entry_allowed
+        and trend_follow_score >= 0.54
         and not late_chase_risk
         and not hard_overheat
     )
@@ -244,6 +278,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         signal_score >= 0.63
         and (clean_momentum_window or strong_late_breakout_exception or stream_entry_ok)
         and orderbook_bid_ask >= 1.02
+        and trend_entry_allowed
+        and trend_follow_score >= 0.56
         and not rsi_bearish_divergence
     )
     # Volume gate: direct_entry_ok (high combined score) also bypasses
@@ -270,7 +306,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} pullback entry — retracement near EMA after spike.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [pullback_note, ignition_note, support_note],
+            "notes": reasons + [pullback_note, trend_note, ignition_note, support_note],
         }
 
     # Direct entry: combined_score is the signal — enter now without extra gate chains
@@ -293,7 +329,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 f"direct entry: combined={signal_score:.2f} micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x",
                 f"clean momentum window: move3={micro_move_3:.2f}% move10={micro_move_10:.2f}% vwap_gap={micro_vwap_gap:.2f}% range5={micro_range_5:.2f}%",
                 f"stream: score={stream_score:.2f} move15={stream_move_15:.2f}% ticks15={stream_ticks_15} buy={stream_buy_ratio:.0%}",
-                ignition_note, support_note,
+                trend_note, ignition_note, support_note,
             ],
         }
 
@@ -308,6 +344,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 f"stream ignition: score={stream_score:.2f} age={stream_age:.2f}s "
                 f"move5={stream_move_5:.2f}% move15={stream_move_15:.2f}% move60={stream_move_60:.2f}% "
                 f"ticks15={stream_ticks_15} buy={stream_buy_ratio:.0%}",
+                trend_note,
                 ignition_note,
                 support_note,
             ],
@@ -323,7 +360,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "focus": f"{lead_market or 'KRW-BTC'} trend ignition long. Trail instead of fixed early take-profit.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
-            "notes": reasons + [ignition_note, support_note, "RSI is treated as momentum context, not an automatic sell signal."],
+            "notes": reasons + [trend_note, ignition_note, support_note, "RSI is treated as momentum context, not an automatic sell signal."],
         }
 
     if soft_overheat and discovery_entry_ok and stance != "DEFENSE":

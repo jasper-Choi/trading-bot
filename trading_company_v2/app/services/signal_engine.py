@@ -650,6 +650,110 @@ def detect_pullback_entry(
     }
 
 
+def summarize_trend_following_context(candles: list[dict[str, Any]]) -> dict[str, Any]:
+    """15m chart trend gate: trade fast only when the higher-timeframe path is up."""
+    empty = {
+        "trend_follow_score": 0.0,
+        "trend_alignment": "unknown",
+        "trend_entry_allowed": False,
+        "ema_stack_bullish": False,
+        "price_above_trend_ema": False,
+        "trend_slope_pct": 0.0,
+        "trend_reasons": ["not enough candles for trend-following context"],
+    }
+    if len(candles) < 36:
+        return empty
+
+    closes = [float(item["close"]) for item in candles]
+    highs = [float(item.get("high") or item["close"]) for item in candles]
+    lows = [float(item.get("low") or item["close"]) for item in candles]
+    last_close = closes[-1]
+    ema8 = ema(closes, 8)
+    ema21 = ema(closes, 21)
+    ema34 = ema(closes, 34)
+    if not ema8 or not ema21 or not ema34 or ema21[-4] <= 0:
+        return empty
+
+    ema_stack_bullish = ema8[-1] > ema21[-1] > ema34[-1]
+    ema_stack_bearish = ema8[-1] < ema21[-1] < ema34[-1]
+    price_above_trend_ema = last_close > ema21[-1]
+    trend_slope_pct = ((ema21[-1] - ema21[-4]) / ema21[-4]) * 100
+    fast_slope_pct = ((ema8[-1] - ema8[-4]) / ema8[-4]) * 100 if ema8[-4] > 0 else 0.0
+    recent_high = max(highs[-8:])
+    prior_high = max(highs[-18:-8])
+    recent_low = min(lows[-8:])
+    prior_low = min(lows[-18:-8])
+    higher_high = recent_high >= prior_high * 0.998
+    higher_low = recent_low >= prior_low * 0.995
+    extension_pct = ((last_close - ema21[-1]) / ema21[-1]) * 100 if ema21[-1] > 0 else 0.0
+    pullback_zone = ema_stack_bullish and -0.7 <= extension_pct <= 2.6 and trend_slope_pct > -0.05
+    late_extension = extension_pct >= 5.0 or fast_slope_pct >= 2.8
+
+    score = 0.12
+    reasons: list[str] = []
+    if ema_stack_bullish:
+        score += 0.28
+        reasons.append("15m EMA8>EMA21>EMA34 bullish stack")
+    elif ema_stack_bearish:
+        score -= 0.18
+        reasons.append("15m EMA stack bearish")
+    else:
+        reasons.append("15m EMA stack mixed")
+
+    if price_above_trend_ema:
+        score += 0.16
+        reasons.append(f"price above EMA21 ({extension_pct:.2f}%)")
+    else:
+        score -= 0.08
+        reasons.append(f"price below EMA21 ({extension_pct:.2f}%)")
+
+    if trend_slope_pct >= 0.18:
+        score += 0.18
+        reasons.append(f"EMA21 rising {trend_slope_pct:.2f}%/3 bars")
+    elif trend_slope_pct >= 0.02:
+        score += 0.08
+        reasons.append(f"EMA21 slightly rising {trend_slope_pct:.2f}%/3 bars")
+    else:
+        score -= 0.10
+        reasons.append(f"EMA21 flat/falling {trend_slope_pct:.2f}%/3 bars")
+
+    if higher_high:
+        score += 0.10
+        reasons.append("recent structure made/held higher high")
+    if higher_low:
+        score += 0.10
+        reasons.append("recent structure held higher low")
+    if pullback_zone:
+        score += 0.10
+        reasons.append("trend pullback zone near EMA21")
+    if late_extension:
+        score -= 0.18
+        reasons.append("late extension risk vs EMA trend")
+
+    score = round(max(0.0, min(1.0, score)), 3)
+    if ema_stack_bearish and not price_above_trend_ema:
+        alignment = "downtrend"
+    elif late_extension and score >= 0.52:
+        alignment = "late_extension"
+    elif pullback_zone and score >= 0.52:
+        alignment = "pullback_long"
+    elif ema_stack_bullish and price_above_trend_ema and trend_slope_pct >= 0.02 and score >= 0.56:
+        alignment = "trend_long"
+    else:
+        alignment = "range"
+
+    return {
+        "trend_follow_score": score,
+        "trend_alignment": alignment,
+        "trend_entry_allowed": alignment in {"trend_long", "pullback_long"},
+        "ema_stack_bullish": ema_stack_bullish,
+        "price_above_trend_ema": price_above_trend_ema,
+        "trend_slope_pct": round(trend_slope_pct, 3),
+        "trend_extension_pct": round(extension_pct, 2),
+        "trend_reasons": reasons,
+    }
+
+
 def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(item["close"]) for item in candles]
     if len(closes) < 30:
@@ -731,6 +835,20 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         score += 0.03
         reasons.append(f"breakout weak ({bk_count}/4)")
 
+    # --- Chart trend-following overlay ---
+    trend = summarize_trend_following_context(candles)
+    trend_score = float(trend.get("trend_follow_score", 0.0) or 0.0)
+    trend_alignment = str(trend.get("trend_alignment", "unknown") or "unknown")
+    if trend_alignment in {"trend_long", "pullback_long"}:
+        score += 0.10 + (trend_score * 0.08)
+    elif trend_alignment == "late_extension":
+        score -= 0.08
+    elif trend_alignment == "downtrend":
+        score -= 0.16
+    else:
+        score -= 0.04
+    reasons.extend(list(trend.get("trend_reasons", []))[:3])
+
     # --- ICT overlay (FVG / OB / Liquidity Sweep / Kill Zone / BOS/CHoCH) ---
     ict = summarize_ict_signal(candles)
     score += float(ict.get("ict_score", 0.0) or 0.0)
@@ -763,6 +881,14 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "rsi_reset_confirmed": bool(bk.get("rsi_reset_confirmed", False)),
         "rsi_bearish_divergence": bool(bk.get("rsi_bearish_divergence", False)),
         "rsi_extreme": bool(bk.get("rsi_extreme", False)),
+        "trend_follow_score": trend_score,
+        "trend_alignment": trend_alignment,
+        "trend_entry_allowed": bool(trend.get("trend_entry_allowed", False)),
+        "ema_stack_bullish": bool(trend.get("ema_stack_bullish", False)),
+        "price_above_trend_ema": bool(trend.get("price_above_trend_ema", False)),
+        "trend_slope_pct": float(trend.get("trend_slope_pct", 0.0) or 0.0),
+        "trend_extension_pct": float(trend.get("trend_extension_pct", 0.0) or 0.0),
+        "trend_reasons": list(trend.get("trend_reasons", [])),
         "ict_score": float(ict.get("ict_score", 0.0) or 0.0),
         "kill_zone_active": bool(ict.get("kill_zone_active")),
         "kill_zone_name": ict.get("kill_zone_name"),

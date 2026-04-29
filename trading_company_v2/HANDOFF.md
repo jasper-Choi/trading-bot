@@ -986,3 +986,39 @@ python walk_forward.py
 - Keep high-return trend targets open, but stop giving back early +1% moves to near-breakeven.
 - Penalize weak ignition patterns earlier so the bot does not repeatedly enter the same low-quality setup.
 - Improve expectancy by reducing average loss and preserving partial wins without moving to futures leverage yet.
+
+## 28. Crypto Chart Trend-Following Gate Patch (2026-04-29)
+
+### Completed
+
+- Added `summarize_trend_following_context()` in `app/services/signal_engine.py`.
+  - Uses 15m EMA8 / EMA21 / EMA34 stack, EMA21 slope, price location, higher-high / higher-low structure, and extension risk.
+  - Produces:
+    - `trend_follow_score`
+    - `trend_alignment` (`trend_long`, `pullback_long`, `range`, `downtrend`, `late_extension`)
+    - `trend_entry_allowed`
+    - `trend_slope_pct`
+    - `trend_extension_pct`
+    - `trend_reasons`
+- `summarize_crypto_signal()` now applies the chart-trend overlay before ICT scoring.
+  - Uptrend or first-pullback structure boosts score.
+  - Downtrend, range, and late-extension structures reduce score.
+- `CryptoDeskAgent` now ranks candidates with explicit chart-trend weight.
+  - Combined score is now more trend-following aligned:
+    - chart/swing signal
+    - trend-follow score
+    - 1m micro timing
+    - orderbook flow
+    - BTC backdrop
+    - discovery/backtest weight
+  - Candidates carry all trend fields into `/scanner-data`, dashboard payloads, and recommendation planning.
+- `build_crypto_plan()` now treats chart trend as the first gate for new long entries.
+  - Fast 1m/stream triggers are only allowed when 15m trend is `trend_long` or `pullback_long`.
+  - Direct, stream, micro, discovery, ignition, and pullback entries all require `trend_entry_allowed`.
+  - If chart trend is `range`, `downtrend`, or `late_extension`, the bot returns `watchlist_only` with an explicit chart-trend reason.
+
+### Intent
+
+- Make the bot a clearer chart trend-following system instead of a loose hybrid momentum scanner.
+- Keep fast response speed, but only react aggressively in the direction of a confirmed 15m trend.
+- Reduce failed-ignition trades caused by chasing 1m/orderbook bounces inside weak or non-trending chart structure.
