@@ -239,7 +239,18 @@ def _local_day_utc_bounds_iso(day: str) -> tuple[str, str]:
 def _extract_order_meta(action: str, rationale: list) -> dict:
     meta = rationale[0] if rationale and isinstance(rationale[0], dict) else {}
     normalized = {
+        "symbol": str(meta.get("symbol", "") or ""),
+        "reference_price": float(meta.get("reference_price", 0.0) or 0.0),
         "notional_pct": float(meta.get("notional_pct", 0.0) or 0.0),
+        "combined_score": float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0),
+        "signal_score": float(meta.get("signal_score", 0.0) or 0.0),
+        "micro_score": float(meta.get("micro_score", 0.0) or 0.0),
+        "orderbook_score": float(meta.get("orderbook_score", 0.0) or 0.0),
+        "orderbook_bid_ask_ratio": float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0),
+        "pullback_score": float(meta.get("pullback_score", 0.0) or 0.0),
+        "stream_score": float(meta.get("stream_score", 0.0) or 0.0),
+        "bias": str(meta.get("bias", "") or ""),
+        "entry_path": str(meta.get("entry_path", action) or action),
         "status": str(meta.get("status", "idle") or "idle"),
         "pnl_estimate_pct": float(meta.get("pnl_estimate_pct", 0.0) or 0.0),
     }
@@ -247,6 +258,60 @@ def _extract_order_meta(action: str, rationale: list) -> dict:
         normalized["status"] = "idle"
         normalized["pnl_estimate_pct"] = 0.0
     return normalized
+
+
+def _paper_trade_payload(position: PaperPositionRecord, meta: dict | None = None) -> dict:
+    meta = meta or {}
+    notional_pct = float(meta.get("notional_pct", 0.0) or _size_to_notional(position.size))
+    return {
+        "desk": position.desk,
+        "symbol": position.symbol,
+        "action": position.action,
+        "size": position.size,
+        "opened_at": position.opened_at,
+        "closed_at": position.closed_at,
+        "entry_price": position.entry_price,
+        "current_price": position.current_price,
+        "exit_price": position.exit_price,
+        "pnl_pct": position.pnl_pct,
+        "peak_pnl_pct": position.peak_pnl_pct,
+        "closed_reason": position.closed_reason,
+        "focus": position.focus,
+        "notional_pct": notional_pct,
+        "capital_krw": settings.paper_capital_krw,
+        "combined_score": float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0),
+        "signal_score": float(meta.get("signal_score", 0.0) or 0.0),
+        "micro_score": float(meta.get("micro_score", 0.0) or 0.0),
+        "orderbook_score": float(meta.get("orderbook_score", meta.get("orderbook_bid_ask_ratio", 0.0)) or 0.0),
+        "pullback_score": float(meta.get("pullback_score", 0.0) or 0.0),
+        "stream_score": float(meta.get("stream_score", 0.0) or 0.0),
+        "bias": str(meta.get("bias", "") or ""),
+        "entry_path": str(meta.get("entry_path", position.action) or position.action),
+    }
+
+
+def _notify_trade_entry(payload: dict) -> None:
+    def _send() -> None:
+        try:
+            from app.notifier import notifier
+            notifier.send_trade_entry(payload)
+        except Exception as exc:
+            print(f"[notifier] trade entry alert failed: {exc}")
+
+    import threading
+    threading.Thread(target=_send, name="telegram-trade-entry", daemon=True).start()
+
+
+def _notify_trade_exit(payload: dict, reason: str) -> None:
+    def _send() -> None:
+        try:
+            from app.notifier import notifier
+            notifier.send_trade_exit(payload, reason)
+        except Exception as exc:
+            print(f"[notifier] trade exit alert failed: {exc}")
+
+    import threading
+    threading.Thread(target=_send, name="telegram-trade-exit", daemon=True).start()
 
 
 def _build_price_lookup(market_snapshot: dict) -> dict[tuple[str, str], float]:
@@ -401,6 +466,8 @@ def _symbol_performance_stats(positions: list[PaperPositionRecord]) -> list[dict
 
 
 def _close_position(position: PaperPositionRecord, reason: str) -> None:
+    if position.status == "closed":
+        return
     position.status = "closed"
     position.closed_at = utcnow_iso()
     if position.desk == "crypto":
@@ -409,6 +476,7 @@ def _close_position(position: PaperPositionRecord, reason: str) -> None:
     else:
         position.exit_price = position.current_price
     position.closed_reason = reason
+    _notify_trade_exit(_paper_trade_payload(position), reason)
 
 
 _db_initialized = False
@@ -569,6 +637,7 @@ def _fetch_zombie_prices(pos_pairs: list[tuple[str, str]], price_lookup: dict[tu
 def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> None:
     init_db()
     price_lookup = _build_price_lookup(market_snapshot)
+    opened_alerts: list[dict] = []
 
     # Read (desk, symbol) pairs first, close session, THEN do HTTP calls outside any DB lock
     with SessionLocal() as _rdb:
@@ -670,23 +739,27 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             if (order.desk, symbol) in existing_open_keys:
                 continue
             entry_price = _paper_entry_price(reference_price, symbol, order.created_at) if order.desk == "crypto" else reference_price
-            db.add(
-                PaperPositionRecord(
-                    desk=order.desk,
-                    symbol=symbol,
-                    status="open",
-                    action=order.action,
-                    size=order.size,
-                    opened_at=order.created_at,
-                    entry_price=entry_price,
-                    current_price=reference_price,
-                    pnl_pct=0.0,
-                    peak_pnl_pct=0.0,
-                    cycles_open=0,
-                    focus=order.focus,
-                )
+            position = PaperPositionRecord(
+                desk=order.desk,
+                symbol=symbol,
+                status="open",
+                action=order.action,
+                size=order.size,
+                opened_at=order.created_at,
+                entry_price=entry_price,
+                current_price=reference_price,
+                pnl_pct=0.0,
+                peak_pnl_pct=0.0,
+                cycles_open=0,
+                focus=order.focus,
             )
+            db.add(
+                position
+            )
+            opened_alerts.append(_paper_trade_payload(position, meta))
         db.commit()
+    for payload in opened_alerts:
+        _notify_trade_entry(payload)
 
 
 def load_crypto_rapid_guard_symbols() -> list[str]:

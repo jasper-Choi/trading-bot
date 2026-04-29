@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime, timezone
 import hashlib
 import time
 from typing import Any
@@ -49,6 +50,125 @@ class TelegramNotifier:
             self.last_error = str(exc)
             print(f"[notifier] telegram send failed: {self.last_error}")
             return False
+
+    @staticmethod
+    def _value(payload: Any, key: str, default: Any = None) -> Any:
+        if isinstance(payload, dict):
+            return payload.get(key, default)
+        return getattr(payload, key, default)
+
+    @staticmethod
+    def _float(value: Any, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _size_to_notional(size: Any) -> float:
+        try:
+            return float(str(size or "0").replace("x", ""))
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def _fmt_krw(value: float) -> str:
+        sign = "+" if value > 0 else ""
+        return f"{sign}{round(value):,}원"
+
+    @staticmethod
+    def _fmt_pct(value: float) -> str:
+        sign = "+" if value > 0 else ""
+        return f"{sign}{value:.2f}%"
+
+    @staticmethod
+    def _holding_minutes(opened_at: Any, closed_at: Any = None) -> int:
+        try:
+            opened = datetime.fromisoformat(str(opened_at).replace("Z", "+00:00"))
+            if opened.tzinfo is None:
+                opened = opened.replace(tzinfo=timezone.utc)
+            if closed_at:
+                closed = datetime.fromisoformat(str(closed_at).replace("Z", "+00:00"))
+                if closed.tzinfo is None:
+                    closed = closed.replace(tzinfo=timezone.utc)
+            else:
+                closed = datetime.now(timezone.utc)
+            return max(round((closed - opened).total_seconds() / 60), 0)
+        except Exception:
+            return 0
+
+    def _position_notional_krw(self, position: Any) -> int:
+        explicit = self._float(self._value(position, "notional_krw", 0.0))
+        if explicit > 0:
+            return round(explicit)
+        notional_pct = self._float(self._value(position, "notional_pct", 0.0))
+        if notional_pct <= 0:
+            notional_pct = self._size_to_notional(self._value(position, "size", "0.00x"))
+        capital = self._float(
+            self._value(position, "capital_krw", settings.live_capital_krw or settings.paper_capital_krw),
+            float(settings.paper_capital_krw),
+        )
+        return round(capital * notional_pct)
+
+    def send_trade_entry(self, position: Any) -> bool:
+        if not self.enabled:
+            return False
+        symbol = str(self._value(position, "symbol", "UNKNOWN") or "UNKNOWN")
+        action = str(self._value(position, "action", "entry") or "entry")
+        size = str(self._value(position, "size", "") or "")
+        notional_krw = self._position_notional_krw(position)
+        entry_price = self._float(self._value(position, "entry_price", self._value(position, "current_price", 0.0)))
+        focus = str(self._value(position, "focus", "") or "")
+        entry_path = str(self._value(position, "entry_path", action) or action)
+        combined = self._float(self._value(position, "combined_score", self._value(position, "signal_score", 0.0)))
+        signal = self._float(self._value(position, "signal_score", 0.0))
+        micro = self._float(self._value(position, "micro_score", 0.0))
+        orderbook = self._float(self._value(position, "orderbook_score", self._value(position, "orderbook_bid_ask_ratio", 0.0)))
+        bias = str(self._value(position, "bias", "") or "")
+        pullback = self._float(self._value(position, "pullback_score", 0.0))
+        stream = self._float(self._value(position, "stream_score", 0.0))
+        opened_at = str(self._value(position, "opened_at", "") or "")
+        lines = [
+            f"🟢 진입 | {symbol}",
+            f"사이즈: {notional_krw:,}원{f' ({size})' if size else ''} | 가격: {entry_price:,.8g}",
+            f"경로: {entry_path}",
+            f"Combined: {combined:.3f} | Signal: {signal:.2f} | Micro: {micro:.2f} | OB: {orderbook:.2f}",
+            f"Bias: {bias or 'n/a'} | Pullback: {pullback:.2f} | Stream: {stream:.2f}",
+        ]
+        if focus:
+            lines.append(f"Focus: {focus[:160]}")
+        return self._send_keyed(
+            f"trade_entry:{symbol}:{action}:{opened_at}",
+            "\n".join(lines),
+            cooldown_seconds=0,
+            suppress_duplicate_seconds=24 * 60 * 60,
+        )
+
+    def send_trade_exit(self, position: Any, exit_reason: str) -> bool:
+        if not self.enabled:
+            return False
+        symbol = str(self._value(position, "symbol", "UNKNOWN") or "UNKNOWN")
+        pnl_pct = self._float(self._value(position, "pnl_pct", self._value(position, "realized_pnl_pct", 0.0)))
+        notional_krw = self._position_notional_krw(position)
+        pnl_krw = self._float(self._value(position, "pnl_krw", notional_krw * pnl_pct / 100))
+        peak_pnl = self._float(self._value(position, "peak_pnl_pct", pnl_pct))
+        opened_at = str(self._value(position, "opened_at", "") or "")
+        closed_at = str(self._value(position, "closed_at", "") or "")
+        holding = self._holding_minutes(opened_at, closed_at)
+        today_pnl_krw = self._value(position, "today_pnl_krw", None)
+        lines = [
+            f"🔴 청산 | {symbol}",
+            f"PnL: {self._fmt_pct(pnl_pct)} ({self._fmt_krw(pnl_krw)}) | 보유: {holding}분",
+            f"사유: {exit_reason} | Peak: {self._fmt_pct(peak_pnl)}",
+        ]
+        if today_pnl_krw is not None:
+            lines.append(f"누적 오늘: {self._fmt_krw(self._float(today_pnl_krw))}")
+        return self._send_keyed(
+            f"trade_exit:{symbol}:{exit_reason}:{opened_at}:{closed_at}",
+            "\n".join(lines),
+            cooldown_seconds=0,
+            suppress_duplicate_seconds=24 * 60 * 60,
+        )
 
     @staticmethod
     def _fingerprint(text: str) -> str:

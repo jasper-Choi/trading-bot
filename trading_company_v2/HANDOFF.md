@@ -854,3 +854,36 @@ python walk_forward.py
   - detect fast entries before a full 1m candle closes
   - keep late-chase protection intact
   - move closer to arbitrage-style reaction speed while still using strategy confirmation and risk gates
+
+## 23. Telegram Trade Journal Patch (2026-04-29)
+
+### Completed
+
+- `app/notifier.py`
+  - Added `send_trade_entry(position)`.
+  - Added `send_trade_exit(position, exit_reason)`.
+  - Entry alert includes symbol, KRW notional, entry price, entry path, Combined/Signal/Micro/OB, Bias, Pullback, Stream, and Focus.
+  - Exit alert includes symbol, PnL%, estimated KRW PnL, holding minutes, exit reason, and peak PnL.
+  - Trade alerts use keyed duplicate suppression so each position event sends once.
+  - Existing error/risk/ops cooldown behavior is unchanged.
+- `app/agents/execution_agent.py`
+  - Order rationale meta now carries trade-journal scoring fields:
+    - `combined_score`
+    - `signal_score`
+    - `micro_score`
+    - `orderbook_score`
+    - `orderbook_bid_ask_ratio`
+    - `pullback_score`
+    - `stream_score`
+    - `bias`
+    - `entry_path`
+- `app/core/state_store.py`
+  - `sync_paper_positions()` sends an entry alert after a new paper position is committed.
+  - `_close_position()` sends an exit alert when a paper position closes.
+  - Telegram sends run in daemon threads so Telegram HTTP latency does not hold DB write locks.
+
+### Operating Note
+
+- Alerts are tied to the `paper_positions` lifecycle because the dashboard and current performance accounting are paper-position centric.
+- This gives one entry alert and one exit alert per bot position without double-alerting the parallel live/paper ledgers.
+- If live broker fill alerts are needed later, add a separate live-fill journal off `live_order_log` to avoid duplicate Telegram messages for the same trade.

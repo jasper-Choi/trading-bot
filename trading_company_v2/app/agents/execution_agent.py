@@ -497,6 +497,15 @@ class ExecutionAgent(BaseAgent):
             "notional_pct": notional_pct,
             "btc_corr_15m": round(btc_corr_15m, 3),
             "signal_freshness": round(signal_freshness, 3),
+            "combined_score": round(float(plan.get("signal_score", 0.0) or 0.0), 3),
+            "signal_score": round(float(plan.get("signal_score", 0.0) or 0.0), 3),
+            "micro_score": round(float(plan.get("micro_score", 0.0) or 0.0), 3),
+            "orderbook_score": round(float(plan.get("orderbook_score", 0.0) or 0.0), 3),
+            "orderbook_bid_ask_ratio": round(float(plan.get("orderbook_bid_ask_ratio", 0.0) or 0.0), 3),
+            "pullback_score": round(float(plan.get("pullback_score", 0.0) or 0.0), 3),
+            "stream_score": round(float(plan.get("stream_score", 0.0) or 0.0), 3),
+            "bias": str(plan.get("desk_bias", plan.get("bias", "")) or ""),
+            "entry_path": action,
             "status": "planned"
             if action in actionable_entries
             and notional_pct > 0
