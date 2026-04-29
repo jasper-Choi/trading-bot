@@ -1282,3 +1282,27 @@ python walk_forward.py
 - Stop entering just because a coin looks good on a scanner.
 - Enter only when the move is actually starting on 1m/tick/volume confirmation.
 - Reduce losing trade count first; increase frequency later only after the win rate recovers.
+
+## 37. Trend Trigger Exit Wiring (2026-04-29)
+
+### Diagnosis
+
+- The system was called trend-following, but exits were mostly stop/no-lift/time based.
+- Bullish entry signals used trend context, but bearish trend triggers were not persisted in order metadata and therefore could not drive paper exits.
+- This made the bot behave like "enter on uptrend candidate, exit on loss control" instead of "enter on uptrend trigger, exit on downtrend trigger."
+
+### Completed
+
+- Execution metadata now persists trend trigger fields:
+  - `trend_alignment`, `trend_entry_allowed`, `trend_follow_score`
+  - `choch_bearish`, `bos_bearish`, `stream_reversal`
+  - `rsi_bearish_divergence`
+- Paper position sync now closes open crypto positions on bearish trend triggers:
+  - `trend_reversal_exit` for bearish CHoCH/BOS/stream reversal
+  - `downtrend_exit` for explicit downtrend alignment
+  - `trend_invalid_exit` when trend permission is gone and score is weak
+  - `bearish_divergence_exit` when RSI divergence appears while PnL is not safely positive
+
+### Intent
+
+- Make the strategy match the intended model: enter on confirmed bullish trend trigger, exit when the bullish trend trigger fails or flips bearish.

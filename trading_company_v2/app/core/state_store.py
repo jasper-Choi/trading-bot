@@ -411,6 +411,10 @@ _STOP_LIKE_PAPER_REASONS = {
     "rapid_reversal_loss",
     "reversal_loss_exit",
     "rapid_repeat_symbol_failure",
+    "trend_reversal_exit",
+    "downtrend_exit",
+    "trend_invalid_exit",
+    "bearish_divergence_exit",
 }
 
 
@@ -429,6 +433,34 @@ def _has_recent_failed_paper_symbol(db: Session, position: PaperPositionRecord) 
         if row.closed_reason in _STOP_LIKE_PAPER_REASONS and float(row.pnl_pct or 0.0) <= -0.30:
             return True
     return False
+
+
+def _build_cycle_signal_meta(paper_orders: list[PaperOrder]) -> dict[str, dict]:
+    meta_by_symbol: dict[str, dict] = {}
+    for order in paper_orders:
+        meta = _extract_order_meta(order.action, order.rationale)
+        symbol = str(meta.get("symbol", "") or order.symbol or "").strip()
+        if symbol:
+            meta_by_symbol[symbol] = meta
+    return meta_by_symbol
+
+
+def _crypto_trend_exit_reason(meta: dict, pnl_pct: float) -> str | None:
+    """Translate bearish trend triggers into exits for open crypto positions."""
+    if not meta:
+        return None
+    trend_alignment = str(meta.get("trend_alignment", "") or "")
+    trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
+    trend_allowed = bool(meta.get("trend_entry_allowed", False))
+    if bool(meta.get("choch_bearish", False)) or bool(meta.get("bos_bearish", False)) or bool(meta.get("stream_reversal", False)):
+        return "trend_reversal_exit"
+    if trend_alignment == "downtrend":
+        return "downtrend_exit"
+    if bool(meta.get("rsi_bearish_divergence", False)) and pnl_pct <= 0.25:
+        return "bearish_divergence_exit"
+    if not trend_allowed and trend_score < 0.40 and pnl_pct <= 0.10:
+        return "trend_invalid_exit"
+    return None
 
 
 def _ensure_schema() -> None:
@@ -726,6 +758,7 @@ def _fetch_zombie_prices(pos_pairs: list[tuple[str, str]], price_lookup: dict[tu
 def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> None:
     init_db()
     price_lookup = _build_price_lookup(market_snapshot)
+    cycle_signal_meta = _build_cycle_signal_meta(paper_orders)
     opened_alerts: list[dict] = []
 
     # Read (desk, symbol) pairs first, close session, THEN do HTTP calls outside any DB lock
@@ -792,6 +825,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 # against fast-cycle noise and ensures "failed ignition" really means failed.
                 elif (no_lift_reason := _crypto_no_lift_exit_reason(minutes_open, peak_pnl, position.pnl_pct)):
                     _close_position(position, no_lift_reason)
+                elif trend_exit_reason := _crypto_trend_exit_reason(cycle_signal_meta.get(position.symbol, {}), position.pnl_pct):
+                    _close_position(position, trend_exit_reason)
                 elif minutes_open >= fast_fail_minutes and position.pnl_pct <= -0.60 and peak_pnl <= 0.10:
                     _close_position(position, "failed_ignition")
                 elif trail_giveback and position.pnl_pct <= protect_level:
