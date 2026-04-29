@@ -1307,6 +1307,39 @@ python walk_forward.py
 
 - Make the strategy match the intended model: enter on confirmed bullish trend trigger, exit when the bullish trend trigger fails or flips bearish.
 
+## 39. Trend Exit Minimum Hold Time Fix (2026-04-30)
+
+### Diagnosis
+
+- Post-reset sample: 43 closed, 5 wins / 38 losses, total PnL -11.85%.
+- **28 of 43 (65%) closed via `trend_invalid_exit`** with peak_pnl=0.0 and losses of -0.09 to -0.46%.
+- Root cause: `_crypto_trend_exit_reason()` had no minimum hold time.
+  With 8-second strategy cycles, positions entered on `trend_entry_allowed=True`
+  were closed 8-16 seconds later when the EMA boundary caused `trend_entry_allowed`
+  to flip False. This produced pure fee+slippage losses on every such trade.
+- The trend gate is for ENTRIES, not for exits. An open position needs time to develop.
+
+### Completed
+
+- Added `minutes_open` parameter to `_crypto_trend_exit_reason()` in `app/core/state_store.py`.
+- Updated the call site at line ~828 to pass the already-computed `minutes_open`.
+- New hold-time ladder:
+  - CHoCH/BOS structural reversal: 2 min minimum
+  - Stream reversal: 3 min + pnl <= +0.20% (very noisy 15s metric)
+  - Confirmed 15m downtrend: 3 min minimum (EMA lags at boundary)
+  - RSI bearish divergence: 3 min minimum
+  - Trend invalid (no permission + weak score): 4 min + pnl <= -0.20%
+    (the -0.20% threshold explicitly excludes pure fee/slippage exits)
+- Hard stops (-2.0%), profit trail, no-lift exits, and rapid guard are unchanged.
+
+### Intent
+
+- Give trades 2-4 minutes to develop before trend-based exits fire.
+- Reduce the frequency of sub-15-second closures that only produce fee losses.
+- Preserve meaningful exits (CHoCH, confirmed downtrend, RSI divergence) with adequate confirmation time.
+
+---
+
 ## 38. Clean Trade Data Baseline Reset (2026-04-29)
 
 ### Completed
