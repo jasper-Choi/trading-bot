@@ -392,6 +392,8 @@ def _crypto_no_lift_exit_reason(minutes_open: float, peak_pnl: float, pnl_pct: f
     """Close crypto entries that never prove momentum."""
     if minutes_open >= 10.0 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
         return "rapid_no_lift" if rapid else "no_lift_exit"
+    if minutes_open >= 10.0 and 0.15 <= peak_pnl < 0.80 and pnl_pct <= -0.35:
+        return "rapid_reversal_loss" if rapid else "reversal_loss_exit"
     if minutes_open >= 18.0 and peak_pnl <= 0.10 and pnl_pct <= 0.05:
         return "rapid_flat_timeout" if rapid else "flat_no_lift_exit"
     return None

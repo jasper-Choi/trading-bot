@@ -14,6 +14,8 @@ STOP_LIKE_EXIT_REASONS = {
     "rapid_failed_start",
     "rapid_no_lift",
     "no_lift_exit",
+    "rapid_reversal_loss",
+    "reversal_loss_exit",
     "rapid_flat_timeout",
     "flat_no_lift_exit",
 }

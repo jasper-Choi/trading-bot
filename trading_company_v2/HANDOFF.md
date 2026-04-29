@@ -1191,6 +1191,7 @@ python walk_forward.py
 
 - Added no-lift crypto exits.
   - `rapid_no_lift`: close after 10 minutes if peak PnL stayed `<= +0.05%` and current PnL is `<= -0.30%`.
+  - `rapid_reversal_loss`: close after 10 minutes if a position only reached `+0.15%` to `+0.80%` but then reverses to `<= -0.35%`.
   - `no_lift_exit`: same rule in the regular position sync path.
   - `rapid_flat_timeout` / `flat_no_lift_exit`: close after 18 minutes if peak stayed `<= +0.10%` and current PnL is not above `+0.05%`.
 - Tightened failed ignition.
