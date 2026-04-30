@@ -62,6 +62,10 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
     combined = _float(candidate.get("combined_score", candidate.get("signal_score", 0.0)))
     trend = _float(candidate.get("trend_follow_score", 0.0))
     stream_score = _float(stream.get("stream_score", 0.0))
+    if str(candidate.get("entry_profile", "") or "") == "range_impulse":
+        if combined >= 0.62 and stream_score >= 0.82:
+            return 0.06
+        return 0.04
     if combined >= 0.86 and trend >= 0.82 and stream_score >= 0.76:
         return 0.12
     if combined >= 0.78 and stream_score >= 0.70:
@@ -85,6 +89,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         return False
     combined = _float(item.get("combined_score", item.get("signal_score", 0.0)))
     trend_score = _float(item.get("trend_follow_score", 0.0))
+    chart_score = _float(item.get("signal_score", 0.0))
     trend_alignment = str(item.get("trend_alignment", "") or "")
     orderbook_bid_ask = _float(item.get("orderbook_bid_ask_ratio", 0.0))
     signal_freshness = _float(item.get("signal_freshness", 1.0), 1.0)
@@ -92,6 +97,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     micro_vwap_gap = _float(item.get("micro_vwap_gap_pct", 0.0))
     recent_change = _float(item.get("recent_change_pct", 0.0))
     burst_change = _float(item.get("burst_change_pct", 0.0))
+    change_rate = _float(item.get("change_rate", 0.0))
     ema_gap = _float(item.get("ema_gap_pct", 0.0))
     rsi = item.get("rsi")
     rsi_value = _float(rsi, 0.0) if rsi is not None else 0.0
@@ -124,7 +130,28 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and orderbook_bid_ask >= 1.20
         and trend_extension_pct <= 2.0
     )
-    return common_guards and (standard_ok or early_ok)
+    # RANGING impulse path:
+    # In box/ranging markets, scanner leaders can show weak orderbook at the snapshot
+    # but still be worth arming if the chart impulse is strong. We do NOT open on the
+    # snapshot; we only subscribe them for a stricter tick-ignition trigger.
+    range_impulse_ok = (
+        trend_alignment in {"trend_long", "pullback_long", "range"}
+        and chart_score >= 0.74
+        and combined >= 0.38
+        and max(recent_change, change_rate) >= 3.0
+        and signal_freshness >= 0.55
+        and trend_extension_pct <= 7.0
+        and rsi_value <= 82.0
+        and micro_vwap_gap <= 4.2
+        and not bool(item.get("rsi_bearish_divergence", False))
+    )
+    if common_guards and (standard_ok or early_ok):
+        item["entry_profile"] = "trend_ignition"
+        return True
+    if range_impulse_ok:
+        item["entry_profile"] = "range_impulse"
+        return True
+    return False
 
 
 def refresh_hot_entry_candidates(state: dict[str, Any] | None = None, force: bool = False) -> dict[str, dict[str, Any]]:
@@ -313,14 +340,14 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         "trend_alignment": str(candidate.get("trend_alignment", "") or ""),
         "trend_entry_allowed": bool(candidate.get("trend_entry_allowed", False)),
         "bias": str(candidate.get("bias", "") or ""),
-        "entry_path": "tick_ignition_entry",
+        "entry_path": str(candidate.get("entry_profile", "tick_ignition_entry") or "tick_ignition_entry"),
         "status": "planned",
     }
     order = PaperOrder(
         desk="crypto",
         action="probe_longs",
         focus=(
-            f"{symbol} tick ignition entry - combined {combined:.2f}, "
+            f"{symbol} {meta['entry_path']} tick entry - combined {combined:.2f}, "
             f"stream {stream_score:.2f}, move15 {_float(stream.get('stream_move_15s_pct', 0.0)):.2f}%."
         ),
         size=f"{size_notional:.2f}x",
@@ -404,16 +431,28 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
     move_60 = _float(stream.get("stream_move_60s_pct", 0.0))
     move_5 = _float(stream.get("stream_move_5s_pct", 0.0))
     buy_ratio = _float(stream.get("stream_buy_ratio_15s", 0.0))
-    ignition = (
-        bool(stream.get("stream_fresh", False))
-        and not bool(stream.get("stream_reversal", False))
-        and ticks_15 >= 3
-        and stream_score >= 0.70
-        and move_5 >= 0.08
-        and 0.28 <= move_15 <= 0.85
-        and move_60 >= -0.12
-        and buy_ratio >= 0.60
-    )
+    entry_profile = str(candidate.get("entry_profile", "trend_ignition") or "trend_ignition")
+    stream_ok = bool(stream.get("stream_fresh", False)) and not bool(stream.get("stream_reversal", False))
+    if entry_profile == "range_impulse":
+        ignition = (
+            stream_ok
+            and ticks_15 >= 4
+            and stream_score >= 0.76
+            and move_5 >= 0.12
+            and 0.35 <= move_15 <= 1.15
+            and move_60 >= -0.08
+            and buy_ratio >= 0.64
+        )
+    else:
+        ignition = (
+            stream_ok
+            and ticks_15 >= 3
+            and stream_score >= 0.70
+            and move_5 >= 0.08
+            and 0.28 <= move_15 <= 0.85
+            and move_60 >= -0.12
+            and buy_ratio >= 0.60
+        )
     if not ignition:
         return {**guard_summary, "entry_opened": 0, "reason": "entry_wait_tick_ignition"}
     return {**guard_summary, **_open_hot_entry(symbol, price, candidate, stream)}

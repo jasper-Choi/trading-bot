@@ -1792,3 +1792,35 @@ python walk_forward.py
   - reject exhausted/late 1m candidates using `micro_move_3_pct` and `micro_vwap_gap_pct`
   - tick ignition now requires stronger stream score, 5s lift, 15s move band, and 60%+ buy pressure
 - Intent: keep the new tick-speed architecture, but stop treating weak micro-bursts as valid trend ignition.
+
+## 47. RANGING Impulse Tick-Scalp Arming (2026-04-30)
+
+### Diagnosis
+
+- Scanner examples such as HYPER/BIO/SPK can show a strong chart impulse while the global regime is still `RANGING`.
+- The old entry path treated weak snapshot orderbook / low combined score as a full block.
+- That avoids some bad chases, but it also misses fast range-break impulses where the correct action is not immediate entry, but tick-level arming.
+
+### Completed
+
+- `app/services/hot_path_guard.py`
+  - Added `range_impulse` entry profile for scanner leaders in ranging markets.
+  - A candidate can now be armed even with weak snapshot OB if:
+    - chart signal is strong (`signal_score >= 0.74`)
+    - recent/change-rate impulse is positive (`>= 3%`)
+    - RSI is not extreme (`<= 82`)
+    - signal is fresh and not bearish-divergent
+  - Range impulse candidates do not open from the cycle snapshot.
+  - They require stricter websocket trade confirmation:
+    - 4+ ticks in 15s
+    - stream score >= 0.76
+    - 5s lift >= 0.12%
+    - 15s lift between 0.35% and 1.15%
+    - 64%+ buy pressure
+  - Entry size is intentionally smaller (`0.04x` to `0.06x`) because range impulses have higher false-positive risk.
+
+### Intent
+
+- Do not hard-block all `RANGING` markets.
+- Treat ranging leaders as scalp candidates only when live tick flow proves continuation.
+- Preserve the user's objective: active trend-following behavior without blindly chasing already-extended candles.
