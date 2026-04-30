@@ -1463,3 +1463,30 @@ python walk_forward.py
   - trend-trigger metadata persistence
   - bearish trend-trigger exits
 - Use the next 20-30 post-reset trades as the first real sample for win rate, average PnL, and exit-reason analysis.
+
+## 40. Mobile Scanner/Performance Navigation (2026-04-30)
+
+### Diagnosis
+
+- `/scanner` and `/performance` existed, but mobile users could miss them because the main dashboard only exposed them in the crowded top header.
+- The scanner/performance pages also had no persistent mobile navigation back to the other operator pages.
+
+### Completed
+
+- Added fixed mobile bottom navigation to:
+  - dashboard `/`
+  - scanner `/scanner`
+  - performance `/performance`
+- Added mobile header wrapping for the dashboard so scanner/performance buttons do not get pushed off-screen.
+- Added mobile scanner layout improvements:
+  - bottom padding for the fixed nav
+  - horizontally scrollable filter chips
+  - two-column market overview cards
+
+### Intent
+
+- Make the three core operator screens reachable on mobile at all times:
+  - Dashboard
+  - Scanner
+  - Performance
+- Keep mobile monitoring usable while preserving the existing desktop layout.

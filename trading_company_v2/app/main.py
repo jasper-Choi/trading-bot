@@ -2427,8 +2427,12 @@ def _performance_html() -> str:  # noqa: PLR0915
     .reason-list{display:flex;flex-direction:column;gap:8px}
     .reason{display:grid;grid-template-columns:minmax(130px,1fr) 70px 70px 80px;gap:8px;align-items:center;border:1px solid rgba(36,48,71,.75);border-radius:12px;padding:10px;background:rgba(13,22,38,.75);font-size:.82rem}
     .reason b{overflow:hidden;text-overflow:ellipsis}
+    .mobile-bottom-nav{display:none}
+    .mobile-bottom-nav a{color:var(--muted);text-decoration:none;font-size:.74rem;font-weight:900;text-align:center;padding:9px 6px;border-radius:12px;border:1px solid transparent}
+    .mobile-bottom-nav a.active{color:var(--blue);background:rgba(112,183,255,.10);border-color:rgba(112,183,255,.3)}
     @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.wide{grid-column:1/-1}.streak-grid{grid-template-columns:repeat(2,1fr)}.top{align-items:flex-start;flex-direction:column}.nav{width:100%}.btn{flex:1;text-align:center}}
-    @media(max-width:560px){.grid{grid-template-columns:1fr}.metric-value{font-size:1.35rem}.reason{grid-template-columns:1fr 54px 58px 64px}.bar-row{grid-template-columns:80px 1fr 56px}.app{padding:14px 10px 50px}.streak-grid{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:700px){.mobile-bottom-nav{position:fixed;left:10px;right:10px;bottom:10px;z-index:50;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:7px;border:1px solid var(--line);border-radius:18px;background:rgba(8,17,31,.96);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(10px)}}
+    @media(max-width:560px){.grid{grid-template-columns:1fr}.metric-value{font-size:1.35rem}.reason{grid-template-columns:1fr 54px 58px 64px}.bar-row{grid-template-columns:80px 1fr 56px}.app{padding:14px 10px 96px}.streak-grid{grid-template-columns:repeat(2,1fr)}}
   </style>
 </head>
 <body>
@@ -2444,6 +2448,12 @@ def _performance_html() -> str:  # noqa: PLR0915
         <a class="btn" href="/performance?format=json">JSON</a>
       </nav>
     </header>
+
+    <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+      <a href="/">Dashboard</a>
+      <a href="/scanner">Scanner</a>
+      <a class="active" href="/performance">Performance</a>
+    </nav>
 
     <!-- 봇 상태 바 -->
     <div class="bot-bar" id="bot-bar">
@@ -2941,9 +2951,13 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     .cand-chips{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
     .cand-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
     .cand-score{font-family:var(--mono);font-size:.78rem;color:var(--muted)}
+    .mobile-bottom-nav{display:none}
+    .mobile-bottom-nav a{color:var(--muted);text-decoration:none;font-size:.74rem;font-weight:800;text-align:center;padding:9px 6px;border-radius:12px;border:1px solid transparent}
+    .mobile-bottom-nav a.active{color:var(--blue);background:var(--blue-bg);border-color:rgba(88,166,255,.25)}
     /* ── 반응형 ── */
     @media(max-width:900px){.pnl-hero{grid-template-columns:repeat(2,1fr)}.desk-grid{grid-template-columns:repeat(3,1fr)}.briefing-grid{grid-template-columns:1fr}}
-    @media(max-width:600px){.app{padding:12px 12px 72px}.topbar{padding:10px 12px}.pnl-hero{grid-template-columns:repeat(2,1fr)}.pnl-value{font-size:1.2rem}.desk-grid{grid-template-columns:repeat(3,1fr)}.desk-card{padding:10px}.desk-action{font-size:.8rem}.desk-focus{display:none}.status-bar{gap:6px}.s-pill{font-size:.75rem;padding:5px 10px}.btn{padding:6px 12px;font-size:.78rem}.briefing-head{display:block}.briefing-badge{display:inline-flex;margin-top:8px}.briefing-panel{padding:12px}}
+    @media(max-width:700px){.mobile-bottom-nav{position:fixed;left:10px;right:10px;bottom:10px;z-index:50;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:7px;border:1px solid var(--border);border-radius:18px;background:rgba(13,17,23,.96);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(10px)}}
+    @media(max-width:600px){.app{padding:12px 12px 96px}.topbar{padding:10px 12px;align-items:stretch;flex-direction:column}.topbar-left,.topbar-right{width:100%}.topbar-right{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.topbar-right .time-stamp{grid-column:1/-1}.topbar-right .btn{text-align:center;justify-content:center}.pnl-hero{grid-template-columns:repeat(2,1fr)}.pnl-value{font-size:1.2rem}.desk-grid{grid-template-columns:repeat(3,1fr)}.desk-card{padding:10px}.desk-action{font-size:.8rem}.desk-focus{display:none}.status-bar{gap:6px}.s-pill{font-size:.75rem;padding:5px 10px}.btn{padding:6px 12px;font-size:.78rem}.briefing-head{display:block}.briefing-badge{display:inline-flex;margin-top:8px}.briefing-panel{padding:12px}}
     @media(max-width:400px){.pnl-hero,.desk-grid{grid-template-columns:repeat(2,1fr)}.desk-grid .desk-card:last-child{grid-column:span 2}}
   </style>
 </head>
@@ -2965,6 +2979,12 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
       <button class="btn btn-primary" id="cycle-btn" onclick="runCycle()">사이클 실행</button>
     </div>
   </header>
+
+  <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+    <a class="active" href="/">Dashboard</a>
+    <a href="/scanner">Scanner</a>
+    <a href="/performance">Performance</a>
+  </nav>
 
   <!-- 경보 배너 -->
   <div class="alert-bar" id="alert-bar"></div>
@@ -3526,6 +3546,20 @@ def _scanner_html() -> str:
 
     /* ── 하단 여백 ── */
     .spacer{height:40px}
+    .mobile-bottom-nav{display:none}
+    .mobile-bottom-nav a{color:var(--muted);text-decoration:none;font-size:.74rem;font-weight:900;text-align:center;padding:9px 6px;border-radius:12px;border:1px solid transparent}
+    .mobile-bottom-nav a.active{color:var(--blue);background:var(--blue-bg);border-color:var(--blue-bd)}
+    @media(max-width:700px){
+      .wrap{padding:12px 10px 96px}
+      .hdr{align-items:stretch}
+      .hdr-left,.hdr-right{width:100%}
+      .hdr-right{display:grid;grid-template-columns:1fr}
+      .back-btn{justify-content:center}
+      .filter-row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+      .chip{white-space:nowrap}
+      .market-bar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+      .mobile-bottom-nav{position:fixed;left:10px;right:10px;bottom:10px;z-index:50;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:7px;border:1px solid var(--border);border-radius:18px;background:rgba(13,17,23,.96);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(10px)}
+    }
   </style>
 </head>
 <body>
@@ -3544,6 +3578,12 @@ def _scanner_html() -> str:
       <a class="back-btn" href="/">← 대시보드</a>
     </div>
   </div>
+
+  <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+    <a href="/">Dashboard</a>
+    <a class="active" href="/scanner">Scanner</a>
+    <a href="/performance">Performance</a>
+  </nav>
 
   <!-- 시장 개요 바 -->
   <div class="market-bar" id="market-bar">
