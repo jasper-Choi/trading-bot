@@ -35,6 +35,7 @@ _ENTRY_CANDIDATE_TTL_SECONDS = 18.0
 _ENTRY_COOLDOWN_SECONDS = 75.0
 _MAX_HOT_OPEN_POSITIONS = 5
 _MAX_HOT_OPEN_NOTIONAL = 1.15
+_ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES = False
 _HOT_RECENT_FAILURE_REASONS = {
     "rapid_tick_failed_start",
     "rapid_obvious_trend_fail",
@@ -184,10 +185,10 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     if common_guards and (standard_ok or early_ok):
         item["entry_profile"] = "trend_ignition"
         return True
-    if obvious_trend_ok:
+    if obvious_trend_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
         item["entry_profile"] = "obvious_trend"
         return True
-    if range_impulse_ok:
+    if range_impulse_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
         item["entry_profile"] = "range_impulse"
         return True
     return False

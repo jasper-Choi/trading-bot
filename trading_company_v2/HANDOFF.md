@@ -1913,3 +1913,33 @@ python walk_forward.py
   - if an obvious-trend entry shows no lift and reaches `-0.35%` after 15s, close
   - if it reaches `-0.70%` at any time, close
   - intent: obvious trends must prove immediate continuation; otherwise the bot exits before a full stop.
+
+## 49. Pause Failed Experimental Impulse Entries + Weighted PnL (2026-04-30)
+
+### Why
+
+- After the clean tick-only reset, six new paper trades closed with negative expectancy:
+  - CHIP `-1.34%`, KAT `-0.88%`, DOGE `-0.88%`, BIO `-0.04%`, ZETA `-0.44%`, HYPER `-0.84%`.
+  - Most came from experimental `obvious_trend` / `range_impulse` hot entries.
+- Dashboard showed roughly `-4.4%`, but those entries used small sizes (`0.03x-0.12x`).
+- The old dashboard/risk summary summed raw trade returns, so a `0.04x` trade losing `-1%` displayed as `-1%` capital damage instead of `-0.04%`.
+
+### Completed
+
+- `app/services/hot_path_guard.py`
+  - Added `_ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES = False`.
+  - `obvious_trend` and `range_impulse` profiles are paused after the failed first sample.
+  - Standard `trend_ignition` and `early_ok` tick entries remain available.
+
+- `app/core/state_store.py`
+  - Daily realized/unrealized PnL is now capital-weighted by notional.
+  - Desk stats are now capital-weighted by notional.
+  - Close-reason and symbol performance `pnl_pct` are now capital-weighted.
+  - Raw trade-return sums are retained as `raw_pnl_pct` for diagnostics.
+  - All-time quick performance compounding now uses `realized_pnl_pct * notional_pct`.
+
+### Intent
+
+- Do not abandon tick trading; stop the unproven impulse profiles that were immediately bleeding.
+- Evaluate fresh trades using actual capital impact, not raw trade-return summation.
+- Rebuild the next sample window from stricter tick entries only.

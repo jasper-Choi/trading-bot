@@ -535,24 +535,35 @@ def _build_desk_stats(positions: list[PaperPositionRecord]) -> dict[str, dict]:
             "wins": wins,
             "losses": losses,
             "win_rate": round((wins / len(closed)) * 100, 1) if closed else 0.0,
-            "realized_pnl_pct": round(sum(row.pnl_pct for row in closed), 2),
-            "unrealized_pnl_pct": round(sum(row.pnl_pct for row in open_rows), 2),
+            "realized_pnl_pct": round(_weighted_paper_pnl_pct(closed), 2),
+            "unrealized_pnl_pct": round(_weighted_paper_pnl_pct(open_rows), 2),
             "open_notional_pct": round(sum(_size_to_notional(row.size) for row in open_rows), 2),
         }
     return stats
+
+
+def _paper_row_notional(row: PaperPositionRecord) -> float:
+    notional = float(getattr(row, "notional_pct", 0.0) or 0.0)
+    return notional if notional > 0 else _size_to_notional(row.size)
+
+
+def _weighted_paper_pnl_pct(rows: list[PaperPositionRecord]) -> float:
+    """Capital P&L contribution, not raw trade-return summation."""
+    return sum(float(row.pnl_pct or 0.0) * _paper_row_notional(row) for row in rows)
 
 
 def _close_reason_stats(closed_rows: list[PaperPositionRecord]) -> dict[str, dict]:
     stats: dict[str, dict] = {}
     for row in closed_rows:
         reason = row.closed_reason or "unknown"
-        bucket = stats.setdefault(reason, {"count": 0, "wins": 0, "losses": 0, "pnl_pct": 0.0})
+        bucket = stats.setdefault(reason, {"count": 0, "wins": 0, "losses": 0, "pnl_pct": 0.0, "raw_pnl_pct": 0.0})
         bucket["count"] += 1
         if row.pnl_pct > 0:
             bucket["wins"] += 1
         else:
             bucket["losses"] += 1
-        bucket["pnl_pct"] = round(float(bucket["pnl_pct"]) + row.pnl_pct, 2)
+        bucket["pnl_pct"] = round(float(bucket["pnl_pct"]) + row.pnl_pct * _paper_row_notional(row), 2)
+        bucket["raw_pnl_pct"] = round(float(bucket["raw_pnl_pct"]) + row.pnl_pct, 2)
     return stats
 
 
@@ -578,11 +589,13 @@ def _symbol_performance_stats(positions: list[PaperPositionRecord]) -> list[dict
                 "wins": 0,
                 "losses": 0,
                 "pnl_pct": 0.0,
+                "raw_pnl_pct": 0.0,
                 "stop_like_count": 0,
             },
         )
         bucket["count"] += 1
-        bucket["pnl_pct"] = round(float(bucket["pnl_pct"]) + row.pnl_pct, 2)
+        bucket["pnl_pct"] = round(float(bucket["pnl_pct"]) + row.pnl_pct * _paper_row_notional(row), 2)
+        bucket["raw_pnl_pct"] = round(float(bucket["raw_pnl_pct"]) + row.pnl_pct, 2)
         if row.pnl_pct > 0:
             bucket["wins"] += 1
         else:
@@ -1189,11 +1202,12 @@ def load_daily_summary() -> dict:
             losses = sum(1 for row in closed_today if row.pnl_pct <= 0)
             closed_count = len(closed_today)
             win_rate = round((wins / closed_count) * 100, 1) if closed_count else 0.0
-            realized_pnl = round(sum(row.pnl_pct for row in closed_today), 2)
-            unrealized_pnl = round(sum(row.pnl_pct for row in open_positions), 2)
+            realized_pnl = round(_weighted_paper_pnl_pct(closed_today), 2)
+            unrealized_pnl = round(_weighted_paper_pnl_pct(open_positions), 2)
             expectancy_pct = round(realized_pnl / closed_count, 2) if closed_count else 0.0
             # Cumulative (all-time) — compounding base
-            cumulative_realized_pnl = round(sum(row.pnl_pct for row in all_closed), 2)
+            # Capital-weighted P&L keeps the dashboard aligned with actual exposure.
+            cumulative_realized_pnl = round(_weighted_paper_pnl_pct(all_closed), 2)
             cumulative_wins = sum(1 for row in all_closed if row.pnl_pct > 0)
             cumulative_losses = sum(1 for row in all_closed if row.pnl_pct <= 0)
             cumulative_closed = len(all_closed)
@@ -2005,7 +2019,8 @@ def load_performance_quick_stats() -> dict:
         peak = 1.0
         max_drawdown = 0.0
         for row in closed:
-            equity *= 1 + row.realized_pnl_pct / 100
+            notional = float(row.notional_pct or 1.0)
+            equity *= 1 + (row.realized_pnl_pct * notional) / 100
             if equity > peak:
                 peak = equity
             dd = (equity - peak) / peak * 100
@@ -2013,7 +2028,7 @@ def load_performance_quick_stats() -> dict:
                 max_drawdown = dd
 
         cumulative_realized_pnl_pct = round((equity - 1.0) * 100, 2)
-        total_unrealized_pnl_pct = round(sum(p.unrealized_pnl_pct for p in open_pos), 2)
+        total_unrealized_pnl_pct = round(sum(p.unrealized_pnl_pct * float(p.notional_pct or 1.0) for p in open_pos), 2)
 
         return {
             "total_trades": total_trades,
