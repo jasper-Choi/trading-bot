@@ -14,6 +14,8 @@ STOP_LIKE_EXIT_REASONS = {
     "stop_hit",
     "rapid_stop_hit",
     "early_failure",
+    "rapid_tick_failed_start",
+    "rapid_range_impulse_fail",
     "rapid_failed_start",      # 4 min + peak ≤ 0.05% + pnl ≤ -0.75%  (never showed life)
     "rapid_repeat_symbol_failure",  # repeated failure on same symbol
 }
@@ -811,8 +813,12 @@ class ExecutionAgent(BaseAgent):
             and (trend_allowed or trend_early or trend_score >= 0.76)
             and trend_score >= 0.68
             and chart_score >= 0.76
-            and combined >= 0.34
-            and max(recent_change, burst_change, change_rate) >= 2.0
+            and recent_change >= -0.50
+            and (
+                combined >= 0.52
+                or (chart_score >= 0.90 and trend_score >= 0.90 and max(change_rate, burst_change) >= 3.0)
+                or (chart_score >= 0.76 and change_rate >= 20.0 and rsi_float <= 70.0)
+            )
             and freshness >= 0.50
             and trend_extension <= 8.5
             and micro_vwap_gap <= 6.5

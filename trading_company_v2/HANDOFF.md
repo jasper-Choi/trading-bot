@@ -1896,3 +1896,13 @@ python walk_forward.py
   - bearish divergence,
   - excessive trend extension,
   - immediate live stream reversal.
+
+### Follow-up Tuning
+
+- First `obvious_trend` samples proved the entry path works, but BIO/DRIFT showed the next failure mode:
+  - a coin can still have a large 15m/day move while the most recent 15m window has already turned down.
+- Tightened the obvious-trend definition:
+  - require current `recent_change_pct >= -0.50`
+  - require either combined >= `0.52`, very strong chart/trend, or a high-change low-RSI exception
+  - tick validation now requires stream score >= `0.35`, non-negative 15s move, and buy ratio >= `48%`
+- Added recent-failure cooldown for hot entries after `rapid_tick_failed_start` / `rapid_range_impulse_fail`.

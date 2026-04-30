@@ -35,6 +35,13 @@ _ENTRY_CANDIDATE_TTL_SECONDS = 18.0
 _ENTRY_COOLDOWN_SECONDS = 75.0
 _MAX_HOT_OPEN_POSITIONS = 5
 _MAX_HOT_OPEN_NOTIONAL = 1.15
+_HOT_RECENT_FAILURE_REASONS = {
+    "rapid_tick_failed_start",
+    "rapid_range_impulse_fail",
+    "rapid_failed_start",
+    "rapid_stop_hit",
+    "rapid_repeat_symbol_failure",
+}
 
 
 def _minutes_open(opened_at: str) -> float:
@@ -162,7 +169,12 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         trend_alignment in {"trend_long", "pullback_long", "range"}
         and (bool(item.get("trend_entry_allowed", False)) or bool(item.get("trend_early_entry", False)) or trend_score >= 0.76)
         and chart_score >= 0.76
-        and max(recent_change, change_rate, burst_change) >= 2.0
+        and recent_change >= -0.50
+        and (
+            combined >= 0.52
+            or (chart_score >= 0.90 and trend_score >= 0.90 and max(change_rate, burst_change) >= 3.0)
+            or (chart_score >= 0.76 and change_rate >= 20.0 and rsi_value <= 70.0)
+        )
         and signal_freshness >= 0.50
         and trend_extension_pct <= 8.5
         and micro_vwap_gap <= 6.5
@@ -408,6 +420,19 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         ).scalar_one_or_none()
         if existing is not None:
             return {"entry_opened": 0, "reason": "entry_already_open"}
+        recent_failure = db.execute(
+            select(PaperPositionRecord)
+            .where(
+                PaperPositionRecord.status == "closed",
+                PaperPositionRecord.desk == "crypto",
+                PaperPositionRecord.symbol == symbol,
+            )
+            .order_by(PaperPositionRecord.id.desc())
+            .limit(2)
+        ).scalars().all()
+        for row in recent_failure:
+            if row.closed_reason in _HOT_RECENT_FAILURE_REASONS and float(row.pnl_pct or 0.0) <= -0.30:
+                return {"entry_opened": 0, "reason": "entry_recent_failure_cooldown"}
         db.add(
             PaperOrderRecord(
                 created_at=order.created_at,
@@ -471,9 +496,10 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         ignition = (
             stream_ok
             and ticks_15 >= 1
-            and move_15 >= -0.18
+            and stream_score >= 0.35
+            and move_15 >= 0.00
             and move_60 >= -0.28
-            and buy_ratio >= 0.42
+            and buy_ratio >= 0.48
         )
     elif entry_profile == "range_impulse":
         ignition = (

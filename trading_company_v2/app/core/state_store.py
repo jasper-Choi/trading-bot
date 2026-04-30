@@ -411,6 +411,8 @@ _STOP_LIKE_PAPER_REASONS = {
     "stop_hit",
     "rapid_stop_hit",
     "early_failure",
+    "rapid_tick_failed_start",
+    "rapid_range_impulse_fail",
     "rapid_failed_start",
     "rapid_repeat_symbol_failure",
 }
