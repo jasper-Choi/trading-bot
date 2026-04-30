@@ -1587,3 +1587,33 @@ python walk_forward.py
 - Change the operating model from "minute-candle reaction" toward "candle-filtered, tick-driven trend following."
 - Keep 15m/1m candles as market structure filters, but let live trade ticks handle fast invalidation.
 - Cut dead entries earlier before they drift into larger `rapid_failed_start` or hard-stop losses.
+
+## 43. Event-Driven Tick Guard Callback (2026-04-30)
+
+### Direction Lock
+
+- Strategy doctrine from the user:
+  - Auto-trading + quant trading direction.
+  - Trend following is the base.
+  - Candles are analysis/filter data, not execution delay tools.
+  - Entry/profit protection/exit must react on tick/second/millisecond-level signals as much as the current Upbit/Python stack allows.
+
+### Completed
+
+- `app/services/upbit_stream_cache.py`
+  - Added trade callback registration.
+  - Websocket trade ticks now emit callbacks after the tick is written into the in-process cache.
+  - Callbacks are executed outside the stream lock so strategy code does not block cache writes.
+- `app/runtime.py`
+  - Registered an event-driven tick guard callback during crypto runtime startup.
+  - The callback:
+    - checks only symbols with open crypto positions,
+    - refreshes the active symbol set at most once per second,
+    - throttles per symbol to avoid DB overload,
+    - calls `rapid_guard_crypto_positions({symbol: tick_price})` directly from the trade event.
+
+### Intent
+
+- Move from "rapid guard every few seconds" to "rapid guard on actual trade ticks."
+- Keep candle cycles for broader model updates, but let live Upbit trade events drive immediate exit/protection checks.
+- This is not true exchange-colocated HFT, but it is the correct next step within the current Oracle VM + Python + Upbit websocket architecture.

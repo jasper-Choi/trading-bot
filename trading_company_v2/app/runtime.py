@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from datetime import datetime
 
@@ -9,7 +10,54 @@ from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
-from app.services.upbit_stream_cache import start_upbit_ticker_stream, upbit_stream_status
+from app.services.upbit_stream_cache import register_trade_callback, start_upbit_ticker_stream, upbit_stream_status
+
+
+_tick_guard_lock = threading.Lock()
+_tick_guard_symbols: set[str] = set()
+_tick_guard_symbols_loaded_at = 0.0
+_tick_guard_last_by_symbol: dict[str, float] = {}
+
+
+def _active_crypto_guard_symbols_cached() -> set[str]:
+    global _tick_guard_symbols, _tick_guard_symbols_loaded_at
+    now = time.monotonic()
+    if now - _tick_guard_symbols_loaded_at <= 1.0:
+        return _tick_guard_symbols
+    try:
+        _tick_guard_symbols = set(load_crypto_rapid_guard_symbols())
+        _tick_guard_symbols_loaded_at = now
+    except Exception as exc:
+        print(f"[runtime] tick guard symbol refresh failed: {exc}")
+    return _tick_guard_symbols
+
+
+def _run_crypto_tick_guard_from_trade(row: dict) -> None:
+    """Event-driven guard: react to trade ticks instead of waiting for the next sleep poll."""
+    symbol = str(row.get("market") or "").strip()
+    price = float(row.get("trade_price") or 0.0)
+    if not symbol or price <= 0:
+        return
+    if symbol not in _active_crypto_guard_symbols_cached():
+        return
+    now = time.monotonic()
+    last = _tick_guard_last_by_symbol.get(symbol, 0.0)
+    if now - last < 0.45:
+        return
+    _tick_guard_last_by_symbol[symbol] = now
+    if not _tick_guard_lock.acquire(blocking=False):
+        return
+    try:
+        summary = rapid_guard_crypto_positions({symbol: price})
+        if summary.get("paper_closed") or summary.get("live_closed"):
+            print(
+                "[runtime] crypto tick guard closed "
+                f"{symbol} paper={summary.get('paper_closed', 0)} live={summary.get('live_closed', 0)}"
+            )
+    except Exception as exc:
+        print(f"[runtime] crypto tick guard failed: {exc}")
+    finally:
+        _tick_guard_lock.release()
 
 
 def _determine_runtime_interval_seconds(session: dict) -> int:
@@ -57,6 +105,7 @@ def _sleep_with_rapid_guards(interval_seconds: int) -> None:
 def run_company_loop() -> None:
     orchestrator = CompanyOrchestrator()
     if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
+        register_trade_callback(_run_crypto_tick_guard_from_trade)
         started = start_upbit_ticker_stream()
         status = upbit_stream_status()
         print(

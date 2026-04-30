@@ -26,6 +26,7 @@ REQUEST_TIMEOUT = 8
 _lock = threading.Lock()
 _ticker_cache: dict[str, dict[str, Any]] = {}
 _trade_ticks: dict[str, deque[dict[str, Any]]] = {}
+_trade_callbacks: list[Callable[[dict[str, Any]], None]] = []
 _stream_thread: threading.Thread | None = None
 _stream_started_at = 0.0
 _stream_error = ""
@@ -132,6 +133,24 @@ def _append_trade_tick(row: dict[str, Any]) -> None:
         ticks.popleft()
 
 
+def register_trade_callback(callback: Callable[[dict[str, Any]], None]) -> None:
+    """Register a lightweight callback fired after each websocket trade tick."""
+    with _lock:
+        if callback not in _trade_callbacks:
+            _trade_callbacks.append(callback)
+
+
+def _emit_trade_callbacks(row: dict[str, Any]) -> None:
+    with _lock:
+        callbacks = list(_trade_callbacks)
+    for callback in callbacks:
+        try:
+            callback(dict(row))
+        except Exception as exc:
+            global _stream_error
+            _stream_error = f"trade callback failed: {exc}"[:240]
+
+
 async def _stream_loop(markets_provider: Callable[[], list[str]]) -> None:
     global _stream_error
     backoff = 1.0
@@ -164,6 +183,7 @@ async def _stream_loop(markets_provider: Callable[[], list[str]]) -> None:
                 _stream_error = ""
                 backoff = 1.0
                 async for raw in ws:
+                    callback_row: dict[str, Any] | None = None
                     if isinstance(raw, bytes):
                         raw = raw.decode("utf-8")
                     try:
@@ -190,11 +210,14 @@ async def _stream_loop(markets_provider: Callable[[], list[str]]) -> None:
                             cached.setdefault("source", "upbit_ws")
                             _ticker_cache[row["market"]] = cached
                             _append_trade_tick(row)
+                            callback_row = row
                         else:
                             row = _normalize_ticker_message(payload)
                             if row is None:
                                 continue
                             _ticker_cache[row["market"]] = row
+                    if callback_row is not None:
+                        _emit_trade_callbacks(callback_row)
         except Exception as exc:
             _stream_error = str(exc)[:240]
             await asyncio.sleep(min(backoff, 30.0))
