@@ -1674,3 +1674,45 @@ python walk_forward.py
 
 - Hot-path latency metrics now reset on runtime startup, so old pre-cache samples do not pollute the new latency window.
 - Each metric event includes `recorded_at_epoch` for freshness checks.
+
+## 46. Tick-Ignition Entry Hot Path (2026-04-30)
+
+### Diagnosis
+
+- The bot had tick-driven exits, but entries were still mostly cycle-driven.
+- That means a 15m/1m candidate could be detected, debated, ordered, and only then opened, creating the user's concern:
+  - "uptrend trigger was found, but the bot enters late"
+  - "then reversal is detected late and the trade exits in loss"
+- Correct doctrine:
+  - candles/agents prepare the candidate and risk context
+  - websocket trade ticks fire the actual entry only when live momentum ignites
+
+### Completed
+
+- `app/services/hot_path_guard.py`
+  - Added an in-memory tick-entry candidate cache.
+  - `refresh_hot_entry_candidates(state)` extracts prepared crypto candidates from the latest `crypto_desk.all_candidates`.
+  - Candidates must pass structural filters:
+    - `trend_entry_allowed`
+    - `trend_alignment` in `trend_long` / `pullback_long`
+    - `trend_follow_score >= 0.70`
+    - `combined_score >= 0.64`
+    - orderbook bid/ask support
+    - no bearish RSI divergence / hard overheat
+  - Added `hot_runtime_symbols()` so websocket callbacks monitor both open positions and prepared entry candidates.
+  - Added `hot_process_crypto_tick(symbol, price)`:
+    - exits are checked first through the memory guard
+    - if no position is open, a prepared candidate can open only on fresh tick ignition
+    - tick ignition requires fresh stream, positive 15s move, non-negative 60s context, enough ticks, and buy pressure
+  - Tick entries write the DB only once, at actual open time, and open the paper position directly without calling the heavier full sync path.
+
+- `app/runtime.py`
+  - Runtime now refreshes hot entry candidates after every orchestrator cycle.
+  - Websocket callbacks now call `hot_process_crypto_tick()`.
+  - Hot-path metrics now mark both `opened` and `closed` events.
+
+### Intent
+
+- Move entry timing from "cycle says buy" to "cycle prepares, tick confirms, tick opens."
+- Keep the existing agent stack as the strategic filter while making execution timing closer to a dedicated execution engine.
+- This is still paper/live-stack Python, not colocated HFT, but it removes the largest architectural mismatch between trend detection and fast execution.

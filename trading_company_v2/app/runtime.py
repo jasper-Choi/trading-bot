@@ -8,7 +8,12 @@ from app.config import settings
 from app.core.state_store import rapid_guard_crypto_positions
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
-from app.services.hot_path_guard import hot_guard_crypto_tick, hot_guard_symbols, refresh_hot_crypto_positions
+from app.services.hot_path_guard import (
+    hot_process_crypto_tick,
+    hot_runtime_symbols,
+    refresh_hot_crypto_positions,
+    refresh_hot_entry_candidates,
+)
 from app.services.hot_path_metrics import record_hot_path_event, reset_hot_path_metrics
 from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
@@ -27,7 +32,7 @@ def _active_crypto_guard_symbols_cached() -> set[str]:
     if now - _tick_guard_symbols_loaded_at <= 1.0:
         return _tick_guard_symbols
     try:
-        _tick_guard_symbols = hot_guard_symbols()
+        _tick_guard_symbols = hot_runtime_symbols()
         _tick_guard_symbols_loaded_at = now
     except Exception as exc:
         print(f"[runtime] tick guard symbol refresh failed: {exc}")
@@ -74,27 +79,35 @@ def _run_crypto_tick_guard_from_trade(row: dict) -> None:
         return
     try:
         guard_started = time.perf_counter()
-        summary = hot_guard_crypto_tick(symbol, price)
+        summary = hot_process_crypto_tick(symbol, price)
         guard_ms = round((time.perf_counter() - guard_started) * 1000, 3)
         closed = bool(summary.get("paper_closed") or summary.get("live_closed"))
+        opened = bool(summary.get("entry_opened"))
         guard_reason = str(summary.get("reason") or ("closed" if closed else "checked"))
         record_hot_path_event(
             {
                 "symbol": symbol,
-                "reason": "closed" if closed else guard_reason,
+                "reason": "closed" if closed else "opened" if opened else guard_reason,
                 "dispatch_ms": round((started_epoch - tick_epoch) * 1000, 3),
                 "guard_ms": guard_ms,
                 "total_ms": round((time.perf_counter() - started_perf) * 1000, 3),
                 "closed": closed,
+                "opened": opened,
                 "guard_reason": guard_reason,
                 "paper_closed": int(summary.get("paper_closed", 0) or 0),
                 "live_closed": int(summary.get("live_closed", 0) or 0),
+                "entry_opened": int(summary.get("entry_opened", 0) or 0),
             }
         )
         if summary.get("paper_closed") or summary.get("live_closed"):
             print(
                 "[runtime] crypto tick guard closed "
                 f"{symbol} paper={summary.get('paper_closed', 0)} live={summary.get('live_closed', 0)}"
+            )
+        if summary.get("entry_opened"):
+            print(
+                "[runtime] crypto tick guard opened "
+                f"{symbol} size={summary.get('size', 0)} score={summary.get('combined_score', 0)}"
             )
     except Exception as exc:
         record_hot_path_event(
@@ -124,7 +137,8 @@ def _determine_runtime_interval_seconds(session: dict) -> int:
 
 
 def _run_crypto_rapid_guard() -> dict:
-    symbols = list(hot_guard_symbols())
+    positions = refresh_hot_crypto_positions()
+    symbols = list(positions)
     if not symbols:
         return {"checked": 0, "paper_closed": 0, "live_closed": 0}
     prices = get_upbit_ticker_prices(symbols)
@@ -160,6 +174,7 @@ def run_company_loop() -> None:
     if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
         reset_hot_path_metrics()
         refresh_hot_crypto_positions(force=True)
+        refresh_hot_entry_candidates({}, force=True)
         register_trade_callback(_run_crypto_tick_guard_from_trade)
         started = start_upbit_ticker_stream()
         status = upbit_stream_status()
@@ -180,6 +195,9 @@ def run_company_loop() -> None:
         try:
             result = orchestrator.run_cycle()
             state = result["state"]
+            if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
+                refresh_hot_crypto_positions(force=True)
+                refresh_hot_entry_candidates(state, force=True)
             session = state.get("session_state", {}) or current_session_snapshot()
             interval_seconds = _determine_runtime_interval_seconds(session)
             print(
