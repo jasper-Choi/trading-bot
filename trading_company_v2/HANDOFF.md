@@ -1669,3 +1669,8 @@ python walk_forward.py
 - Remove DB reads/writes from the normal per-tick path.
 - Reduce guard latency and make the architecture closer to a dedicated execution engine.
 - Keep DB persistence for actual state-changing events so the dashboard and paper/live tracking remain consistent.
+
+### Follow-up
+
+- Hot-path latency metrics now reset on runtime startup, so old pre-cache samples do not pollute the new latency window.
+- Each metric event includes `recorded_at_epoch` for freshness checks.

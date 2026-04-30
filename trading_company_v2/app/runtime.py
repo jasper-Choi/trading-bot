@@ -9,7 +9,7 @@ from app.core.state_store import rapid_guard_crypto_positions
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 from app.services.hot_path_guard import hot_guard_crypto_tick, hot_guard_symbols, refresh_hot_crypto_positions
-from app.services.hot_path_metrics import record_hot_path_event
+from app.services.hot_path_metrics import record_hot_path_event, reset_hot_path_metrics
 from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
 from app.services.upbit_stream_cache import register_trade_callback, start_upbit_ticker_stream, upbit_stream_status
@@ -158,6 +158,7 @@ def _sleep_with_rapid_guards(interval_seconds: int) -> None:
 def run_company_loop() -> None:
     orchestrator = CompanyOrchestrator()
     if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
+        reset_hot_path_metrics()
         refresh_hot_crypto_positions(force=True)
         register_trade_callback(_run_crypto_tick_guard_from_trade)
         started = start_upbit_ticker_stream()

@@ -65,10 +65,20 @@ def _flush_snapshot_locked(force: bool = False) -> None:
 
 def record_hot_path_event(event: dict[str, Any]) -> None:
     reason = str(event.get("reason") or "unknown")
+    event = {"recorded_at_epoch": time.time(), **dict(event)}
     with _lock:
-        _events.append(dict(event))
+        _events.append(event)
         _reason_counts[reason] += 1
         _flush_snapshot_locked()
+
+
+def reset_hot_path_metrics() -> None:
+    global _last_flush_monotonic
+    with _lock:
+        _events.clear()
+        _reason_counts.clear()
+        _last_flush_monotonic = 0.0
+        _flush_snapshot_locked(force=True)
 
 
 def read_hot_path_metrics() -> dict[str, Any]:
