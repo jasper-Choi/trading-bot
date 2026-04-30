@@ -1839,6 +1839,7 @@ python walk_forward.py
 - First live range impulse sample (`KRW-HYPER`) opened correctly but failed with no positive peak.
 - Added range-impulse-specific risk handling:
   - size reduced from `0.04x-0.06x` to `0.03x-0.04x`
-  - hard fail close at `-0.35%`
+  - no-lift fail close at `-0.25%` after 15s
+  - hard fail close at `-0.40%`
   - if peak reaches `+0.28%`, protect at roughly `peak - 0.35%`
 - Intent: keep scanning/arming fast movers, but make each failed range scalp cheap until the pattern proves positive expectancy.

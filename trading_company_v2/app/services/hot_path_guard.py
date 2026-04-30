@@ -269,7 +269,9 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         reason = ""
         if pnl_pct >= target_pct:
             reason = "rapid_target_hit"
-        elif is_range_impulse and pnl_pct <= -0.35:
+        elif is_range_impulse and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.25:
+            reason = "rapid_range_impulse_fail"
+        elif is_range_impulse and pnl_pct <= -0.40:
             reason = "rapid_range_impulse_fail"
         elif is_range_impulse and peak_pnl >= 0.28 and pnl_pct <= max(0.02, peak_pnl - 0.35):
             reason = "rapid_range_impulse_protect"

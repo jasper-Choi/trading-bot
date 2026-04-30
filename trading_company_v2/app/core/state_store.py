@@ -960,7 +960,11 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
                 paper_closed += 1
-            elif is_range_impulse and position.pnl_pct <= -0.35:
+            elif is_range_impulse and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.25:
+                closed_symbols.append((position.symbol, "rapid_range_impulse_fail"))
+                _close_position(position, "rapid_range_impulse_fail")
+                paper_closed += 1
+            elif is_range_impulse and position.pnl_pct <= -0.40:
                 closed_symbols.append((position.symbol, "rapid_range_impulse_fail"))
                 _close_position(position, "rapid_range_impulse_fail")
                 paper_closed += 1
