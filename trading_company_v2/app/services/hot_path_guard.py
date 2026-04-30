@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.core.models import PaperOrder
 from app.core.state_store import (
+    PaperOrderRecord,
     PaperPositionRecord,
     SessionLocal,
     _crypto_no_lift_exit_reason,
@@ -20,7 +21,6 @@ from app.core.state_store import (
     _position_thresholds,
     init_db,
     rapid_guard_crypto_positions,
-    save_paper_orders,
 )
 from app.services.upbit_stream_cache import summarize_stream_momentum
 
@@ -313,7 +313,6 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             f"stream buy {_float(stream.get('stream_buy_ratio_15s', 0.0)):.0%}, ticks15 {int(stream.get('stream_ticks_15s', 0) or 0)}",
         ],
     )
-    save_paper_orders([order])
     entry_price = _paper_entry_price(price, symbol, order.created_at)
     opened_payload: dict[str, Any] | None = None
     init_db()
@@ -327,6 +326,16 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         ).scalar_one_or_none()
         if existing is not None:
             return {"entry_opened": 0, "reason": "entry_already_open"}
+        db.add(
+            PaperOrderRecord(
+                created_at=order.created_at,
+                desk=order.desk,
+                action=order.action,
+                focus=order.focus,
+                size=order.size,
+                rationale=order.rationale,
+            )
+        )
         position = PaperPositionRecord(
             desk="crypto",
             symbol=symbol,
