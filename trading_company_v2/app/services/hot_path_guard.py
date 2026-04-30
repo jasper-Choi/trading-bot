@@ -63,9 +63,9 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
     trend = _float(candidate.get("trend_follow_score", 0.0))
     stream_score = _float(stream.get("stream_score", 0.0))
     if str(candidate.get("entry_profile", "") or "") == "range_impulse":
-        if combined >= 0.62 and stream_score >= 0.82:
-            return 0.06
-        return 0.04
+        if combined >= 0.62 and stream_score >= 0.84:
+            return 0.04
+        return 0.03
     if combined >= 0.86 and trend >= 0.82 and stream_score >= 0.76:
         return 0.12
     if combined >= 0.78 and stream_score >= 0.70:
@@ -219,6 +219,7 @@ def refresh_hot_crypto_positions(force: bool = False) -> dict[str, list[dict[str
                 "peak_pnl_pct": float(row.peak_pnl_pct or 0.0),
                 "opened_at": str(row.opened_at or ""),
                 "size": str(row.size or "0.00x"),
+                "focus": str(row.focus or ""),
             }
             if item["symbol"] and item["entry_price"] > 0:
                 next_cache.setdefault(item["symbol"], []).append(item)
@@ -264,9 +265,14 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
         protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
+        is_range_impulse = "range_impulse" in str(item.get("focus", "") or "")
         reason = ""
         if pnl_pct >= target_pct:
             reason = "rapid_target_hit"
+        elif is_range_impulse and pnl_pct <= -0.35:
+            reason = "rapid_range_impulse_fail"
+        elif is_range_impulse and peak_pnl >= 0.28 and pnl_pct <= max(0.02, peak_pnl - 0.35):
+            reason = "rapid_range_impulse_protect"
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
         else:

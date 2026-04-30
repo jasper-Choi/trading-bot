@@ -947,6 +947,7 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
             trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
             protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+            is_range_impulse = "range_impulse" in str(position.focus or "")
             minutes_open = 0.0
             try:
                 opened_dt = datetime.fromisoformat(str(position.opened_at).replace("Z", "+00:00"))
@@ -958,6 +959,14 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             if position.pnl_pct >= target_pct:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
+                paper_closed += 1
+            elif is_range_impulse and position.pnl_pct <= -0.35:
+                closed_symbols.append((position.symbol, "rapid_range_impulse_fail"))
+                _close_position(position, "rapid_range_impulse_fail")
+                paper_closed += 1
+            elif is_range_impulse and peak_pnl >= 0.28 and position.pnl_pct <= max(0.02, peak_pnl - 0.35):
+                closed_symbols.append((position.symbol, "rapid_range_impulse_protect"))
+                _close_position(position, "rapid_range_impulse_protect")
                 paper_closed += 1
             elif (
                 0.40 <= peak_pnl < 0.80

@@ -1833,3 +1833,12 @@ python walk_forward.py
   - no cycle entry,
   - candidate armed,
   - waiting for websocket trade ignition.
+
+### First Sample Tuning
+
+- First live range impulse sample (`KRW-HYPER`) opened correctly but failed with no positive peak.
+- Added range-impulse-specific risk handling:
+  - size reduced from `0.04x-0.06x` to `0.03x-0.04x`
+  - hard fail close at `-0.35%`
+  - if peak reaches `+0.28%`, protect at roughly `peak - 0.35%`
+- Intent: keep scanning/arming fast movers, but make each failed range scalp cheap until the pattern proves positive expectancy.
