@@ -50,6 +50,7 @@ from app.services.kis_broker import get_account_positions as get_kis_account_pos
 from app.services.kis_broker import get_order as get_kis_order
 from app.services.kis_broker import normalize_order_state as normalize_kis_order_state
 from app.services.broker_router import normalize_execution_mode
+from app.services.hot_path_metrics import read_hot_path_metrics
 from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_upbit_ticker_prices, get_us_daily_prices, get_us_data_status
 from app.services.recommendation_engine import build_crypto_plan, build_korea_plan, build_us_plan
 from app.services.upbit_broker import get_account_positions as get_upbit_account_positions
@@ -1522,6 +1523,11 @@ def access_map() -> dict:
             "public_url appears only when PUBLIC_BASE_URL is configured",
         ],
     }
+
+
+@app.get("/diagnostics/hot-path-latency")
+def hot_path_latency() -> dict:
+    return read_hot_path_metrics()
 
 
 @app.get("/state")
@@ -3567,6 +3573,7 @@ def _scanner_html() -> str:
       .market-bar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
       .mobile-bottom-nav{position:fixed;left:10px;right:10px;bottom:10px;z-index:50;display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:7px;border:1px solid var(--border);border-radius:18px;background:rgba(13,17,23,.96);box-shadow:0 14px 38px rgba(0,0,0,.45);backdrop-filter:blur(10px)}
     }
+
   </style>
 </head>
 <body>

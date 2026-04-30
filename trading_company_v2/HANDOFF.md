@@ -1617,3 +1617,27 @@ python walk_forward.py
 - Move from "rapid guard every few seconds" to "rapid guard on actual trade ticks."
 - Keep candle cycles for broader model updates, but let live Upbit trade events drive immediate exit/protection checks.
 - This is not true exchange-colocated HFT, but it is the correct next step within the current Oracle VM + Python + Upbit websocket architecture.
+
+## 44. Hot-Path Latency Instrumentation (2026-04-30)
+
+### Completed
+
+- Added `app/services/hot_path_metrics.py`.
+- Runtime tick guard now records:
+  - websocket trade dispatch delay (`dispatch_ms`)
+  - guard execution time (`guard_ms`)
+  - total tick-to-decision time (`total_ms`)
+  - event reason counts (`checked`, `closed`, `throttled`, `lock_busy`, `error`)
+- Metrics are written to:
+  - `data/hot_path_latency.json`
+- Added dashboard/API diagnostic endpoint:
+  - `/diagnostics/hot-path-latency`
+
+### Intent
+
+- Stop guessing where latency comes from.
+- Separate the bottlenecks:
+  - websocket dispatch delay
+  - Python guard/DB decision time
+  - later: order request and fill confirmation latency
+- Use this data to decide when the hot execution path must move from Python into a Rust/Go sidecar.

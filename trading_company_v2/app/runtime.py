@@ -8,6 +8,7 @@ from app.config import settings
 from app.core.state_store import load_crypto_rapid_guard_symbols, rapid_guard_crypto_positions
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
+from app.services.hot_path_metrics import record_hot_path_event
 from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
 from app.services.upbit_stream_cache import register_trade_callback, start_upbit_ticker_stream, upbit_stream_status
@@ -34,27 +35,76 @@ def _active_crypto_guard_symbols_cached() -> set[str]:
 
 def _run_crypto_tick_guard_from_trade(row: dict) -> None:
     """Event-driven guard: react to trade ticks instead of waiting for the next sleep poll."""
+    started_perf = time.perf_counter()
+    started_epoch = time.time()
     symbol = str(row.get("market") or "").strip()
     price = float(row.get("trade_price") or 0.0)
     if not symbol or price <= 0:
         return
+    tick_epoch = float(row.get("received_at") or started_epoch)
     if symbol not in _active_crypto_guard_symbols_cached():
         return
     now = time.monotonic()
     last = _tick_guard_last_by_symbol.get(symbol, 0.0)
     if now - last < 0.45:
+        record_hot_path_event(
+            {
+                "symbol": symbol,
+                "reason": "throttled",
+                "dispatch_ms": round((started_epoch - tick_epoch) * 1000, 3),
+                "guard_ms": None,
+                "total_ms": round((time.perf_counter() - started_perf) * 1000, 3),
+                "closed": False,
+            }
+        )
         return
     _tick_guard_last_by_symbol[symbol] = now
     if not _tick_guard_lock.acquire(blocking=False):
+        record_hot_path_event(
+            {
+                "symbol": symbol,
+                "reason": "lock_busy",
+                "dispatch_ms": round((started_epoch - tick_epoch) * 1000, 3),
+                "guard_ms": None,
+                "total_ms": round((time.perf_counter() - started_perf) * 1000, 3),
+                "closed": False,
+            }
+        )
         return
     try:
+        guard_started = time.perf_counter()
         summary = rapid_guard_crypto_positions({symbol: price})
+        guard_ms = round((time.perf_counter() - guard_started) * 1000, 3)
+        closed = bool(summary.get("paper_closed") or summary.get("live_closed"))
+        record_hot_path_event(
+            {
+                "symbol": symbol,
+                "reason": "closed" if closed else "checked",
+                "dispatch_ms": round((started_epoch - tick_epoch) * 1000, 3),
+                "guard_ms": guard_ms,
+                "total_ms": round((time.perf_counter() - started_perf) * 1000, 3),
+                "closed": closed,
+                "paper_closed": int(summary.get("paper_closed", 0) or 0),
+                "live_closed": int(summary.get("live_closed", 0) or 0),
+            }
+        )
         if summary.get("paper_closed") or summary.get("live_closed"):
             print(
                 "[runtime] crypto tick guard closed "
                 f"{symbol} paper={summary.get('paper_closed', 0)} live={summary.get('live_closed', 0)}"
             )
     except Exception as exc:
+        record_hot_path_event(
+            {
+                "symbol": symbol,
+                "reason": "error",
+                "dispatch_ms": round((started_epoch - tick_epoch) * 1000, 3),
+                "guard_ms": None,
+                "total_ms": round((time.perf_counter() - started_perf) * 1000, 3),
+                "closed": False,
+                "error": str(exc)[:120],
+            }
+        )
         print(f"[runtime] crypto tick guard failed: {exc}")
     finally:
         _tick_guard_lock.release()
