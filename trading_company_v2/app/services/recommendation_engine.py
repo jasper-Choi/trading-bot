@@ -164,16 +164,39 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
     soft_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 85.0)
-    # Trend-pullback entry: 15m EMA structure shows pullback_long but signal_engine
-    # spike+retrace pattern may not be detected. Allow entry when trend confidence is
-    # very high + orderbook shows buyers — no volume/micro gate (pullback = soft by design).
+    stream_timing_ok = (
+        stream_fresh
+        and stream_age <= 3.5
+        and not stream_reversal
+        and (
+            (stream_ignition and stream_move_15 >= -0.05)
+            or (stream_score >= 0.58 and stream_move_15 >= 0.05)
+            or (stream_score >= 0.55 and stream_buy_ratio >= 0.52 and stream_move_15 >= -0.03)
+        )
+    )
+    micro_timing_ok = (
+        micro_score >= 0.60
+        and micro_vol_ratio >= 1.05
+        and micro_move_3 >= -0.10
+        and micro_vwap_gap <= 1.8
+        and not micro_exhausted
+    )
+    breakout_timing_ok = breakout_count >= 2 and vol_ratio >= 1.4 and micro_move_3 >= -0.20
+    trend_pullback_timing_ok = stream_timing_ok or micro_timing_ok or breakout_timing_ok
+    timing_note = (
+        f"timing: stream_ok={stream_timing_ok} age={stream_age:.1f}s move15={stream_move_15:.2f}% "
+        f"buy={stream_buy_ratio:.0%} / micro_ok={micro_timing_ok} m3={micro_move_3:.2f}% "
+        f"mvol={micro_vol_ratio:.1f}x / breakout_ok={breakout_timing_ok}"
+    )
+    # Trend-pullback entry: 15m structure is only the setup. Require fresh
+    # 1m/tick timing before entering so we do not buy dead pullbacks.
     trend_pullback_ok = (
         trend_alignment == "pullback_long"
         and trend_entry_allowed
         and trend_follow_score >= 0.72
         and signal_score >= 0.65
         and orderbook_bid_ask >= 1.02
-        and (micro_score >= 0.42 or stream_score >= 0.45 or breakout_count >= 2)
+        and trend_pullback_timing_ok
         and not rsi_bearish_divergence
         and not late_chase_risk
         and not hard_overheat
@@ -356,6 +379,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [
                 trend_note,
                 f"trend_pullback: signal={signal_score:.2f} ob={orderbook_bid_ask:.2f}x trend={trend_follow_score:.2f}",
+                timing_note,
                 ignition_note,
             ],
         }

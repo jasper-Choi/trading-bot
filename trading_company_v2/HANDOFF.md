@@ -1494,3 +1494,44 @@ python walk_forward.py
   - Performance
 - Keep mobile monitoring usable while preserving the existing desktop layout.
 - Prevent the scanner page from showing an empty/loading state when the candidate data exists in desk views.
+
+## 41. Fresh Timing Gate for Crypto Trend Pullbacks (2026-04-30)
+
+### Diagnosis
+
+- The user's suspicion was correct: the bot could still enter a pullback because the 15m trend and orderbook were strong, even when the immediate 1m/tick timing was already stale or weak.
+- This created the bad pattern:
+  - 15m trend says bullish setup
+  - entry happens after the live move has already lost lift
+  - position starts negative from fee/slippage
+  - exit logic then manages a weak trade instead of riding a fresh trend
+- Paper repeat-failure logic also still treated managed exits like `trend_invalid_exit`, `rapid_no_lift`, and `reversal_loss_exit` as stop-like failures, which could over-penalize symbols after normal risk-management exits.
+
+### Completed
+
+- `app/services/recommendation_engine.py`
+  - Added `trend_pullback_timing_ok`.
+  - Trend-pullback entries now require at least one fresh timing confirmation:
+    - fresh stream/tick support within 3.5s
+    - or 1m micro support with volume and non-falling 3m move
+    - or breakout + volume confirmation
+  - Trend-pullback notes now include timing details so the dashboard explains why an entry was allowed.
+- `app/agents/execution_agent.py`
+  - Mirrored the same fresh timing gate in `_crypto_candidate_entry_ok()` so multi-coin candidate rotation cannot bypass it.
+  - Fixed the trend alignment check from the invalid `"uptrend"` label to the actual `"trend_long"` label.
+  - Candidate focus text now shows actual symbol, combined score, trend alignment, micro score, stream score, and orderbook ratio.
+  - Missing candidate metadata now updates focus to the actual rotated symbol instead of leaving the lead-symbol text on another coin.
+- `app/core/state_store.py`
+  - Narrowed `_STOP_LIKE_PAPER_REASONS` to true hard stops only:
+    - `stop_hit`
+    - `rapid_stop_hit`
+    - `early_failure`
+    - `rapid_failed_start`
+    - `rapid_repeat_symbol_failure`
+  - Managed exits remain visible in performance stats but no longer poison repeat-symbol failure checks as if they were immediate hard stops.
+
+### Intent
+
+- Keep active crypto trading, but stop entering "dead pullbacks" where the high-timeframe setup is valid but the immediate launch has already faded.
+- Make entries closer to the intended model: 15m trend setup + fresh 1m/tick trigger.
+- Reduce false throttling after normal managed exits.

@@ -674,7 +674,16 @@ class ExecutionAgent(BaseAgent):
         trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
         micro_score = float(meta.get("micro_score", 0.0) or 0.0)
         stream_score = float(meta.get("stream_score", 0.0) or 0.0)
+        stream_fresh = bool(meta.get("stream_fresh", False))
+        stream_ignition = bool(meta.get("stream_ignition", False))
+        stream_reversal = bool(meta.get("stream_reversal", False))
+        stream_age = float(meta.get("stream_age_seconds", 999.0) or 999.0)
+        stream_move_15 = float(meta.get("stream_move_15s_pct", 0.0) or 0.0)
+        stream_buy_ratio = float(meta.get("stream_buy_ratio_15s", 0.0) or 0.0)
         micro_vol_ratio = float(meta.get("micro_vol_ratio", 0.0) or 0.0)
+        micro_move_3 = float(meta.get("micro_move_3_pct", 0.0) or 0.0)
+        micro_vwap_gap = float(meta.get("micro_vwap_gap_pct", 0.0) or 0.0)
+        micro_exhausted = bool(meta.get("micro_exhausted", False))
         breakout_count = int(meta.get("breakout_count", 0) or 0)
         vol_ratio = float(meta.get("vol_ratio", 0.0) or 0.0)
         pullback_score = float(meta.get("pullback_score", 0.0) or 0.0)
@@ -692,22 +701,40 @@ class ExecutionAgent(BaseAgent):
         launch_confirmed = (
             (micro_score >= 0.55 and micro_vol_ratio >= 1.1)
             or stream_score >= 0.55
-            or bool(meta.get("stream_ignition", False))
+            or stream_ignition
             or (breakout_count >= 2 and vol_ratio >= 1.4)
             or (pullback_score >= 0.75 and micro_score >= 0.42)
         )
         trend_alignment = str(meta.get("trend_alignment", "") or "")
         rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
+        stream_timing_ok = (
+            stream_fresh
+            and stream_age <= 3.5
+            and not stream_reversal
+            and (
+                (stream_ignition and stream_move_15 >= -0.05)
+                or (stream_score >= 0.58 and stream_move_15 >= 0.05)
+                or (stream_score >= 0.55 and stream_buy_ratio >= 0.52 and stream_move_15 >= -0.03)
+            )
+        )
+        micro_timing_ok = (
+            micro_score >= 0.60
+            and micro_vol_ratio >= 1.05
+            and micro_move_3 >= -0.10
+            and micro_vwap_gap <= 1.8
+            and not micro_exhausted
+        )
+        breakout_timing_ok = breakout_count >= 2 and vol_ratio >= 1.4 and micro_move_3 >= -0.20
+        trend_pullback_timing_ok = stream_timing_ok or micro_timing_ok or breakout_timing_ok
         # --- Trend-pullback fast-path ---
-        # Strong chart trend (pullback_long/uptrend) + very strong orderbook + solid micro.
-        # combined_score can be moderate (0.65+) because the chart structure itself is the signal.
-        # This directly addresses setups like SOL/XRP at combined=0.72 but trend=0.94, ob=2.53x.
+        # Strong chart trend is only the setup. Require fresh 1m/tick timing
+        # before bypassing the normal composite threshold.
         trend_pullback_eligible = (
-            trend_alignment in ("pullback_long", "uptrend")
+            trend_alignment in ("pullback_long", "trend_long")
             and trend_allowed
             and trend_score >= 0.80
             and orderbook_bid_ask >= 1.60
-            and micro_score >= 0.50
+            and trend_pullback_timing_ok
             and score >= 0.65
             and not rsi_bearish_div
             and not hard_overheat
@@ -716,7 +743,11 @@ class ExecutionAgent(BaseAgent):
         if trend_pullback_eligible:
             recent_failure = self._recent_crypto_symbol_failure(symbol)
             if not recent_failure:
-                return True, f"trend_pullback eligible combined={score:.2f} trend={trend_score:.2f} ob={orderbook_bid_ask:.2f}x"
+                return (
+                    True,
+                    f"trend_pullback eligible combined={score:.2f} trend={trend_score:.2f} "
+                    f"ob={orderbook_bid_ask:.2f}x timing stream={stream_timing_ok} micro={micro_timing_ok}",
+                )
         # --- Standard path ---
         if score < 0.76:
             return False, f"combined score too low ({score:.2f})"
@@ -753,9 +784,14 @@ class ExecutionAgent(BaseAgent):
         mapped["symbol"] = str(meta.get("market", mapped.get("symbol", "")) or mapped.get("symbol", ""))
         mapped["signal_score"] = float(meta.get("combined_score", meta.get("signal_score", mapped.get("signal_score", 0.0))) or 0.0)
         mapped["desk_bias"] = str(meta.get("bias", mapped.get("desk_bias", "balanced")) or "balanced")
+        trend_alignment = str(meta.get("trend_alignment", "") or "")
+        micro_score = float(meta.get("micro_score", 0.0) or 0.0)
+        stream_score = float(meta.get("stream_score", 0.0) or 0.0)
+        orderbook_bid_ask = float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
         mapped["focus"] = (
             f"{mapped['symbol']} candidate-specific multi-coin entry "
-            f"(combined {mapped['signal_score']:.2f})"
+            f"(combined {mapped['signal_score']:.2f}, {trend_alignment}, "
+            f"micro {micro_score:.2f}, stream {stream_score:.2f}, ob {orderbook_bid_ask:.2f}x)"
         )
         passthrough_keys = (
             "discovery_score", "change_rate", "volume_24h_krw",
@@ -812,6 +848,7 @@ class ExecutionAgent(BaseAgent):
                 notes = list(single_plan.get("notes", []) or [])
                 notes.append("candidate rotation disabled: missing candidate-specific metadata")
                 single_plan["notes"] = notes
+                single_plan["focus"] = f"{symbol} candidate rotation entry (metadata missing)"
             if skipped_candidates:
                 single_plan["notes"] = list(single_plan.get("notes", []) or []) + [
                     f"skipped weaker candidates: {'; '.join(skipped_candidates[:3])}"

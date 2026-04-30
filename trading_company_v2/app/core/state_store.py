@@ -403,18 +403,8 @@ _STOP_LIKE_PAPER_REASONS = {
     "stop_hit",
     "rapid_stop_hit",
     "early_failure",
-    "failed_ignition",
-    "failed_followthrough",
     "rapid_failed_start",
-    "rapid_no_lift",
-    "no_lift_exit",
-    "rapid_reversal_loss",
-    "reversal_loss_exit",
     "rapid_repeat_symbol_failure",
-    "trend_reversal_exit",
-    "downtrend_exit",
-    "trend_invalid_exit",
-    "bearish_divergence_exit",
 }
 
 
