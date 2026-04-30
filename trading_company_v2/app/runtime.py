@@ -124,7 +124,7 @@ def _determine_runtime_interval_seconds(session: dict) -> int:
 
 
 def _run_crypto_rapid_guard() -> dict:
-    symbols = load_crypto_rapid_guard_symbols()
+    symbols = list(hot_guard_symbols())
     if not symbols:
         return {"checked": 0, "paper_closed": 0, "live_closed": 0}
     prices = get_upbit_ticker_prices(symbols)
