@@ -5,9 +5,10 @@ import time
 from datetime import datetime
 
 from app.config import settings
-from app.core.state_store import load_crypto_rapid_guard_symbols, rapid_guard_crypto_positions
+from app.core.state_store import rapid_guard_crypto_positions
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
+from app.services.hot_path_guard import hot_guard_crypto_tick, hot_guard_symbols, refresh_hot_crypto_positions
 from app.services.hot_path_metrics import record_hot_path_event
 from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
@@ -26,7 +27,7 @@ def _active_crypto_guard_symbols_cached() -> set[str]:
     if now - _tick_guard_symbols_loaded_at <= 1.0:
         return _tick_guard_symbols
     try:
-        _tick_guard_symbols = set(load_crypto_rapid_guard_symbols())
+        _tick_guard_symbols = hot_guard_symbols()
         _tick_guard_symbols_loaded_at = now
     except Exception as exc:
         print(f"[runtime] tick guard symbol refresh failed: {exc}")
@@ -73,17 +74,19 @@ def _run_crypto_tick_guard_from_trade(row: dict) -> None:
         return
     try:
         guard_started = time.perf_counter()
-        summary = rapid_guard_crypto_positions({symbol: price})
+        summary = hot_guard_crypto_tick(symbol, price)
         guard_ms = round((time.perf_counter() - guard_started) * 1000, 3)
         closed = bool(summary.get("paper_closed") or summary.get("live_closed"))
+        guard_reason = str(summary.get("reason") or ("closed" if closed else "checked"))
         record_hot_path_event(
             {
                 "symbol": symbol,
-                "reason": "closed" if closed else "checked",
+                "reason": "closed" if closed else guard_reason,
                 "dispatch_ms": round((started_epoch - tick_epoch) * 1000, 3),
                 "guard_ms": guard_ms,
                 "total_ms": round((time.perf_counter() - started_perf) * 1000, 3),
                 "closed": closed,
+                "guard_reason": guard_reason,
                 "paper_closed": int(summary.get("paper_closed", 0) or 0),
                 "live_closed": int(summary.get("live_closed", 0) or 0),
             }
@@ -155,6 +158,7 @@ def _sleep_with_rapid_guards(interval_seconds: int) -> None:
 def run_company_loop() -> None:
     orchestrator = CompanyOrchestrator()
     if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
+        refresh_hot_crypto_positions(force=True)
         register_trade_callback(_run_crypto_tick_guard_from_trade)
         started = start_upbit_ticker_stream()
         status = upbit_stream_status()

@@ -1641,3 +1641,31 @@ python walk_forward.py
   - Python guard/DB decision time
   - later: order request and fill confirmation latency
 - Use this data to decide when the hot execution path must move from Python into a Rust/Go sidecar.
+
+## 45. In-Memory Hot Path Position Guard (2026-04-30)
+
+### Diagnosis
+
+- `/diagnostics/hot-path-latency` showed websocket dispatch was effectively instant, but guard execution took several milliseconds:
+  - dispatch average: ~0.015ms
+  - guard average: ~5.8ms
+  - guard p95: ~12ms
+- Root cause: the tick callback still called `rapid_guard_crypto_positions()`, which opened SQLite sessions, read all open positions, updated rows, committed, then refreshed all-time positions even when no close was needed.
+- For tick-level execution, this is the wrong hot path. DB work belongs on close/persist events, not every tick.
+
+### Completed
+
+- Added `app/services/hot_path_guard.py`.
+- Open crypto paper positions are now cached in memory for the tick hot path.
+- The tick callback now calls `hot_guard_crypto_tick(symbol, price)`:
+  - evaluates PnL, peak, trail, no-lift, tick reversal from memory
+  - updates in-memory PnL/peak on non-close ticks
+  - only falls back to DB-backed `rapid_guard_crypto_positions()` when a close is actually required
+- Runtime now refreshes the hot position cache at startup and through the hot guard symbol path.
+- Hot-path latency metrics now include the guard reason (`checked_memory`, `no_open_position`, `closed`, etc.).
+
+### Intent
+
+- Remove DB reads/writes from the normal per-tick path.
+- Reduce guard latency and make the architecture closer to a dedicated execution engine.
+- Keep DB persistence for actual state-changing events so the dashboard and paper/live tracking remain consistent.
