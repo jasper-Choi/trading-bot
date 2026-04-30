@@ -1884,7 +1884,7 @@ python walk_forward.py
   - Intent: when trend pays, move the liquidation line up with the position.
 
 - `app/agents/risk_committee_agent.py`
-  - Crypto-only growth mode now uses a wider drawdown gate (`-12%`) before fully blocking entries.
+  - Crypto-only growth mode now uses a wider drawdown gate (`-20%`) before fully blocking entries.
   - When entries remain allowed, risk budget has a floor of `0.32`.
   - Intent: losses throttle the bot, but do not suffocate obvious trend setups down to `0.03x` just as the strategy changes.
 
