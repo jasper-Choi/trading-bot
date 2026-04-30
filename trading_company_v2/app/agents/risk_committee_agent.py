@@ -49,7 +49,7 @@ class RiskCommitteeAgent(BaseAgent):
         compounding_mode = str(capital_profile.get("mode", "neutral") or "neutral")
         profit_buffer_pct = float(capital_profile.get("profit_buffer_pct", 0.0) or 0.0)
         global_multiplier = float(capital_profile.get("global_multiplier", 1.0) or 1.0)
-        drawdown_entry_floor = -6.0 if active_desks == {"crypto"} else -1.5
+        drawdown_entry_floor = -12.0 if active_desks == {"crypto"} else -1.5
         state.allow_new_entries = state.regime != "STRESSED" and combined_pnl > drawdown_entry_floor
         if active_desks == {"crypto"} and combined_pnl <= -1.5 and state.allow_new_entries:
             note = f"crypto recovery mode keeps entries open at throttled risk ({combined_pnl:.2f}% active P&L)"
@@ -109,6 +109,10 @@ class RiskCommitteeAgent(BaseAgent):
                     state.notes.append(hour_note)
         except Exception:
             pass
+        if crypto_growth_mode and state.allow_new_entries:
+            # Crypto-only growth mode should throttle after losses, not suffocate.
+            # The execution/hot-path guards still cap exposure and cut failures fast.
+            state.risk_budget = max(state.risk_budget, 0.32)
 
         if "risk committee enforcing conservative defaults" not in state.notes:
             state.notes.append("risk committee enforcing conservative defaults")
