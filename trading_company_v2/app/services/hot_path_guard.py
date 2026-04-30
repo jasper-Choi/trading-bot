@@ -169,7 +169,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         trend_alignment in {"trend_long", "pullback_long", "range"}
         and (bool(item.get("trend_entry_allowed", False)) or bool(item.get("trend_early_entry", False)) or trend_score >= 0.76)
         and chart_score >= 0.76
-        and recent_change >= -0.50
+        and recent_change >= 0.00
         and (
             combined >= 0.52
             or (chart_score >= 0.90 and trend_score >= 0.90 and max(change_rate, burst_change) >= 3.0)
@@ -496,10 +496,10 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         ignition = (
             stream_ok
             and ticks_15 >= 1
-            and stream_score >= 0.35
-            and move_15 >= 0.00
+            and stream_score >= 0.55
+            and move_15 >= 0.18
             and move_60 >= -0.28
-            and buy_ratio >= 0.48
+            and buy_ratio >= 0.55
         )
     elif entry_profile == "range_impulse":
         ignition = (

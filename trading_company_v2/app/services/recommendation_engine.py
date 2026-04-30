@@ -212,7 +212,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         trend_alignment in {"trend_long", "pullback_long", "range"}
         and (trend_entry_allowed or trend_follow_score >= 0.76)
         and trend_follow_score >= 0.68
-        and recent_change >= -0.50
+        and recent_change >= 0.00
         and (
             signal_score >= 0.52
             or (trend_follow_score >= 0.90 and max(change_rate, burst_change) >= 3.0)

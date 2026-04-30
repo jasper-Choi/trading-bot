@@ -813,7 +813,7 @@ class ExecutionAgent(BaseAgent):
             and (trend_allowed or trend_early or trend_score >= 0.76)
             and trend_score >= 0.68
             and chart_score >= 0.76
-            and recent_change >= -0.50
+            and recent_change >= 0.00
             and (
                 combined >= 0.52
                 or (chart_score >= 0.90 and trend_score >= 0.90 and max(change_rate, burst_change) >= 3.0)
