@@ -1535,3 +1535,25 @@ python walk_forward.py
 - Keep active crypto trading, but stop entering "dead pullbacks" where the high-timeframe setup is valid but the immediate launch has already faded.
 - Make entries closer to the intended model: 15m trend setup + fresh 1m/tick trigger.
 - Reduce false throttling after normal managed exits.
+
+### Follow-up Tightening
+
+- Immediate loss diagnosis after deployment still showed the losing trades were mostly no-lift entries:
+  - 12 closed paper trades
+  - 1 win / 11 losses
+  - many losers had `peak_pnl_pct` near 0.0, meaning the bot entered before actual lift appeared.
+- Tightened the micro-only timing path:
+  - `micro_score` 0.60 -> 0.72
+  - `micro_vol_ratio` 1.05x -> 1.15x
+  - `micro_move_3_pct` must be positive (`>= 0.05%`)
+  - `micro_vwap_gap_pct` max 1.8% -> 1.6%
+- Tightened breakout timing:
+  - `vol_ratio` 1.4x -> 1.6x
+  - `micro_move_3_pct` must be non-negative.
+- Tightened recommendation-level trend-pullback orderbook floor:
+  - `orderbook_bid_ask_ratio` 1.02x -> 1.10x.
+
+### Intent
+
+- Avoid entries that look good on 15m structure but have no immediate lift.
+- Keep trading active, but make "active" mean live momentum is actually present, not just a historical trend setup.

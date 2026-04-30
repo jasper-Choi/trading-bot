@@ -718,13 +718,13 @@ class ExecutionAgent(BaseAgent):
             )
         )
         micro_timing_ok = (
-            micro_score >= 0.60
-            and micro_vol_ratio >= 1.05
-            and micro_move_3 >= -0.10
-            and micro_vwap_gap <= 1.8
+            micro_score >= 0.72
+            and micro_vol_ratio >= 1.15
+            and micro_move_3 >= 0.05
+            and micro_vwap_gap <= 1.6
             and not micro_exhausted
         )
-        breakout_timing_ok = breakout_count >= 2 and vol_ratio >= 1.4 and micro_move_3 >= -0.20
+        breakout_timing_ok = breakout_count >= 2 and vol_ratio >= 1.6 and micro_move_3 >= 0.0
         trend_pullback_timing_ok = stream_timing_ok or micro_timing_ok or breakout_timing_ok
         # --- Trend-pullback fast-path ---
         # Strong chart trend is only the setup. Require fresh 1m/tick timing

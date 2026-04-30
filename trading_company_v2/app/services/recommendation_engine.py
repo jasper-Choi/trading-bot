@@ -175,13 +175,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         )
     )
     micro_timing_ok = (
-        micro_score >= 0.60
-        and micro_vol_ratio >= 1.05
-        and micro_move_3 >= -0.10
-        and micro_vwap_gap <= 1.8
+        micro_score >= 0.72
+        and micro_vol_ratio >= 1.15
+        and micro_move_3 >= 0.05
+        and micro_vwap_gap <= 1.6
         and not micro_exhausted
     )
-    breakout_timing_ok = breakout_count >= 2 and vol_ratio >= 1.4 and micro_move_3 >= -0.20
+    breakout_timing_ok = breakout_count >= 2 and vol_ratio >= 1.6 and micro_move_3 >= 0.0
     trend_pullback_timing_ok = stream_timing_ok or micro_timing_ok or breakout_timing_ok
     timing_note = (
         f"timing: stream_ok={stream_timing_ok} age={stream_age:.1f}s move15={stream_move_15:.2f}% "
@@ -195,7 +195,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and trend_entry_allowed
         and trend_follow_score >= 0.72
         and signal_score >= 0.65
-        and orderbook_bid_ask >= 1.02
+        and orderbook_bid_ask >= 1.10
         and trend_pullback_timing_ok
         and not rsi_bearish_divergence
         and not late_chase_risk
