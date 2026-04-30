@@ -1824,3 +1824,12 @@ python walk_forward.py
 - Do not hard-block all `RANGING` markets.
 - Treat ranging leaders as scalp candidates only when live tick flow proves continuation.
 - Preserve the user's objective: active trend-following behavior without blindly chasing already-extended candles.
+
+### Dashboard/Journal Visibility
+
+- `app/agents/execution_agent.py` now labels these cases as:
+  - `RANGING impulse candidates armed for tick confirmation.`
+- This prevents the dashboard from saying the candidate simply "failed" when the real state is:
+  - no cycle entry,
+  - candidate armed,
+  - waiting for websocket trade ignition.

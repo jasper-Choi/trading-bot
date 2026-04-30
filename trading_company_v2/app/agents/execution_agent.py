@@ -777,6 +777,40 @@ class ExecutionAgent(BaseAgent):
         return True, f"eligible combined={score:.2f} trend={trend_score:.2f} ob={orderbook_bid_ask:.2f}x"
 
     @staticmethod
+    def _crypto_range_impulse_armed(meta: dict) -> tuple[bool, str]:
+        if not meta:
+            return False, "missing metadata"
+        chart_score = float(meta.get("signal_score", 0.0) or 0.0)
+        combined = float(meta.get("combined_score", 0.0) or 0.0)
+        trend_alignment = str(meta.get("trend_alignment", "") or "")
+        recent_change = float(meta.get("recent_change_pct", 0.0) or 0.0)
+        change_rate = float(meta.get("change_rate", 0.0) or 0.0)
+        freshness = float(meta.get("signal_freshness", 1.0) or 1.0)
+        micro_vwap_gap = float(meta.get("micro_vwap_gap_pct", 0.0) or 0.0)
+        trend_extension = float(meta.get("trend_extension_pct", 0.0) or 0.0)
+        rsi_value = meta.get("rsi")
+        try:
+            rsi_float = float(rsi_value) if rsi_value is not None else 0.0
+        except (TypeError, ValueError):
+            rsi_float = 0.0
+        ok = (
+            trend_alignment in {"trend_long", "pullback_long", "range"}
+            and chart_score >= 0.74
+            and combined >= 0.38
+            and max(recent_change, change_rate) >= 3.0
+            and freshness >= 0.55
+            and trend_extension <= 7.0
+            and rsi_float <= 82.0
+            and micro_vwap_gap <= 4.2
+            and not bool(meta.get("rsi_bearish_divergence", False))
+        )
+        return (
+            ok,
+            f"range impulse armed chart={chart_score:.2f} combined={combined:.2f} "
+            f"move={max(recent_change, change_rate):.2f}% ext={trend_extension:.2f}% rsi={rsi_float:.0f}",
+        )
+
+    @staticmethod
     def _apply_crypto_candidate_meta(plan: dict, meta: dict) -> dict:
         if not meta:
             return plan
@@ -881,20 +915,36 @@ class ExecutionAgent(BaseAgent):
         if desk == "crypto":
             if candidate_meta:
                 eligible_candidates = []
+                range_armed_candidates = []
+                range_armed_notes = []
                 for candidate in all_candidates:
-                    ok, reason = self._crypto_candidate_entry_ok(candidate_meta.get(candidate, {}))
+                    meta = candidate_meta.get(candidate, {})
+                    ok, reason = self._crypto_candidate_entry_ok(meta)
                     if ok:
                         eligible_candidates.append(candidate)
                     else:
                         skipped_candidates.append(f"{candidate}: {reason}")
+                        armed_ok, armed_reason = self._crypto_range_impulse_armed(meta)
+                        if armed_ok:
+                            range_armed_candidates.append(candidate)
+                            range_armed_notes.append(f"{candidate}: {armed_reason}")
                 all_candidates = eligible_candidates
                 if not all_candidates:
                     blocked_plan = dict(plan)
                     blocked_plan["action"] = "watchlist_only"
                     blocked_plan["size"] = "0.00x"
-                    blocked_plan["focus"] = "Crypto candidates failed per-symbol growth-mode eligibility."
-                    blocked_plan["candidate_symbols"] = []
-                    blocked_plan["notes"] = list(plan.get("notes", []) or []) + skipped_candidates[:6]
+                    if range_armed_candidates:
+                        blocked_plan["focus"] = "RANGING impulse candidates armed for tick confirmation."
+                        blocked_plan["candidate_symbols"] = range_armed_candidates[:6]
+                        blocked_plan["notes"] = (
+                            list(plan.get("notes", []) or [])
+                            + range_armed_notes[:6]
+                            + ["No cycle entry: waiting for websocket trade ignition before opening."]
+                        )
+                    else:
+                        blocked_plan["focus"] = "Crypto candidates failed per-symbol growth-mode eligibility."
+                        blocked_plan["candidate_symbols"] = []
+                        blocked_plan["notes"] = list(plan.get("notes", []) or []) + skipped_candidates[:6]
                     return [self._plan_to_order(desk, blocked_plan).model_dump()]
             elif plan.get("candidate_symbols"):
                 all_candidates = [primary] if primary else []
