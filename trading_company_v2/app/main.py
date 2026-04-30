@@ -3364,8 +3364,15 @@ def _scanner_chart_payload(market: str) -> dict:
 def scanner_data() -> dict:
     """전체 스캔 코인 데이터 반환 (스캐너 페이지용)"""
     state = load_company_state()
-    crypto_view = state.market_snapshot.get("crypto_view", {}) if state.market_snapshot else {}
-    all_candidates = list(crypto_view.get("all_candidates") or crypto_view.get("candidate_markets") or [])
+    snapshot_crypto_view = state.market_snapshot.get("crypto_view", {}) if state.market_snapshot else {}
+    desk_crypto_view = state.desk_views.get("crypto_desk", {}) if state.desk_views else {}
+    crypto_view = desk_crypto_view or snapshot_crypto_view or {}
+    all_candidates = list(
+        crypto_view.get("all_candidates")
+        or crypto_view.get("candidate_markets")
+        or (state.strategy_book.get("crypto_plan", {}) if state.strategy_book else {}).get("candidate_markets")
+        or []
+    )
     scanned_count = int(crypto_view.get("scanned_market_count", len(all_candidates)) or len(all_candidates))
     direction_bias = str(crypto_view.get("direction_bias", "balanced") or "balanced")
     direction_score = float(crypto_view.get("direction_score", 0.5) or 0.5)

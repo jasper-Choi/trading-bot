@@ -1482,6 +1482,9 @@ python walk_forward.py
   - bottom padding for the fixed nav
   - horizontally scrollable filter chips
   - two-column market overview cards
+- Fixed `/scanner-data` source selection:
+  - Scanner now reads `desk_views["crypto_desk"]["all_candidates"]`, where `CryptoDeskAgent` actually stores the full scan list.
+  - Orchestrator also persists `crypto_view` into `state.market_snapshot` for future scanner consumers.
 
 ### Intent
 
@@ -1490,3 +1493,4 @@ python walk_forward.py
   - Scanner
   - Performance
 - Keep mobile monitoring usable while preserving the existing desktop layout.
+- Prevent the scanner page from showing an empty/loading state when the candidate data exists in desk views.

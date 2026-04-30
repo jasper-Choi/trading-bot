@@ -603,6 +603,7 @@ class CompanyOrchestrator:
         state.market_snapshot = {
             "as_of": market_data_result.payload.get("as_of"),
             "crypto_leaders": market_data_result.payload.get("crypto_leaders", []),
+            "crypto_view": crypto_desk_result.payload,
             "stock_leaders": market_data_result.payload.get("stock_leaders", []),
             "gap_candidates": market_data_result.payload.get("gap_candidates", []),
             "us_leaders": market_data_result.payload.get("us_leaders", []),
