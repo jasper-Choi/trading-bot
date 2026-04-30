@@ -1,7 +1,91 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-04-29
+Last updated: 2026-04-30
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-04-30
+
+### Root Cause: Cascading Failure Cycle (now fixed)
+
+The bot was stuck in a loop: fake losses from 8-second `trend_invalid_exit` → high stop pressure → 
+throttled entries → fewer wins → more pressure → repeat. Four separate fixes were required.
+
+### Fix 1: Hold-time ladder for trend exits (commit 6d3f497 — previous session)
+`_crypto_trend_exit_reason()` now requires minimum hold time before any trend-based exit:
+- choch_bearish/bos_bearish: wait 2 min
+- stream_reversal/downtrend/bearish_divergence: wait 3 min
+- trend_invalid_exit: wait 4 min + pnl <= -0.20%
+
+Before this: positions were closing in 8-16 seconds with `trend_invalid_exit` (65% of all losses were
+fake — coin never had time to show whether the trend was valid). Now exits are gated by actual holding time.
+
+### Fix 2: Mid-range failed-breakout exit (commit 9eaa06b)
+Two new early-exit rules prevent API3-style reversals from hitting the full -2% hard stop:
+
+**In `rapid_guard_crypto_positions`** (runs every 2 sec):
+```
+If peak in [0.40, 0.80%) and minutes_open >= 1.0 and pnl <= max(-0.55, peak - 1.10):
+    → failed_breakout_exit
+```
+Example: peak=0.59%, fires at -0.51% instead of waiting for -2.32% hard stop.
+
+**In `manage_paper_positions`** (main cycle, runs every 8s):
+```
+If peak >= 0.40 and minutes_open >= 3.0 and pnl <= max(-0.50, peak - 1.20):
+    → failed_followthrough
+```
+(Previously required peak >= 0.65 and 8 minutes — missed most reversals.)
+
+### Fix 3: STOP_LIKE_EXIT_REASONS narrowed to true hard stops (commit 7e1f07f)
+Time-gated managed exits (trend_invalid_exit, downtrend_exit, trend_reversal_exit,
+bearish_divergence_exit, rapid_no_lift, no_lift_exit, reversal_loss_exit, failed_ignition,
+failed_followthrough, rapid_flat_timeout, flat_no_lift_exit) were removed from the set.
+
+**Why**: These exits require 2-18 minutes of holding before firing — they are controlled risk
+management, not immediate failures. Including them caused:
+- stop_pressure = "high" after any 3 managed exits → probe_longs downgraded to selective_probe
+- symbol_edge_state "cold" → re-entry blocked for coins that just had managed exits
+- _recent_crypto_symbol_failure flagging coins unnecessarily
+- Size scaled down to 0.07x on otherwise valid setups
+
+**Now**: Only `stop_hit`, `rapid_stop_hit`, `early_failure`, `rapid_failed_start`,
+`rapid_repeat_symbol_failure` count. True stops only.
+
+### Fix 4: Trend-pullback fast-path in `_crypto_candidate_entry_ok` (commit c82f7f5)
+Added a fast-path for strong trend+orderbook setups that were blocked by the combined_score >= 0.76 gate:
+
+```
+If trend_alignment in (pullback_long, uptrend) AND trend_score >= 0.80 AND ob >= 1.60x
+   AND micro >= 0.50 AND combined >= 0.65 AND no recent hard stop:
+    → eligible (bypass the 0.76 combined_score requirement)
+```
+
+**Why**: Coins like SOL/XRP regularly showed trend_score=0.94, ob=2.53x, micro=0.68 but 
+combined_score=0.72. These are EXCELLENT trend-following setups. The 0.76 combined_score gate 
+was blocking the exact trades the strategy was designed to catch.
+
+### Second Oracle VM data reset
+Performed 2026-04-30T00:00 UTC to clear polluted stats from 45+ fake losses.
+All paper_positions, closed_positions, cycle_journal were cleared.
+`company_state` table NOT cleared (preserves regime, stance, strategy_book).
+
+### Post-reset trade results (first 4 trades, as of 2026-04-30T00:20 UTC)
+| Symbol   | PnL    | Peak   | Reason                | Notes                     |
+|----------|--------|--------|-----------------------|---------------------------|
+| CHIP     | +2.47% | +3.42% | rapid_trend_trail     | WIN — trend worked ✓      |
+| ADA      | -0.27% | +0.02% | trend_invalid_exit    | small managed exit ✓      |
+| API3     | -2.32% | +0.59% | rapid_stop_hit        | hard stop — failure. New failed_breakout_exit would cut at -0.51% |
+| XRP      | -0.35% | 0.00%  | rapid_no_lift         | 10-min no-lift timeout ✓  |
+
+Win rate: 1/4 = 25% (too early to evaluate). Net: -0.47%.
+After failed_breakout_exit fix, API3-style loss → -0.51% (saves ~1.8% per trade).
+
+### Current VM state (2026-04-30)
+- Oracle VM: 134.185.118.144, both services active
+- trading-loop service deployed commit c82f7f5
+- Bot entering again: SHIB opened at 00:21:48 at 0.10x (cooldown multiplier due to low win rate)
+- Size will increase naturally as win rate improves
+- regime=RANGING, stance=BALANCED, capital_profile mode=neutral, allow_new_entries=True
 
 ## 0. Latest Claude Notes - 2026-04-28
 
