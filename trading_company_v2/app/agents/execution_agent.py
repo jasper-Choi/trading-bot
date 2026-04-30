@@ -15,6 +15,7 @@ STOP_LIKE_EXIT_REASONS = {
     "rapid_stop_hit",
     "early_failure",
     "rapid_tick_failed_start",
+    "rapid_obvious_trend_fail",
     "rapid_range_impulse_fail",
     "rapid_failed_start",      # 4 min + peak ≤ 0.05% + pnl ≤ -0.75%  (never showed life)
     "rapid_repeat_symbol_failure",  # repeated failure on same symbol

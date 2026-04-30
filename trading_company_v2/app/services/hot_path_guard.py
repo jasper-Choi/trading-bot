@@ -37,6 +37,7 @@ _MAX_HOT_OPEN_POSITIONS = 5
 _MAX_HOT_OPEN_NOTIONAL = 1.15
 _HOT_RECENT_FAILURE_REASONS = {
     "rapid_tick_failed_start",
+    "rapid_obvious_trend_fail",
     "rapid_range_impulse_fail",
     "rapid_failed_start",
     "rapid_stop_hit",
@@ -304,9 +305,14 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
         is_range_impulse = "range_impulse" in str(item.get("focus", "") or "")
+        is_obvious_trend = "obvious_trend" in str(item.get("focus", "") or "")
         reason = ""
         if pnl_pct >= target_pct:
             reason = "rapid_target_hit"
+        elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.35:
+            reason = "rapid_obvious_trend_fail"
+        elif is_obvious_trend and pnl_pct <= -0.70:
+            reason = "rapid_obvious_trend_fail"
         elif is_range_impulse and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.25:
             reason = "rapid_range_impulse_fail"
         elif is_range_impulse and pnl_pct <= -0.40:

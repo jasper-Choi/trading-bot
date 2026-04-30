@@ -412,6 +412,7 @@ _STOP_LIKE_PAPER_REASONS = {
     "rapid_stop_hit",
     "early_failure",
     "rapid_tick_failed_start",
+    "rapid_obvious_trend_fail",
     "rapid_range_impulse_fail",
     "rapid_failed_start",
     "rapid_repeat_symbol_failure",
@@ -954,6 +955,7 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
             protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
             is_range_impulse = "range_impulse" in str(position.focus or "")
+            is_obvious_trend = "obvious_trend" in str(position.focus or "")
             minutes_open = 0.0
             try:
                 opened_dt = datetime.fromisoformat(str(position.opened_at).replace("Z", "+00:00"))
@@ -965,6 +967,14 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             if position.pnl_pct >= target_pct:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
+                paper_closed += 1
+            elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.35:
+                closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
+                _close_position(position, "rapid_obvious_trend_fail")
+                paper_closed += 1
+            elif is_obvious_trend and position.pnl_pct <= -0.70:
+                closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
+                _close_position(position, "rapid_obvious_trend_fail")
                 paper_closed += 1
             elif is_range_impulse and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.25:
                 closed_symbols.append((position.symbol, "rapid_range_impulse_fail"))

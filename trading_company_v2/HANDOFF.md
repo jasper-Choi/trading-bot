@@ -1906,3 +1906,7 @@ python walk_forward.py
   - require either combined >= `0.52`, very strong chart/trend, or a high-change low-RSI exception
   - tick validation now requires stream score >= `0.55`, 15s move >= `0.18%`, and buy ratio >= `55%`
 - Added recent-failure cooldown for hot entries after `rapid_tick_failed_start` / `rapid_range_impulse_fail`.
+- Added `rapid_obvious_trend_fail`:
+  - if an obvious-trend entry shows no lift and reaches `-0.35%` after 15s, close
+  - if it reaches `-0.70%` at any time, close
+  - intent: obvious trends must prove immediate continuation; otherwise the bot exits before a full stop.
