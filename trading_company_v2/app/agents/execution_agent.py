@@ -710,11 +710,6 @@ class ExecutionAgent(BaseAgent):
         )
         trend_alignment = str(meta.get("trend_alignment", "") or "")
         rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
-        obvious_ok, obvious_reason = self._crypto_obvious_trend_entry_ok(meta)
-        if obvious_ok:
-            recent_failure = self._recent_crypto_symbol_failure(symbol)
-            if not recent_failure or score >= 0.55 or float(meta.get("signal_score", 0.0) or 0.0) >= 0.82:
-                return True, obvious_reason
         stream_timing_ok = (
             stream_fresh
             and stream_age <= 3.5
@@ -961,29 +956,6 @@ class ExecutionAgent(BaseAgent):
         """Generate up to max_positions concurrent orders per desk from ranked candidates."""
         action = str(plan.get("action", ""))
         if action not in {"probe_longs", "attack_opening_drive", "selective_probe"}:
-            if desk == "crypto":
-                candidate_meta = {
-                    str(item.get("market", "")).strip(): item
-                    for item in (plan.get("candidate_markets") or [])
-                    if str(item.get("market", "")).strip()
-                }
-                obvious_candidates = [
-                    symbol
-                    for symbol, meta in candidate_meta.items()
-                    if self._crypto_obvious_trend_entry_ok(meta)[0]
-                    and not self._has_open_position(desk, symbol)
-                ]
-                if obvious_candidates:
-                    trend_plan = dict(plan)
-                    trend_plan["action"] = "probe_longs"
-                    trend_plan["size"] = "0.72x"
-                    trend_plan["symbol"] = obvious_candidates[0]
-                    trend_plan["candidate_symbols"] = obvious_candidates[1:6]
-                    trend_plan["focus"] = "Obvious 15m trend ride overrides watchlist-only gate."
-                    trend_plan["notes"] = list(plan.get("notes", []) or []) + [
-                        "Watchlist override: at least one candidate has a clear 15m rising trigger.",
-                    ]
-                    return self._multi_orders(desk, trend_plan)
             return [self._plan_to_order(desk, plan).model_dump()]
 
         max_positions, _ = self._desk_limits(desk)

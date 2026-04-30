@@ -1873,8 +1873,9 @@ python walk_forward.py
 
 - `app/services/recommendation_engine.py`
   - Added `obvious_trend_ride_ok` before the defensive hard-overheat / volume gates.
-  - Clear rising 15m trend can return `probe_longs` directly with focus:
-    - `obvious 15m trend ride - enter first, trail the line`
+  - Clear rising 15m trend now returns `watchlist_only` with focus:
+    - `obvious 15m trend armed for live-tick continuation`
+  - Intent: the cycle arms the setup, but websocket tick flow opens the position.
 
 - `app/core/state_store.py`
   - Raised the crypto trailing exit line sooner:
@@ -1901,11 +1902,13 @@ python walk_forward.py
 
 - First `obvious_trend` samples proved the entry path works, but BIO/DRIFT showed the next failure mode:
   - a coin can still have a large 15m/day move while the most recent 15m window has already turned down.
+  - cycle snapshot orders could still open without live stream confirmation.
 - Tightened the obvious-trend definition:
   - require current `recent_change_pct >= 0.00`
   - require either combined >= `0.52`, very strong chart/trend, or a high-change low-RSI exception
   - tick validation now requires stream score >= `0.55`, 15s move >= `0.18%`, and buy ratio >= `55%`
 - Added recent-failure cooldown for hot entries after `rapid_tick_failed_start` / `rapid_range_impulse_fail`.
+- Removed cycle-level obvious-trend opening. Obvious trend setups are now armed only; entry happens in `hot_process_crypto_tick()`.
 - Added `rapid_obvious_trend_fail`:
   - if an obvious-trend entry shows no lift and reaches `-0.35%` after 15s, close
   - if it reaches `-0.70%` at any time, close

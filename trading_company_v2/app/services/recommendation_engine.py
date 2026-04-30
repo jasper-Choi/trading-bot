@@ -224,17 +224,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and not (stream_fresh and stream_reversal and stream_move_15 <= -0.25)
     )
     if obvious_trend_ride_ok and stance != "DEFENSE":
-        entry_size = "0.72x" if signal_score >= 0.55 else "0.55x"
-        if trend_extension_pct >= 6.5:
-            entry_size = "0.42x"
         return {
-            "action": "probe_longs",
-            "size": entry_size,
-            "focus": f"{lead_market or 'KRW-BTC'} obvious 15m trend ride - enter first, trail the line.",
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": f"{lead_market or 'KRW-BTC'} obvious 15m trend armed for live-tick continuation.",
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [
-                "obvious_trend_ride: 15m trend trigger overrides confirmation-wait gates.",
+                "obvious_trend_ride: cycle arms the setup; websocket tick flow opens only on live continuation.",
                 f"move={max(recent_change, burst_change, change_rate):.2f}% extension={trend_extension_pct:.2f}% rsi={rsi_value}",
                 trend_note, ignition_note, timing_note,
             ],
