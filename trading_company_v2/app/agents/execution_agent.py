@@ -6,23 +6,16 @@ from app.core.models import AgentResult, PaperOrder
 
 
 STOP_LIKE_EXIT_REASONS = {
+    # True hard stops: position hit the max-loss threshold immediately / near-immediately.
+    # These count toward stop_pressure and candidate penalties.
+    # Time-gated managed exits (trend_invalid, downtrend, no_lift, failed_ignition, etc.) are NOT
+    # included here — they represent controlled risk management after holding a valid duration,
+    # not immediate-entry failures. Including them caused cascading throttling after any losing run.
     "stop_hit",
     "rapid_stop_hit",
     "early_failure",
-    "failed_ignition",
-    "failed_followthrough",
-    "rapid_failed_start",
-    "rapid_no_lift",
-    "no_lift_exit",
-    "rapid_reversal_loss",
-    "reversal_loss_exit",
-    "rapid_repeat_symbol_failure",
-    "trend_reversal_exit",
-    "downtrend_exit",
-    "trend_invalid_exit",
-    "bearish_divergence_exit",
-    "rapid_flat_timeout",
-    "flat_no_lift_exit",
+    "rapid_failed_start",      # 4 min + peak ≤ 0.05% + pnl ≤ -0.75%  (never showed life)
+    "rapid_repeat_symbol_failure",  # repeated failure on same symbol
 }
 
 
