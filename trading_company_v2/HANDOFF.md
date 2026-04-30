@@ -1716,3 +1716,14 @@ python walk_forward.py
 - Move entry timing from "cycle says buy" to "cycle prepares, tick confirms, tick opens."
 - Keep the existing agent stack as the strategic filter while making execution timing closer to a dedicated execution engine.
 - This is still paper/live-stack Python, not colocated HFT, but it removes the largest architectural mismatch between trend detection and fast execution.
+
+### Immediate Tuning After First Live Samples
+
+- First two tick-entry samples opened correctly but closed as `rapid_tick_failed_start` with no positive peak.
+- Tightened tick-entry quality gate:
+  - candidate `combined_score` 0.64 -> 0.72
+  - candidate `trend_follow_score` 0.70 -> 0.76
+  - candidate orderbook bid/ask 1.02 -> 1.08
+  - reject exhausted/late 1m candidates using `micro_move_3_pct` and `micro_vwap_gap_pct`
+  - tick ignition now requires stronger stream score, 5s lift, 15s move band, and 60%+ buy pressure
+- Intent: keep the new tick-speed architecture, but stop treating weak micro-bursts as valid trend ignition.

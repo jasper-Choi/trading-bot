@@ -88,6 +88,8 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     trend_alignment = str(item.get("trend_alignment", "") or "")
     orderbook_bid_ask = _float(item.get("orderbook_bid_ask_ratio", 0.0))
     signal_freshness = _float(item.get("signal_freshness", 1.0), 1.0)
+    micro_move_3 = _float(item.get("micro_move_3_pct", 0.0))
+    micro_vwap_gap = _float(item.get("micro_vwap_gap_pct", 0.0))
     recent_change = _float(item.get("recent_change_pct", 0.0))
     burst_change = _float(item.get("burst_change_pct", 0.0))
     ema_gap = _float(item.get("ema_gap_pct", 0.0))
@@ -97,11 +99,14 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     return (
         bool(item.get("trend_entry_allowed", False))
         and trend_alignment in {"trend_long", "pullback_long"}
-        and trend_score >= 0.70
-        and combined >= 0.64
-        and orderbook_bid_ask >= 1.02
+        and trend_score >= 0.76
+        and combined >= 0.72
+        and orderbook_bid_ask >= 1.08
         and signal_freshness >= 0.55
+        and -0.45 <= micro_move_3 <= 1.20
+        and micro_vwap_gap <= 1.80
         and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
         and not hard_overheat
     )
 
@@ -381,15 +386,17 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
     stream_score = _float(stream.get("stream_score", 0.0))
     move_15 = _float(stream.get("stream_move_15s_pct", 0.0))
     move_60 = _float(stream.get("stream_move_60s_pct", 0.0))
+    move_5 = _float(stream.get("stream_move_5s_pct", 0.0))
     buy_ratio = _float(stream.get("stream_buy_ratio_15s", 0.0))
     ignition = (
         bool(stream.get("stream_fresh", False))
         and not bool(stream.get("stream_reversal", False))
         and ticks_15 >= 3
-        and stream_score >= 0.64
-        and move_15 >= 0.24
+        and stream_score >= 0.70
+        and move_5 >= 0.08
+        and 0.28 <= move_15 <= 0.85
         and move_60 >= -0.12
-        and buy_ratio >= 0.54
+        and buy_ratio >= 0.60
     )
     if not ignition:
         return {**guard_summary, "entry_opened": 0, "reason": "entry_wait_tick_ignition"}
