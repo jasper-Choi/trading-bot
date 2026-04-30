@@ -3,6 +3,71 @@
 Last updated: 2026-04-30
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Claude Notes - 2026-04-30 (session 2)
+
+### Strategic Direction (user-confirmed)
+오토/퀀트 트레이딩: 추세 추종 + 틱/밀리초 즉각 대응.
+- **Entry**: 상승 추세 트리거 포착 즉시 올라타기 (no EMA-stack delay)
+- **Exit**: 하락 추세 트리거 포착 즉시 청산 (no hold-time buffer)
+- 분봉/시간봉/일봉 = 컨텍스트만. 딜레이 도구 아님.
+- Goal: 1천만원 → 1억원 (2026년 내)
+
+### Fix A: Trail protection for +0.40-0.80% peak positions (`state_store.py`)
+`_crypto_trail_rules()` previously had no tier between 0% and 0.80% — a position peaking at
++0.50% could reverse all the way to 0% with zero automatic protection (API3 trade pattern).
+
+Added new tier:
+```python
+if peak_pnl >= 0.40:
+    return 0.30, 0.00  # exit if falls 0.30% from peak → near breakeven
+```
+Now: peak=0.50% → trail fires at +0.20% instead of waiting for hard stop at -2%.
+
+### Fix B: `trend_early_entry` flag in `signal_engine.py`
+`trend_entry_allowed` requires full 3-EMA stack (EMA8 > EMA21 > EMA34 on 15m), which lags
+trend start by 45-90 min. Bot was entering at the TOP of impulse moves.
+
+New flag `trend_early_entry` fires 1-2 candles (15-30 min) BEFORE full EMA stack confirms:
+```python
+trend_early_entry = (
+    price_above_EMA21
+    and trend_slope_pct >= 0.08
+    and trend_alignment not in {"downtrend", "late_extension"}
+    and (choch_bullish or bos_bullish)      # structural break = real trend change
+    and not choch_bearish
+    and not rsi_bearish_divergence
+)
+```
+
+### Fix C: `trend_early_entry` propagated through agent pipeline (`crypto_desk_agent.py`)
+Added `"trend_early_entry"` field to `ranked_candidates` dict, leader fallback dict, and
+leader propagation section. Now flows all the way to hot_path_guard and recommendation_engine.
+
+### Fix D: Hot path early trend path + extension gate (`hot_path_guard.py`)
+`_candidate_is_hot_entry_eligible()` refactored into two paths:
+
+**Standard path** (EMA stack confirmed):
+- Same as before + `trend_extension_pct <= 3.0` (blocks entry when price is 3%+ above EMA21)
+
+**Early trend path** (CHoCH/BOS fires before EMA stack):
+- `trend_early_entry=True` + not in downtrend/late_extension
+- Stricter thresholds: `trend_score >= 0.70`, `combined >= 0.74`, `ob >= 1.20`, `extension <= 2.0`
+
+### Fix E: Extension gate in `recommendation_engine.py`
+`direct_entry_ok` now includes:
+```python
+and (trend_extension_pct <= 2.8 or pullback_detected)
+```
+Prevents the orchestrator from recommending direct entry when price is already 3%+ overextended
+from EMA21 (which was the root cause of many "enter at top of impulse" trades).
+
+### Files changed this session
+- `app/core/state_store.py` — trail tier 0.40-0.80%
+- `app/services/signal_engine.py` — `trend_early_entry` flag
+- `app/agents/crypto_desk_agent.py` — propagate `trend_early_entry`
+- `app/services/hot_path_guard.py` — early trend path + extension gate
+- `app/services/recommendation_engine.py` — extension gate on `direct_entry_ok`
+
 ## 0. Latest Claude Notes - 2026-04-30
 
 ### Root Cause: Cascading Failure Cycle (now fixed)

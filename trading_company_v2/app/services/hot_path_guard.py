@@ -95,20 +95,36 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     ema_gap = _float(item.get("ema_gap_pct", 0.0))
     rsi = item.get("rsi")
     rsi_value = _float(rsi, 0.0) if rsi is not None else 0.0
+    trend_extension_pct = _float(item.get("trend_extension_pct", 0.0))
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or rsi_value >= 92.0
-    return (
-        bool(item.get("trend_entry_allowed", False))
-        and trend_alignment in {"trend_long", "pullback_long"}
-        and trend_score >= 0.76
-        and combined >= 0.72
-        and orderbook_bid_ask >= 1.08
-        and signal_freshness >= 0.55
+    common_guards = (
+        signal_freshness >= 0.55
         and -0.45 <= micro_move_3 <= 1.20
         and micro_vwap_gap <= 1.80
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
         and not hard_overheat
     )
+    # Standard path: full EMA stack confirmed, price not overextended
+    standard_ok = (
+        bool(item.get("trend_entry_allowed", False))
+        and trend_alignment in {"trend_long", "pullback_long"}
+        and trend_score >= 0.76
+        and combined >= 0.72
+        and orderbook_bid_ask >= 1.08
+        and trend_extension_pct <= 3.0
+    )
+    # Early trend path: CHoCH/BOS structural break before EMA stack catches up
+    # Requires stricter score + stronger orderbook since structure is less confirmed
+    early_ok = (
+        bool(item.get("trend_early_entry", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.70
+        and combined >= 0.74
+        and orderbook_bid_ask >= 1.20
+        and trend_extension_pct <= 2.0
+    )
+    return common_guards and (standard_ok or early_ok)
 
 
 def refresh_hot_entry_candidates(state: dict[str, Any] | None = None, force: bool = False) -> dict[str, dict[str, Any]]:

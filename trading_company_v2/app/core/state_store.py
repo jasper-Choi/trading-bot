@@ -375,6 +375,7 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
       peak >= 1.8%  → floor 0.70%
       peak >= 1.0%  → floor 0.35%  (lock in ≥0.35% once +1% seen)
       peak >= 0.80% → floor 0.12%  (near breakeven lock once +0.8% seen)
+      peak >= 0.40% → floor 0.00%  (추세 반전 시 즉시 수익 보호; 0.30% 되돌리면 청산)
     """
     if peak_pnl >= 5.0:
         return 1.20, 2.20
@@ -386,6 +387,8 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
         return 0.45, 0.35
     if peak_pnl >= 0.80:
         return 0.40, 0.12  # once +0.8% seen: floor at breakeven+, exit around +0.40%
+    if peak_pnl >= 0.40:
+        return 0.30, 0.00  # once +0.40% seen: exit if falls 0.30% from peak → near breakeven
     return 0.0, 0.0
 
 

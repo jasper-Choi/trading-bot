@@ -327,6 +327,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and trend_follow_score >= 0.58
         and launch_confirmed
         and not rsi_bearish_divergence
+        and (trend_extension_pct <= 2.8 or pullback_detected)
     )
     # combined_score_ok: lower-conviction path for moderate composite readings.
     # Fires when combined_score is meaningful but below the direct_entry_ok threshold,

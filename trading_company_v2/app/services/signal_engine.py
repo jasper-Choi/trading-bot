@@ -862,6 +862,21 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     else:
         bias = "balanced"
     pullback = detect_pullback_entry(candles)
+    # Early trend entry: structural break (CHoCH/BOS) before full EMA stack confirms.
+    # Fires 1-2 candles (15-30 min) earlier than trend_entry_allowed — captures the
+    # moment the market STARTS the uptrend, not after it's already confirmed.
+    # Requires: price above EMA21 + rising slope + CHoCH/BOS structure + no bearish reversal.
+    choch_bullish = bool(ict.get("choch_bullish"))
+    bos_bullish = bool(ict.get("bos_bullish"))
+    choch_bearish = bool(ict.get("choch_bearish"))
+    trend_early_entry = (
+        bool(trend.get("price_above_trend_ema", False))
+        and float(trend.get("trend_slope_pct", 0.0) or 0.0) >= 0.08
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and (choch_bullish or bos_bullish)
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
     return {
         "bias": bias,
         "score": score,
@@ -884,6 +899,7 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "trend_follow_score": trend_score,
         "trend_alignment": trend_alignment,
         "trend_entry_allowed": bool(trend.get("trend_entry_allowed", False)),
+        "trend_early_entry": trend_early_entry,
         "ema_stack_bullish": bool(trend.get("ema_stack_bullish", False)),
         "price_above_trend_ema": bool(trend.get("price_above_trend_ema", False)),
         "trend_slope_pct": float(trend.get("trend_slope_pct", 0.0) or 0.0),
@@ -894,9 +910,9 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "kill_zone_name": ict.get("kill_zone_name"),
         "ssl_sweep_confirmed": bool(ict.get("ssl_sweep_confirmed")),
         "bsl_sweep_confirmed": bool(ict.get("bsl_sweep_confirmed")),
-        "choch_bullish": bool(ict.get("choch_bullish")),
-        "choch_bearish": bool(ict.get("choch_bearish")),
-        "bos_bullish": bool(ict.get("bos_bullish")),
+        "choch_bullish": choch_bullish,
+        "choch_bearish": choch_bearish,
+        "bos_bullish": bos_bullish,
         "bos_bearish": bool(ict.get("bos_bearish")),
         "price_at_bull_ob": bool(ict.get("price_at_bull_ob")),
         "price_in_bull_fvg": bool(ict.get("price_in_bull_fvg")),
