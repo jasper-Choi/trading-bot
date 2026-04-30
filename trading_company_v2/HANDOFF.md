@@ -1557,3 +1557,33 @@ python walk_forward.py
 
 - Avoid entries that look good on 15m structure but have no immediate lift.
 - Keep trading active, but make "active" mean live momentum is actually present, not just a historical trend setup.
+
+## 42. Tick-Driven Crypto Rapid Guard (2026-04-30)
+
+### Diagnosis
+
+- The bot already used the Upbit websocket cache, but the websocket subscription was ticker-first.
+- Strategy cycles were still effectively candle-cycle driven:
+  - 15m/1m selected candidates
+  - stream/tick fields were used as score inputs
+  - rapid guard between cycles mostly used price-only trailing/stop logic
+- For the user's target style, candles should define the direction/filter, but entry/exit response must be driven by live ticks.
+
+### Completed
+
+- `app/services/upbit_stream_cache.py`
+  - Added Upbit websocket `trade` subscription alongside `ticker`.
+  - Added `_normalize_trade_message()`.
+  - Added `_append_trade_tick()` with a 180-second rolling trade buffer.
+  - Trade messages now update the latest price and append true trade ticks without overwriting ticker liquidity fields.
+- `app/core/state_store.py`
+  - `rapid_guard_crypto_positions()` now uses `summarize_stream_momentum()` for open crypto positions.
+  - Added tick-driven rapid exits before hard stop:
+    - `rapid_tick_failed_start` when a position never lifts and the 15s tick stream reverses.
+    - `rapid_tick_reversal` when a small profitable start reverses sharply in tick flow.
+
+### Intent
+
+- Change the operating model from "minute-candle reaction" toward "candle-filtered, tick-driven trend following."
+- Keep 15m/1m candles as market structure filters, but let live trade ticks handle fast invalidation.
+- Cut dead entries earlier before they drift into larger `rapid_failed_start` or hard-stop losses.

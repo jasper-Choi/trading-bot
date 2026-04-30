@@ -88,6 +88,50 @@ def _normalize_ticker_message(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _normalize_trade_message(payload: dict[str, Any]) -> dict[str, Any] | None:
+    market = str(payload.get("code") or payload.get("cd") or "").strip()
+    if not market:
+        return None
+    try:
+        trade_price = float(payload.get("trade_price", payload.get("tp")) or 0.0)
+    except (TypeError, ValueError):
+        trade_price = 0.0
+    if trade_price <= 0:
+        return None
+    try:
+        trade_ts = int(payload.get("trade_timestamp", payload.get("ttms")) or 0)
+    except (TypeError, ValueError):
+        trade_ts = 0
+    try:
+        trade_volume = float(payload.get("trade_volume", payload.get("tv")) or 0.0)
+    except (TypeError, ValueError):
+        trade_volume = 0.0
+    return {
+        "market": market,
+        "trade_price": trade_price,
+        "trade_volume": trade_volume,
+        "ask_bid": str(payload.get("ask_bid", payload.get("ab")) or "").upper(),
+        "trade_timestamp": trade_ts,
+        "received_at": _now(),
+        "source": "upbit_ws_trade",
+    }
+
+
+def _append_trade_tick(row: dict[str, Any]) -> None:
+    ticks = _trade_ticks.setdefault(row["market"], deque(maxlen=360))
+    ticks.append(
+        {
+            "received_at": row["received_at"],
+            "price": row["trade_price"],
+            "volume": row.get("trade_volume", 0.0),
+            "ask_bid": row.get("ask_bid", ""),
+        }
+    )
+    cutoff = row["received_at"] - 180.0
+    while ticks and float(ticks[0].get("received_at") or 0.0) < cutoff:
+        ticks.popleft()
+
+
 async def _stream_loop(markets_provider: Callable[[], list[str]]) -> None:
     global _stream_error
     backoff = 1.0
@@ -113,6 +157,7 @@ async def _stream_loop(markets_provider: Callable[[], list[str]]) -> None:
                 request = [
                     {"ticket": f"trading-company-{uuid.uuid4()}"},
                     {"type": "ticker", "codes": markets, "is_only_realtime": True},
+                    {"type": "trade", "codes": markets, "is_only_realtime": True},
                     {"format": "DEFAULT"},
                 ]
                 await ws.send(json.dumps(request))
@@ -125,23 +170,31 @@ async def _stream_loop(markets_provider: Callable[[], list[str]]) -> None:
                         payload = json.loads(raw)
                     except (TypeError, ValueError):
                         continue
-                    row = _normalize_ticker_message(payload)
-                    if row is None:
-                        continue
+                    message_type = str(payload.get("type") or payload.get("ty") or "").lower()
                     with _lock:
-                        _ticker_cache[row["market"]] = row
-                        ticks = _trade_ticks.setdefault(row["market"], deque(maxlen=240))
-                        ticks.append(
-                            {
-                                "received_at": row["received_at"],
-                                "price": row["trade_price"],
-                                "volume": row["trade_volume"],
-                                "ask_bid": row["ask_bid"],
-                            }
-                        )
-                        cutoff = row["received_at"] - 120.0
-                        while ticks and float(ticks[0].get("received_at") or 0.0) < cutoff:
-                            ticks.popleft()
+                        if message_type == "trade":
+                            row = _normalize_trade_message(payload)
+                            if row is None:
+                                continue
+                            cached = dict(_ticker_cache.get(row["market"]) or {})
+                            cached.update(
+                                {
+                                    "market": row["market"],
+                                    "trade_price": row["trade_price"],
+                                    "trade_volume": row["trade_volume"],
+                                    "ask_bid": row["ask_bid"],
+                                    "trade_timestamp": row["trade_timestamp"],
+                                    "received_at": row["received_at"],
+                                }
+                            )
+                            cached.setdefault("source", "upbit_ws")
+                            _ticker_cache[row["market"]] = cached
+                            _append_trade_tick(row)
+                        else:
+                            row = _normalize_ticker_message(payload)
+                            if row is None:
+                                continue
+                            _ticker_cache[row["market"]] = row
         except Exception as exc:
             _stream_error = str(exc)[:240]
             await asyncio.sleep(min(backoff, 30.0))

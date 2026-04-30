@@ -13,6 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, obje
 
 from app.config import settings
 from app.core.models import AgentSnapshot, ClosedPosition, CompanyState, CycleJournalEntry, PaperOrder, Position, utcnow_iso
+from app.services.upbit_stream_cache import summarize_stream_momentum
 
 
 class Base(DeclarativeBase):
@@ -917,7 +918,7 @@ def load_crypto_rapid_guard_symbols() -> list[str]:
 
 
 def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
-    """Fast price-only guard for open crypto positions between full strategy cycles."""
+    """Fast tick/price guard for open crypto positions between full strategy cycles."""
     if not prices:
         return {"checked": 0, "paper_closed": 0, "live_closed": 0}
     init_db()
@@ -965,6 +966,20 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 # Not added to STOP_LIKE_EXIT_REASONS so it doesn't cascade into risk throttling.
                 closed_symbols.append((position.symbol, "failed_breakout_exit"))
                 _close_position(position, "failed_breakout_exit")
+                paper_closed += 1
+            elif (
+                (stream := summarize_stream_momentum(position.symbol, max_age_seconds=3.5))
+                and bool(stream.get("stream_reversal", False))
+                and minutes_open >= 0.5
+                and position.pnl_pct <= 0.15
+                and (
+                    (peak_pnl <= 0.15 and position.pnl_pct <= -0.12)
+                    or (peak_pnl >= 0.20 and position.pnl_pct <= max(-0.15, peak_pnl - 0.55))
+                )
+            ):
+                reason = "rapid_tick_failed_start" if peak_pnl <= 0.15 else "rapid_tick_reversal"
+                closed_symbols.append((position.symbol, reason))
+                _close_position(position, reason)
                 paper_closed += 1
             elif position.pnl_pct <= stop_pct:
                 closed_symbols.append((position.symbol, "rapid_stop_hit"))
