@@ -707,6 +707,11 @@ class ExecutionAgent(BaseAgent):
         )
         trend_alignment = str(meta.get("trend_alignment", "") or "")
         rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
+        obvious_ok, obvious_reason = self._crypto_obvious_trend_entry_ok(meta)
+        if obvious_ok:
+            recent_failure = self._recent_crypto_symbol_failure(symbol)
+            if not recent_failure or score >= 0.55 or float(meta.get("signal_score", 0.0) or 0.0) >= 0.82:
+                return True, obvious_reason
         stream_timing_ok = (
             stream_fresh
             and stream_age <= 3.5
@@ -777,6 +782,51 @@ class ExecutionAgent(BaseAgent):
         return True, f"eligible combined={score:.2f} trend={trend_score:.2f} ob={orderbook_bid_ask:.2f}x"
 
     @staticmethod
+    def _crypto_obvious_trend_entry_ok(meta: dict) -> tuple[bool, str]:
+        if not meta:
+            return False, "missing metadata"
+        chart_score = float(meta.get("signal_score", 0.0) or 0.0)
+        combined = float(meta.get("combined_score", 0.0) or 0.0)
+        trend_score = float(meta.get("trend_follow_score", 0.0) or 0.0)
+        trend_alignment = str(meta.get("trend_alignment", "") or "")
+        trend_allowed = bool(meta.get("trend_entry_allowed", False))
+        trend_early = bool(meta.get("trend_early_entry", False))
+        recent_change = float(meta.get("recent_change_pct", 0.0) or 0.0)
+        burst_change = float(meta.get("burst_change_pct", 0.0) or 0.0)
+        change_rate = float(meta.get("change_rate", 0.0) or 0.0)
+        freshness = float(meta.get("signal_freshness", 1.0) or 1.0)
+        ema_gap = float(meta.get("ema_gap_pct", 0.0) or 0.0)
+        micro_vwap_gap = float(meta.get("micro_vwap_gap_pct", 0.0) or 0.0)
+        trend_extension = float(meta.get("trend_extension_pct", 0.0) or 0.0)
+        rsi_value = meta.get("rsi")
+        try:
+            rsi_float = float(rsi_value) if rsi_value is not None else 0.0
+        except (TypeError, ValueError):
+            rsi_float = 0.0
+        stream_reversal = bool(meta.get("stream_reversal", False))
+        stream_fresh = bool(meta.get("stream_fresh", False))
+        top_risk = ema_gap >= 10.0 or rsi_float >= 88.0 or bool(meta.get("rsi_bearish_divergence", False))
+        ok = (
+            trend_alignment in {"trend_long", "pullback_long", "range"}
+            and (trend_allowed or trend_early or trend_score >= 0.76)
+            and trend_score >= 0.68
+            and chart_score >= 0.76
+            and combined >= 0.34
+            and max(recent_change, burst_change, change_rate) >= 2.0
+            and freshness >= 0.50
+            and trend_extension <= 8.5
+            and micro_vwap_gap <= 6.5
+            and not top_risk
+            and not (stream_fresh and stream_reversal)
+        )
+        return (
+            ok,
+            f"obvious 15m trend ride chart={chart_score:.2f} combined={combined:.2f} "
+            f"trend={trend_score:.2f} move={max(recent_change, burst_change, change_rate):.2f}% "
+            f"ext={trend_extension:.2f}% rsi={rsi_float:.0f}",
+        )
+
+    @staticmethod
     def _crypto_range_impulse_armed(meta: dict) -> tuple[bool, str]:
         if not meta:
             return False, "missing metadata"
@@ -822,11 +872,20 @@ class ExecutionAgent(BaseAgent):
         micro_score = float(meta.get("micro_score", 0.0) or 0.0)
         stream_score = float(meta.get("stream_score", 0.0) or 0.0)
         orderbook_bid_ask = float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
-        mapped["focus"] = (
-            f"{mapped['symbol']} candidate-specific multi-coin entry "
-            f"(combined {mapped['signal_score']:.2f}, {trend_alignment}, "
-            f"micro {micro_score:.2f}, stream {stream_score:.2f}, ob {orderbook_bid_ask:.2f}x)"
-        )
+        obvious_ok, obvious_reason = ExecutionAgent._crypto_obvious_trend_entry_ok(meta)
+        if obvious_ok:
+            mapped["entry_profile"] = "obvious_trend"
+            mapped["focus"] = (
+                f"{mapped['symbol']} obvious_trend 15m trend ride "
+                f"(combined {mapped['signal_score']:.2f}, {trend_alignment}, "
+                f"micro {micro_score:.2f}, stream {stream_score:.2f}, ob {orderbook_bid_ask:.2f}x)"
+            )
+        else:
+            mapped["focus"] = (
+                f"{mapped['symbol']} candidate-specific multi-coin entry "
+                f"(combined {mapped['signal_score']:.2f}, {trend_alignment}, "
+                f"micro {micro_score:.2f}, stream {stream_score:.2f}, ob {orderbook_bid_ask:.2f}x)"
+            )
         passthrough_keys = (
             "discovery_score", "change_rate", "volume_24h_krw",
             "recent_change_pct", "burst_change_pct", "ema_gap_pct", "pullback_gap_pct", "range_4_pct", "rsi",
@@ -841,7 +900,7 @@ class ExecutionAgent(BaseAgent):
             "btc_corr_15m", "signal_freshness", "signal_age_minutes", "freshness_reason",
             "breakout_confirmed", "breakout_partial", "breakout_count", "vol_ratio", "breakout_score",
             "trend_follow_score", "trend_alignment", "trend_entry_allowed", "trend_slope_pct",
-            "trend_extension_pct", "trend_reasons",
+            "trend_extension_pct", "trend_early_entry", "entry_profile", "trend_reasons",
             "rsi_quality_ok", "rsi_reset_confirmed", "rsi_bearish_divergence", "rsi_extreme",
             "ict_score", "kill_zone_active", "kill_zone_name", "ssl_sweep_confirmed",
             "choch_bullish", "choch_bearish", "bos_bullish", "bos_bearish", "ict_bullish_count",
@@ -857,6 +916,8 @@ class ExecutionAgent(BaseAgent):
             f"trend={mapped.get('trend_follow_score', 0.0):.2f} "
             f"ob={mapped.get('orderbook_bid_ask_ratio', 0.0):.2f}x"
         )
+        if obvious_ok:
+            notes.append(obvious_reason)
         mapped["notes"] = notes
         return mapped
 
@@ -893,6 +954,29 @@ class ExecutionAgent(BaseAgent):
         """Generate up to max_positions concurrent orders per desk from ranked candidates."""
         action = str(plan.get("action", ""))
         if action not in {"probe_longs", "attack_opening_drive", "selective_probe"}:
+            if desk == "crypto":
+                candidate_meta = {
+                    str(item.get("market", "")).strip(): item
+                    for item in (plan.get("candidate_markets") or [])
+                    if str(item.get("market", "")).strip()
+                }
+                obvious_candidates = [
+                    symbol
+                    for symbol, meta in candidate_meta.items()
+                    if self._crypto_obvious_trend_entry_ok(meta)[0]
+                    and not self._has_open_position(desk, symbol)
+                ]
+                if obvious_candidates:
+                    trend_plan = dict(plan)
+                    trend_plan["action"] = "probe_longs"
+                    trend_plan["size"] = "0.72x"
+                    trend_plan["symbol"] = obvious_candidates[0]
+                    trend_plan["candidate_symbols"] = obvious_candidates[1:6]
+                    trend_plan["focus"] = "Obvious 15m trend ride overrides watchlist-only gate."
+                    trend_plan["notes"] = list(plan.get("notes", []) or []) + [
+                        "Watchlist override: at least one candidate has a clear 15m rising trigger.",
+                    ]
+                    return self._multi_orders(desk, trend_plan)
             return [self._plan_to_order(desk, plan).model_dump()]
 
         max_positions, _ = self._desk_limits(desk)

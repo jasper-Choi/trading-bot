@@ -164,6 +164,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
     soft_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 85.0)
+    try:
+        rsi_numeric = float(rsi_value) if rsi_value is not None else 0.0
+    except (TypeError, ValueError):
+        rsi_numeric = 0.0
     stream_timing_ok = (
         stream_fresh
         and stream_age <= 3.5
@@ -201,6 +205,36 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and not late_chase_risk
         and not hard_overheat
     )
+    # Obvious trend ride:
+    # A clear 15m rising trigger should not be blocked by weak orderbook/micro
+    # snapshots. Candles define the setup; tick/rapid guard manages the exit line.
+    obvious_trend_ride_ok = (
+        trend_alignment in {"trend_long", "pullback_long", "range"}
+        and (trend_entry_allowed or trend_follow_score >= 0.76)
+        and trend_follow_score >= 0.68
+        and signal_score >= 0.38
+        and max(recent_change, burst_change, change_rate) >= 2.0
+        and trend_extension_pct <= 8.5
+        and not rsi_bearish_divergence
+        and rsi_numeric < 88.0
+        and not (stream_fresh and stream_reversal and stream_move_15 <= -0.25)
+    )
+    if obvious_trend_ride_ok and stance != "DEFENSE":
+        entry_size = "0.72x" if signal_score >= 0.55 else "0.55x"
+        if trend_extension_pct >= 6.5:
+            entry_size = "0.42x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"{lead_market or 'KRW-BTC'} obvious 15m trend ride - enter first, trail the line.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                "obvious_trend_ride: 15m trend trigger overrides confirmation-wait gates.",
+                f"move={max(recent_change, burst_change, change_rate):.2f}% extension={trend_extension_pct:.2f}% rsi={rsi_value}",
+                trend_note, ignition_note, timing_note,
+            ],
+        }
     if hard_overheat and not (signal_score >= 0.68 and micro_score >= 0.50 and flow_support):
         return {
             "action": "watchlist_only",

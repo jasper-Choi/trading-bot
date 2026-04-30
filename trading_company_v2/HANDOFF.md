@@ -1843,3 +1843,51 @@ python walk_forward.py
   - hard fail close at `-0.40%`
   - if peak reaches `+0.28%`, protect at roughly `peak - 0.35%`
 - Intent: keep scanning/arming fast movers, but make each failed range scalp cheap until the pattern proves positive expectancy.
+
+## 48. Obvious 15m Trend Ride Override (2026-04-30)
+
+### User Doctrine
+
+- Candles/minute/hour/day charts are context and trigger discovery.
+- Entry/exit/profit protection must happen on tick/second speed.
+- If a 15m chart is already in a clear rising trigger, the bot should not keep saying "confirmation wait" just because snapshot orderbook/micro/combined score is weak.
+- Once entered, the exit line must rise with profit instead of letting a paid trend fall back into loss.
+
+### Completed
+
+- `app/services/hot_path_guard.py`
+  - Added `obvious_trend` entry profile.
+  - Clear 15m trend candidates can now be prepared even when orderbook/micro snapshot gates are weak.
+  - Tick entry requires only lightweight no-reversal validation:
+    - fresh stream
+    - at least 1 tick in the 15s window
+    - 15s and 60s moves not actively dumping
+    - buy ratio at least 42%
+  - Size is larger than `range_impulse` but still capped (`0.07x-0.12x`) until expectancy improves.
+
+- `app/agents/execution_agent.py`
+  - Added `_crypto_obvious_trend_entry_ok()`.
+  - Candidate-level execution can now approve obvious 15m trends without requiring orderbook >= 1.08x or launch-confirmed gates.
+  - If the global `crypto_plan` is `watchlist_only`, execution now scans candidate metadata anyway and overrides to `probe_longs` when an obvious trend exists.
+  - Focus/notes explicitly label these entries as `obvious_trend 15m trend ride`.
+
+- `app/services/recommendation_engine.py`
+  - Added `obvious_trend_ride_ok` before the defensive hard-overheat / volume gates.
+  - Clear rising 15m trend can return `probe_longs` directly with focus:
+    - `obvious 15m trend ride - enter first, trail the line`
+
+- `app/core/state_store.py`
+  - Raised the crypto trailing exit line sooner:
+    - peak >= `0.55%`: floor `+0.05%`
+    - peak >= `0.80%`: floor `+0.18%`
+    - peak >= `1.20%`: floor `+0.45%`
+  - Intent: when trend pays, move the liquidation line up with the position.
+
+### Intent
+
+- HYPER/BIO/SPK-style visible 15m trend leaders should no longer die at "score not enough / confirmation wait" before execution sees them.
+- This is intentionally more aggressive. The remaining guards are top-risk filters only:
+  - RSI extreme,
+  - bearish divergence,
+  - excessive trend extension,
+  - immediate live stream reversal.

@@ -383,10 +383,14 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
         return 0.90, 1.20
     if peak_pnl >= 1.8:
         return 0.65, 0.70
+    if peak_pnl >= 1.2:
+        return 0.45, 0.45
     if peak_pnl >= 1.0:
         return 0.45, 0.35
     if peak_pnl >= 0.80:
-        return 0.40, 0.12  # once +0.8% seen: floor at breakeven+, exit around +0.40%
+        return 0.35, 0.18  # raise the exit line once +0.8% has paid
+    if peak_pnl >= 0.55:
+        return 0.30, 0.05
     if peak_pnl >= 0.40:
         return 0.30, 0.00  # once +0.40% seen: exit if falls 0.30% from peak → near breakeven
     return 0.0, 0.0

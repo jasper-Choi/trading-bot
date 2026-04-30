@@ -61,8 +61,16 @@ def _size_to_notional(size: str) -> float:
 def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
     combined = _float(candidate.get("combined_score", candidate.get("signal_score", 0.0)))
     trend = _float(candidate.get("trend_follow_score", 0.0))
+    chart = _float(candidate.get("signal_score", 0.0))
     stream_score = _float(stream.get("stream_score", 0.0))
-    if str(candidate.get("entry_profile", "") or "") == "range_impulse":
+    entry_profile = str(candidate.get("entry_profile", "") or "")
+    if entry_profile == "obvious_trend":
+        if chart >= 0.84 and trend >= 0.82 and stream_score >= 0.55:
+            return 0.12
+        if chart >= 0.78 and trend >= 0.76:
+            return 0.09
+        return 0.07
+    if entry_profile == "range_impulse":
         if combined >= 0.62 and stream_score >= 0.84:
             return 0.04
         return 0.03
@@ -145,8 +153,26 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and micro_vwap_gap <= 4.2
         and not bool(item.get("rsi_bearish_divergence", False))
     )
+    # Obvious trend path:
+    # If the 15m chart is already in a clear rising trigger, do not bury it
+    # behind orderbook/micro snapshot gates. The websocket still checks that
+    # the current tick is not an immediate sell reversal before opening.
+    obvious_top_risk = ema_gap >= 10.0 or rsi_value >= 88.0 or bool(item.get("rsi_bearish_divergence", False))
+    obvious_trend_ok = (
+        trend_alignment in {"trend_long", "pullback_long", "range"}
+        and (bool(item.get("trend_entry_allowed", False)) or bool(item.get("trend_early_entry", False)) or trend_score >= 0.76)
+        and chart_score >= 0.76
+        and max(recent_change, change_rate, burst_change) >= 2.0
+        and signal_freshness >= 0.50
+        and trend_extension_pct <= 8.5
+        and micro_vwap_gap <= 6.5
+        and not obvious_top_risk
+    )
     if common_guards and (standard_ok or early_ok):
         item["entry_profile"] = "trend_ignition"
+        return True
+    if obvious_trend_ok:
+        item["entry_profile"] = "obvious_trend"
         return True
     if range_impulse_ok:
         item["entry_profile"] = "range_impulse"
@@ -441,7 +467,15 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
     buy_ratio = _float(stream.get("stream_buy_ratio_15s", 0.0))
     entry_profile = str(candidate.get("entry_profile", "trend_ignition") or "trend_ignition")
     stream_ok = bool(stream.get("stream_fresh", False)) and not bool(stream.get("stream_reversal", False))
-    if entry_profile == "range_impulse":
+    if entry_profile == "obvious_trend":
+        ignition = (
+            stream_ok
+            and ticks_15 >= 1
+            and move_15 >= -0.18
+            and move_60 >= -0.28
+            and buy_ratio >= 0.42
+        )
+    elif entry_profile == "range_impulse":
         ignition = (
             stream_ok
             and ticks_15 >= 4
