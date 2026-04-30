@@ -696,10 +696,32 @@ class ExecutionAgent(BaseAgent):
             or (breakout_count >= 2 and vol_ratio >= 1.4)
             or (pullback_score >= 0.75 and micro_score >= 0.42)
         )
+        trend_alignment = str(meta.get("trend_alignment", "") or "")
+        rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
+        # --- Trend-pullback fast-path ---
+        # Strong chart trend (pullback_long/uptrend) + very strong orderbook + solid micro.
+        # combined_score can be moderate (0.65+) because the chart structure itself is the signal.
+        # This directly addresses setups like SOL/XRP at combined=0.72 but trend=0.94, ob=2.53x.
+        trend_pullback_eligible = (
+            trend_alignment in ("pullback_long", "uptrend")
+            and trend_allowed
+            and trend_score >= 0.80
+            and orderbook_bid_ask >= 1.60
+            and micro_score >= 0.50
+            and score >= 0.65
+            and not rsi_bearish_div
+            and not hard_overheat
+            and freshness > 0.55
+        )
+        if trend_pullback_eligible:
+            recent_failure = self._recent_crypto_symbol_failure(symbol)
+            if not recent_failure:
+                return True, f"trend_pullback eligible combined={score:.2f} trend={trend_score:.2f} ob={orderbook_bid_ask:.2f}x"
+        # --- Standard path ---
         if score < 0.76:
             return False, f"combined score too low ({score:.2f})"
         if not trend_allowed or trend_score < 0.58:
-            return False, f"trend gate failed ({meta.get('trend_alignment', 'unknown')} {trend_score:.2f})"
+            return False, f"trend gate failed ({trend_alignment} {trend_score:.2f})"
         if orderbook_bid_ask < 1.08:
             return False, f"orderbook not supportive ({orderbook_bid_ask:.2f}x)"
         if not launch_confirmed:
@@ -708,7 +730,7 @@ class ExecutionAgent(BaseAgent):
                 "launch not confirmed "
                 f"(micro {micro_score:.2f}, stream {stream_score:.2f}, breakout {breakout_count}, vol {vol_ratio:.1f}x)",
             )
-        if bool(meta.get("rsi_bearish_divergence", False)):
+        if rsi_bearish_div:
             return False, "bearish RSI divergence"
         if freshness <= 0.55:
             return False, f"stale signal ({freshness:.2f})"
