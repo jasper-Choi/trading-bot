@@ -852,7 +852,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     _close_position(position, "failed_ignition")
                 elif trail_giveback and position.pnl_pct <= protect_level:
                     _close_position(position, "profit_protect" if peak_pnl < 1.8 else "trend_trail")
-                elif peak_pnl >= 0.65 and minutes_open >= 8.0 and position.pnl_pct <= -0.15:
+                elif peak_pnl >= 0.40 and minutes_open >= 3.0 and position.pnl_pct <= max(-0.50, peak_pnl - 1.20):
+                    # Wider failed_followthrough: covers smaller peaks (0.40%+) and fires earlier (3 min).
+                    # Catches reversals before they reach the hard -2% stop.
                     _close_position(position, "failed_followthrough")
                 elif position.cycles_open >= max_cycles and position.pnl_pct < 0.8:
                     _close_position(position, "time_exit")
@@ -962,6 +964,17 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             if position.pnl_pct >= target_pct:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
+                paper_closed += 1
+            elif (
+                0.40 <= peak_pnl < 0.80
+                and minutes_open >= 1.0
+                and position.pnl_pct <= max(-0.55, peak_pnl - 1.10)
+            ):
+                # Mid-range failed breakout: saw initial upside (0.40-0.80%) but fully reversed.
+                # Cuts well before the hard -2% stop — saves ~1-1.5% on API3-style reversals.
+                # Not added to STOP_LIKE_EXIT_REASONS so it doesn't cascade into risk throttling.
+                closed_symbols.append((position.symbol, "failed_breakout_exit"))
+                _close_position(position, "failed_breakout_exit")
                 paper_closed += 1
             elif position.pnl_pct <= stop_pct:
                 closed_symbols.append((position.symbol, "rapid_stop_hit"))
