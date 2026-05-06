@@ -1,7 +1,57 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-04-30
+Last updated: 2026-05-06
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-06 (session 3)
+
+### Root Cause Analysis: 9% win rate, -122% PnL (322 trades)
+- **All 10 recent cycles**: regime=RANGING — trend-following in RANGING = structural loss
+- **74% of trades**: peak_pnl=0.00% — entered at wrong moment, price reversed immediately
+- **Root cause**: bot was running trend strategies in sideways/consolidation market
+
+### Fix F: RANGING regime gate (all 5 files)
+Block trend entries completely in RANGING; add mean-reversion (Airborne) strategy instead.
+
+**signal_engine.py**:
+- `detect_airborne_signal()`: MG 에어본 지표 (price deviation from EMA20 + Bollinger Bands)
+  - `deviation_pct = (price/EMA - 1) * 100`; `deviation_sigma` = normalized
+  - `airborne_long` when deviation_pct <= -1.5% (price below EMA, expect bounce)
+  - `bb_pct_b`, `at_bb_lower` as confirmation
+- `range_scalp_eligible`: airborne_long + RSI 22-48 + flat slope + no bearish structure
+- `rsi_mean_rev_long`: RSI <= 35 + no downtrend (fallback signal)
+
+**recommendation_engine.py**:
+- RANGING block before trend logic: if range_scalp_ok → `probe_longs` with focus="range_scalp:..."
+- Otherwise → `watchlist_only` (trend blocked in RANGING)
+- range_scalp size: 0.55x / 0.45x / 0.35x based on airborne_sigma + bb_lower
+
+**crypto_desk_agent.py**:
+- All airborne/range_scalp fields propagated: candidates, leader fallback, leader payload
+
+**state_store.py**:
+- `_position_thresholds`: "range_scalp" in focus → 1.20% target, -0.70% stop, 75 cycles
+- `_range_scalp_trail_rules(peak_pnl)`: tiered trail (0.15→0.30 giveback per peak tier)
+- `_range_scalp_no_lift_exit()`: exit if no lift after 4-12 min
+- `manage_paper_positions`: branched range_scalp exits
+- `rapid_guard_crypto_positions`: range_scalp rapid path
+
+**hot_path_guard.py** (this session):
+- `refresh_hot_entry_candidates`: inject `regime` from state into each candidate
+- `_candidate_is_hot_entry_eligible`: RANGING gate at top — blocks all trend paths;
+  range_scalp path: `range_scalp_eligible + airborne_long + score>=0.40 + OB>=1.05`
+- `_hot_entry_size`: range_scalp sizing 0.04-0.06x
+- `hot_guard_crypto_tick`: pass `focus` to `_position_thresholds`; dedicated range_scalp
+  rapid guard using `_range_scalp_trail_rules` + `_range_scalp_no_lift_exit`
+- `hot_process_crypto_tick`: range_scalp ignition (lighter bar: move5>=0.05, score>=0.52)
+- `_open_hot_entry`: range_scalp focus tag "range_scalp: ..." for state_store routing
+
+### Pending / Next steps
+- Monitor performance: RANGING gate should push win rate from 9% toward 40%+
+- 50-70 strategy combinations (long-term goal): add BB bounce, VWAP reversion, RSI
+  extreme, stochastic, MACD crossover, etc. — one strategy per 3-5 regime × signal combos
+- Clean up tmp files: `tmp_analyze.py`, `tmp_analyze2.py`, `tmp_vm_query*.py`,
+  `tmp_state.py`, `tmp_deep_analysis.py`
 
 ## 0. Latest Claude Notes - 2026-04-30 (session 2)
 
