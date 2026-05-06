@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.agents.base import BaseAgent
 from app.config import settings
 from app.core.models import AgentResult, PaperOrder
+from app.core.state_store import save_shadow_signal
 
 
 STOP_LIKE_EXIT_REASONS = {
@@ -696,6 +697,21 @@ class ExecutionAgent(BaseAgent):
                 f"peak0 {float(strategy_disabled.get('peak0_pct', 0.0) or 0.0):.1f}%"
             )
         rationale = [meta, *notes]
+        if strategy_disabled and action in actionable_entries:
+            save_shadow_signal(
+                desk=desk,
+                symbol=symbol,
+                strategy_id=strategy_id,
+                entry_profile=entry_profile,
+                source="cycle",
+                action=action,
+                focus=str(plan.get("focus", "")),
+                reason="strategy_disabled",
+                score=float(plan.get("signal_score", 0.0) or 0.0),
+                stream_score=float(plan.get("stream_score", 0.0) or 0.0),
+                notional_pct=notional_pct,
+                payload={"meta": meta, "notes": notes[-6:], "strategy_stats": strategy_disabled},
+            )
         return PaperOrder(
             desk=desk,
             action=action,

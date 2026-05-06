@@ -142,6 +142,25 @@ class LiveOrderRecord(Base):
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class ShadowSignalRecord(Base):
+    __tablename__ = "shadow_signals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[str] = mapped_column(String(40), default="")
+    desk: Mapped[str] = mapped_column(String(50), default="")
+    symbol: Mapped[str] = mapped_column(String(100), default="")
+    strategy_id: Mapped[str] = mapped_column(String(80), default="")
+    entry_profile: Mapped[str] = mapped_column(String(80), default="")
+    source: Mapped[str] = mapped_column(String(50), default="")
+    action: Mapped[str] = mapped_column(String(50), default="")
+    focus: Mapped[str] = mapped_column(String(240), default="")
+    reason: Mapped[str] = mapped_column(String(120), default="")
+    score: Mapped[float] = mapped_column(Float, default=0.0)
+    stream_score: Mapped[float] = mapped_column(Float, default=0.0)
+    notional_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 db_path = Path(settings.db_path)
 db_path.parent.mkdir(parents=True, exist_ok=True)
 engine = create_engine(
@@ -640,6 +659,8 @@ def _ensure_schema() -> None:
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_cycle_journal_run_at ON cycle_journal(run_at)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_positions_status ON paper_positions(status)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_positions_strategy ON paper_positions(strategy_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_shadow_signals_created_at ON shadow_signals(created_at)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_shadow_signals_strategy ON shadow_signals(strategy_id)"))
 
 
 def _build_desk_stats(positions: list[PaperPositionRecord]) -> dict[str, dict]:
@@ -1963,6 +1984,160 @@ def load_strategy_performance_stats(window: int = 300) -> list[dict]:
     except OperationalError:
         rebuild_db()
         return []
+
+
+def save_shadow_signal(
+    *,
+    desk: str,
+    symbol: str,
+    strategy_id: str,
+    entry_profile: str = "",
+    source: str = "",
+    action: str = "",
+    focus: str = "",
+    reason: str = "",
+    score: float = 0.0,
+    stream_score: float = 0.0,
+    notional_pct: float = 0.0,
+    payload: dict | None = None,
+    dedupe_seconds: int = 60,
+) -> bool:
+    """Record a blocked strategy signal without opening a position.
+
+    Dedupe prevents websocket ticks from writing the same blocked signal repeatedly.
+    """
+    init_db()
+    created_at = utcnow_iso()
+    payload = payload or {}
+    try:
+        with SessionLocal() as db:
+            latest = db.execute(
+                select(ShadowSignalRecord)
+                .where(
+                    ShadowSignalRecord.desk == desk,
+                    ShadowSignalRecord.symbol == symbol,
+                    ShadowSignalRecord.strategy_id == strategy_id,
+                    ShadowSignalRecord.source == source,
+                    ShadowSignalRecord.reason == reason,
+                )
+                .order_by(ShadowSignalRecord.id.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            latest_dt = _local_datetime_from_iso(latest.created_at) if latest else None
+            if latest_dt is not None:
+                age = (datetime.now(_local_timezone()) - latest_dt).total_seconds()
+                if age < dedupe_seconds:
+                    return False
+            db.add(
+                ShadowSignalRecord(
+                    created_at=created_at,
+                    desk=desk,
+                    symbol=symbol,
+                    strategy_id=strategy_id,
+                    entry_profile=entry_profile,
+                    source=source,
+                    action=action,
+                    focus=focus[:240],
+                    reason=reason,
+                    score=round(float(score or 0.0), 4),
+                    stream_score=round(float(stream_score or 0.0), 4),
+                    notional_pct=round(float(notional_pct or 0.0), 4),
+                    payload=payload,
+                )
+            )
+            db.commit()
+            return True
+    except OperationalError:
+        rebuild_db()
+        return False
+
+
+def load_recent_shadow_signals(limit: int = 50) -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(ShadowSignalRecord)
+                .order_by(ShadowSignalRecord.id.desc())
+                .limit(limit)
+            ).scalars().all()
+            return [
+                {
+                    "id": row.id,
+                    "created_at": row.created_at,
+                    "desk": row.desk,
+                    "symbol": row.symbol,
+                    "strategy_id": row.strategy_id,
+                    "entry_profile": row.entry_profile,
+                    "source": row.source,
+                    "action": row.action,
+                    "focus": row.focus,
+                    "reason": row.reason,
+                    "score": row.score,
+                    "stream_score": row.stream_score,
+                    "notional_pct": row.notional_pct,
+                    "payload": row.payload or {},
+                }
+                for row in rows
+            ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_shadow_signal_stats(window: int = 300) -> list[dict]:
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(ShadowSignalRecord)
+                .order_by(ShadowSignalRecord.id.desc())
+                .limit(window)
+            ).scalars().all()
+    except OperationalError:
+        rebuild_db()
+        return []
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        key = row.strategy_id or "unknown"
+        bucket = buckets.setdefault(
+            key,
+            {
+                "strategy_id": key,
+                "count": 0,
+                "symbols": set(),
+                "sources": set(),
+                "reasons": {},
+                "score_sum": 0.0,
+                "stream_sum": 0.0,
+                "latest_at": "",
+            },
+        )
+        bucket["count"] += 1
+        bucket["symbols"].add(row.symbol)
+        bucket["sources"].add(row.source)
+        bucket["reasons"][row.reason] = int(bucket["reasons"].get(row.reason, 0)) + 1
+        bucket["score_sum"] += float(row.score or 0.0)
+        bucket["stream_sum"] += float(row.stream_score or 0.0)
+        if not bucket["latest_at"] or row.created_at > bucket["latest_at"]:
+            bucket["latest_at"] = row.created_at
+    result = []
+    for bucket in buckets.values():
+        count = max(int(bucket["count"]), 1)
+        reasons = sorted(bucket["reasons"].items(), key=lambda item: item[1], reverse=True)
+        result.append(
+            {
+                "strategy_id": bucket["strategy_id"],
+                "count": count,
+                "symbols": sorted(bucket["symbols"])[:8],
+                "sources": sorted(bucket["sources"]),
+                "top_reason": reasons[0][0] if reasons else "",
+                "avg_score": round(float(bucket["score_sum"]) / count, 4),
+                "avg_stream_score": round(float(bucket["stream_sum"]) / count, 4),
+                "latest_at": bucket["latest_at"],
+            }
+        )
+    return sorted(result, key=lambda item: item["count"], reverse=True)
 
 
 def load_closed_positions(limit: int = 50) -> list[dict]:

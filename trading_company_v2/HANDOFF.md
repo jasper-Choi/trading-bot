@@ -59,6 +59,17 @@ This is the foundation for the next critical step: automatic strategy kill switc
 - Disabled strategies now produce an explanatory note with win rate, capital PnL, and peak0%.
 - This converts attribution from passive reporting into active capital protection.
 
+### Follow-up Patch: Shadow Mode Logging
+- Added `shadow_signals` table for blocked strategy signals.
+- Added `save_shadow_signal()` with 60s dedupe to avoid websocket log spam.
+- Added `load_recent_shadow_signals()` and `load_shadow_signal_stats()`.
+- Cycle-level disabled entries now log a shadow signal instead of silently disappearing.
+- Hot-path disabled candidates/open attempts now log shadow signals with candidate/stream payload.
+- `/performance-data` and `/performance?format=json` expose:
+  - `shadow_signal_stats`
+  - `recent_shadow_signals`
+- This allows disabled strategies to keep being measured without opening paper/live positions.
+
 ## 0. Latest Claude Notes - 2026-05-06 (session 4)
 
 ### Session Goal

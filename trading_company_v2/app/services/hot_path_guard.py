@@ -24,6 +24,7 @@ from app.core.state_store import (
     init_db,
     load_strategy_performance_stats,
     rapid_guard_crypto_positions,
+    save_shadow_signal,
 )
 from app.services.upbit_stream_cache import summarize_stream_momentum
 
@@ -78,6 +79,13 @@ def _disabled_strategy_ids(force: bool = False) -> set[str]:
 
 def _strategy_is_disabled(strategy_id: str) -> bool:
     return bool(strategy_id) and strategy_id in _disabled_strategy_ids()
+
+
+def _strategy_id_for_entry_profile(entry_profile: str) -> str:
+    profile = str(entry_profile or "").strip() or "tick_ignition"
+    if profile == "trend_ignition":
+        return "crypto.tick_ignition"
+    return f"crypto.{profile}"
 
 
 def _minutes_open(opened_at: str) -> float:
@@ -197,6 +205,20 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             item["entry_profile"] = "range_scalp"
             if _strategy_is_disabled("crypto.range_scalp"):
                 item["hot_block_reason"] = "strategy_disabled"
+                save_shadow_signal(
+                    desk="crypto",
+                    symbol=symbol,
+                    strategy_id="crypto.range_scalp",
+                    entry_profile="range_scalp",
+                    source="hot_candidate",
+                    action="probe_longs",
+                    focus=str(item.get("focus", "range_scalp hot candidate") or "range_scalp hot candidate"),
+                    reason="strategy_disabled",
+                    score=combined,
+                    stream_score=_float(item.get("stream_score", 0.0)),
+                    payload={"candidate": item},
+                    dedupe_seconds=60,
+                )
                 return False
             return True
         return False
@@ -264,20 +286,63 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     )
     if common_guards and (standard_ok or early_ok):
         item["entry_profile"] = "trend_ignition"
-        if _strategy_is_disabled("crypto.trend_ignition"):
+        disabled_id = _strategy_id_for_entry_profile("trend_ignition")
+        if _strategy_is_disabled(disabled_id):
             item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id=disabled_id,
+                entry_profile="trend_ignition",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "trend_ignition hot candidate") or "trend_ignition hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
             return False
         return True
     if obvious_trend_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
         item["entry_profile"] = "obvious_trend"
         if _strategy_is_disabled("crypto.obvious_trend"):
             item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.obvious_trend",
+                entry_profile="obvious_trend",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "obvious_trend hot candidate") or "obvious_trend hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
             return False
         return True
     if range_impulse_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
         item["entry_profile"] = "range_impulse"
         if _strategy_is_disabled("crypto.range_impulse"):
             item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.range_impulse",
+                entry_profile="range_impulse",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "range_impulse hot candidate") or "range_impulse hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
             return False
         return True
     return False
@@ -500,8 +565,23 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
     orderbook_bid_ask = _float(candidate.get("orderbook_bid_ask_ratio", 0.0))
     stream_score = _float(stream.get("stream_score", 0.0))
     entry_profile = str(candidate.get("entry_profile", "tick_ignition") or "tick_ignition")
-    strategy_id = f"crypto.{entry_profile}"
+    strategy_id = _strategy_id_for_entry_profile(entry_profile)
     if _strategy_is_disabled(strategy_id):
+        save_shadow_signal(
+            desk="crypto",
+            symbol=symbol,
+            strategy_id=strategy_id,
+            entry_profile=entry_profile,
+            source="hot_path",
+            action="probe_longs",
+            focus=f"{symbol} {entry_profile} blocked by strategy kill switch",
+            reason="strategy_disabled",
+            score=combined,
+            stream_score=stream_score,
+            notional_pct=size_notional,
+            payload={"candidate": candidate, "stream": stream},
+            dedupe_seconds=60,
+        )
         return {"entry_opened": 0, "reason": "entry_strategy_disabled", "strategy_id": strategy_id}
     meta = {
         "symbol": symbol,

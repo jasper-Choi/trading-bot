@@ -43,6 +43,8 @@ from app.core.state_store import (
     load_performance_analytics,
     load_performance_quick_stats,
     load_recent_journal,
+    load_recent_shadow_signals,
+    load_shadow_signal_stats,
     load_strategy_performance_stats,
 )
 from app.notifier import notifier
@@ -2359,6 +2361,8 @@ def performance_data() -> dict:
     return {
         "quick_stats": load_performance_quick_stats(),
         "strategy_stats": load_strategy_performance_stats(),
+        "shadow_signal_stats": load_shadow_signal_stats(),
+        "recent_shadow_signals": load_recent_shadow_signals(limit=25),
         "analytics": analytics,
         "bot_status": bot_status,
     }
@@ -2370,6 +2374,8 @@ def performance(request: Request):
         return {
             "stats": load_performance_quick_stats(),
             "strategy_stats": load_strategy_performance_stats(),
+            "shadow_signal_stats": load_shadow_signal_stats(),
+            "recent_shadow_signals": load_recent_shadow_signals(limit=25),
             "open_positions": [p.model_dump() for p in load_open_positions()],
             "closed_positions": load_closed_positions(limit=50),
             "analytics": load_performance_analytics(),
