@@ -3,6 +3,38 @@
 Last updated: 2026-05-06
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Claude Notes - 2026-05-06 (session 5 — 수익률 개선)
+
+### 데이터 기반 분석 (300건 closed positions)
+- 승률 9.7% (RANGING gate 이전 구 데이터 322건이 대부분)
+- RANGING gate 이후: range_scalp 4건, 50% 승률
+- 최대 손실 원인: rapid_tick_failed_start(95건 -58%), rapid_obvious_trend_fail(70건 -35%)
+- range_scalp avg stop -0.895% (설정 -0.70% 초과), KRW-STORJ dev=+1.32%에서 잘못된 방향 진입
+
+### 수익률 개선 수술 (커밋 d3b4b3d)
+
+**1. range_scalp stop -0.70% → -0.50%** (`state_store.py`)
+- STORJ -0.80%, SC -0.99% → 최대 -0.50%로 제한
+
+**2. dev > +1.0% range_scalp 롱 차단** (`hot_path_guard.py`)
+- `airborne_deviation_pct > 1.0` 이면 range_scalp_hot_ok=False
+- EMA 위에서 평균회귀 롱 = 방향 반대 → 구조적 실패 원천 제거
+
+**3. rapid_tick_failed_start fallback** (`state_store.py`)
+- stream_reversal 없어도: peak<=0.05 AND min>=0.5 AND pnl<=-0.25% → 즉시청산
+- avg -0.612% → ~-0.25% 목표 (손실 59% 절감)
+
+**4. _crypto_trail_rules 수익 보호 강화** (`state_store.py`)
+- peak >= 0.55%: giveback 0.30→0.20 (수익반납 -0.28% 사례 방지)
+- peak >= 0.40%: giveback 0.30→0.20, floor 0→0.05
+- peak >= 0.25%: 신규 tier (giveback 0.15, 조기 원금 보호)
+
+**5. range_scalp no_lift 단축** (`state_store.py`)
+- 3.0min → 1.5min, -0.25% → -0.22%
+
+### 배포
+- 2026-05-06 07:28 UTC, 에러 없음
+
 ## 0. Latest Codex Notes - 2026-05-06 (RANGING local breakout strategies)
 
 ### Session Goal
