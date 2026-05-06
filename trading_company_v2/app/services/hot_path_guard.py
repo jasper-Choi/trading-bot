@@ -142,12 +142,20 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         bb_squeeze_bounce = bool(item.get("bb_squeeze_bounce", False))
         vwap_deviation_long = bool(item.get("vwap_deviation_long", False))
         rsi_extreme_long = bool(item.get("rsi_extreme_long", False))
-        # 멀티 신호: 에어본/BB스퀴즈/VWAP이격/RSI극단 중 1개 이상
+        stoch_oversold_cross = bool(item.get("stoch_oversold_cross", False))
+        macd_histogram_reversal = bool(item.get("macd_histogram_reversal", False))
+        hammer_candle = bool(item.get("hammer_candle", False))
+        doji_candle = bool(item.get("doji_candle", False))
+        # 멀티 신호: 8개 중 1개 이상
         ranging_signal = (
             (range_scalp_eligible and airborne_long and airborne_score >= 0.40)
             or bb_squeeze_bounce
             or vwap_deviation_long
             or (rsi_extreme_long and airborne_score >= 0.25)
+            or stoch_oversold_cross
+            or macd_histogram_reversal
+            or hammer_candle
+            or doji_candle
         )
         range_scalp_hot_ok = (
             ranging_signal

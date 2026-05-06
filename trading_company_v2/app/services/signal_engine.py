@@ -39,6 +39,29 @@ def bollinger_bands(
     return {"upper": upper, "middle": middle, "lower": lower}
 
 
+def stochastic(
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    k_period: int = 14,
+    d_period: int = 3,
+) -> dict[str, list[float | None]]:
+    """Stochastic oscillator — %K (fast) and %D (SMA of K)."""
+    k_vals: list[float | None] = [None] * len(closes)
+    for i in range(k_period - 1, len(closes)):
+        hh = max(highs[i - k_period + 1 : i + 1])
+        ll = min(lows[i - k_period + 1 : i + 1])
+        denom = hh - ll
+        k_vals[i] = (closes[i] - ll) / denom * 100.0 if denom > 0 else 50.0
+    # %D = SMA of %K; treat None slots as 50.0 only for SMA input, then mask back
+    valid_k = [v if v is not None else 0.0 for v in k_vals]
+    d_raw = sma(valid_k, d_period)
+    d_vals: list[float | None] = [
+        None if k_vals[i] is None else d_raw[i] for i in range(len(closes))
+    ]
+    return {"k": k_vals, "d": d_vals}
+
+
 def detect_airborne_signal(
     candles: list[dict[str, Any]],
     ema_period: int = 20,
@@ -1059,6 +1082,84 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         and float(recent_change) > -8.0
     )
 
+    # --- Stochastic %K 과매도 교차 ---
+    # %K < 25(과매도)에서 %D 위로 교차 → 단기 모멘텀 반전 신호
+    highs = [float(c.get("high") or c["close"]) for c in candles]
+    lows = [float(c.get("low") or c["close"]) for c in candles]
+    _stoch = stochastic(highs, lows, closes, k_period=14, d_period=3)
+    _sk = _stoch["k"]
+    _sd = _stoch["d"]
+    _sk_curr = _sk[-1]
+    _sk_prev = _sk[-2] if len(_sk) >= 2 else None
+    _sd_curr = _sd[-1]
+    _sd_prev = _sd[-2] if len(_sd) >= 2 else None
+    stoch_k_val = round(float(_sk_curr), 1) if _sk_curr is not None else 50.0
+    stoch_oversold_cross = (
+        _sk_curr is not None and _sd_curr is not None
+        and _sk_prev is not None and _sd_prev is not None
+        and float(_sk_curr) < 25.0                  # 과매도 구간
+        and float(_sk_curr) >= float(_sd_curr)      # K가 D 위로 교차
+        and float(_sk_prev) < float(_sd_prev)       # 직전에는 K < D였음
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -6.0
+    )
+
+    # --- MACD 히스토그램 바닥 반전 ---
+    # 히스토그램이 음수 구간에서 2봉 연속 상승 → MACD 모멘텀 회복 신호
+    _ema12 = ema(closes, 12)
+    _ema26 = ema(closes, 26)
+    _macd_line = [_ema12[i] - _ema26[i] for i in range(len(closes))]
+    _signal_line = ema(_macd_line, 9)
+    _histogram = [_macd_line[i] - _signal_line[i] for i in range(len(closes))]
+    _hist_curr = _histogram[-1]
+    _hist_prev = _histogram[-2] if len(_histogram) >= 2 else None
+    _hist_prev2 = _histogram[-3] if len(_histogram) >= 3 else None
+    macd_hist_val = round(_hist_curr, 8)
+    macd_histogram_reversal = (
+        _hist_prev is not None and _hist_prev2 is not None
+        and _hist_curr > _hist_prev             # 히스토그램 상승 전환
+        and _hist_prev <= _hist_prev2           # 직전 봉은 하락/횡보 (바닥 확인)
+        and _hist_prev < 0.0                    # 음수 구간에서 반전
+        and last_rsi is not None and last_rsi <= 55.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -5.0
+    )
+
+    # --- 캔들 반전 패턴 (Hammer / Doji) ---
+    # Hammer: 하단 꼬리 ≥ 몸통 2배, 상단 꼬리 ≤ 몸통 0.5배, 양봉 → 강한 지지 반등
+    # Doji: 몸통 ≤ 전체 범위 10% → 매수/매도 균형, 방향 전환 가능성
+    _opens = [float(c.get("open") or c["close"]) for c in candles]
+    _c_open = _opens[-1]
+    _c_close = closes[-1]
+    _c_high = highs[-1]
+    _c_low = lows[-1]
+    _body = abs(_c_close - _c_open)
+    _total_range = _c_high - _c_low
+    _lower_wick = min(_c_open, _c_close) - _c_low
+    _upper_wick = _c_high - max(_c_open, _c_close)
+    hammer_candle = (
+        _total_range > 0
+        and _body > 0
+        and _lower_wick >= _body * 2.0          # 하단 꼬리 ≥ 몸통 2배
+        and _upper_wick <= _body * 0.5          # 상단 꼬리 ≤ 몸통 절반
+        and _c_close >= _c_open                 # 양봉 (반등 강도 확인)
+        and last_rsi is not None and last_rsi <= 50.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+    )
+    doji_candle = (
+        _total_range > 0
+        and _body / _total_range <= 0.10        # 몸통 ≤ 전체 범위 10%
+        and _total_range / _c_close >= 0.003    # 전체 범위 ≥ 0.3% (의미있는 꼬리)
+        and last_rsi is not None and last_rsi <= 50.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+    )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1150,6 +1251,13 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "vwap_deviation_long": vwap_deviation_long,
         "vwap_deviation_pct": vwap_deviation_pct,
         "rsi_extreme_long": rsi_extreme_long,
+        # 추가 RANGING 신호 (Fix 4)
+        "stoch_k": stoch_k_val,
+        "stoch_oversold_cross": stoch_oversold_cross,
+        "macd_hist": macd_hist_val,
+        "macd_histogram_reversal": macd_histogram_reversal,
+        "hammer_candle": hammer_candle,
+        "doji_candle": doji_candle,
     }
 
 

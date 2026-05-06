@@ -70,6 +70,11 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     vwap_deviation_long = bool(payload.get("vwap_deviation_long", False))
     vwap_deviation_pct = float(payload.get("vwap_deviation_pct", 0.0) or 0.0)
     rsi_extreme_long = bool(payload.get("rsi_extreme_long", False))
+    stoch_k = float(payload.get("stoch_k", 50.0) or 50.0)
+    stoch_oversold_cross = bool(payload.get("stoch_oversold_cross", False))
+    macd_histogram_reversal = bool(payload.get("macd_histogram_reversal", False))
+    hammer_candle = bool(payload.get("hammer_candle", False))
+    doji_candle = bool(payload.get("doji_candle", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -194,8 +199,17 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         sig_rsi_extreme = rsi_extreme_long
         # 신호 5: RSI 평균회귀 (≤35)
         sig_rsi_rev     = rsi_mean_rev_long or range_scalp_eligible
+        # 신호 6: Stochastic 과매도 교차 (%K < 25, %K crosses above %D)
+        sig_stoch_cross = stoch_oversold_cross
+        # 신호 7: MACD 히스토그램 바닥 반전
+        sig_macd_rev    = macd_histogram_reversal
+        # 신호 8: 캔들 반전 패턴 (Hammer / Doji)
+        sig_candle_rev  = hammer_candle or doji_candle
 
-        mean_rev_count = sum([sig_airborne, sig_bb_squeeze, sig_vwap_dev, sig_rsi_extreme, sig_rsi_rev])
+        mean_rev_count = sum([
+            sig_airborne, sig_bb_squeeze, sig_vwap_dev, sig_rsi_extreme, sig_rsi_rev,
+            sig_stoch_cross, sig_macd_rev, sig_candle_rev,
+        ])
 
         # 공통 필터: 급락 중 아님 + 베어리쉬 구조 아님 + 과열 아님
         _ranging_guard = (
@@ -215,8 +229,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             f"score={airborne_score:.2f} bb_lower={at_bb_lower}"
         )
         ranging_signal_note = (
-            f"ranging signals({mean_rev_count}/5): airborne={sig_airborne} bb_squeeze={sig_bb_squeeze} "
-            f"vwap_dev={sig_vwap_dev}({vwap_deviation_pct:.1f}%) rsi_ext={sig_rsi_extreme} rsi_rev={sig_rsi_rev}"
+            f"ranging signals({mean_rev_count}/8): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
+            f"vwap={sig_vwap_dev}({vwap_deviation_pct:.1f}%) rsi_ext={sig_rsi_extreme} rsi_rev={sig_rsi_rev} "
+            f"stoch={sig_stoch_cross}(k={stoch_k:.0f}) macd_rev={sig_macd_rev} candle={sig_candle_rev}"
         )
 
         if range_scalp_ok:
@@ -263,7 +278,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [
                 airborne_note,
                 ranging_signal_note,
-                "진입 조건: 에어본/BB스퀴즈/VWAP이격/RSI극단 중 1개 이상 + OB매수우위",
+                "진입 조건: 에어본/BB스퀴즈/VWAP이격/RSI극단/스토캐스틱/MACD반전/캔들패턴 중 1개 이상 + OB매수우위",
             ],
         }
     # ── TRENDING / 기타 시장: 기존 추세추종 로직 유지 ──────────────────────────

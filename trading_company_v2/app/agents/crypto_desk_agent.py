@@ -280,6 +280,12 @@ class CryptoDeskAgent(BaseAgent):
                     "vwap_deviation_long": bool(signal.get("vwap_deviation_long", False)),
                     "vwap_deviation_pct": float(signal.get("vwap_deviation_pct", 0.0) or 0.0),
                     "rsi_extreme_long": bool(signal.get("rsi_extreme_long", False)),
+                    "stoch_k": float(signal.get("stoch_k", 50.0) or 50.0),
+                    "stoch_oversold_cross": bool(signal.get("stoch_oversold_cross", False)),
+                    "macd_hist": float(signal.get("macd_hist", 0.0) or 0.0),
+                    "macd_histogram_reversal": bool(signal.get("macd_histogram_reversal", False)),
+                    "hammer_candle": bool(signal.get("hammer_candle", False)),
+                    "doji_candle": bool(signal.get("doji_candle", False)),
                 }
             )
 
@@ -322,6 +328,12 @@ class CryptoDeskAgent(BaseAgent):
             "vwap_deviation_long": False,
             "vwap_deviation_pct": 0.0,
             "rsi_extreme_long": False,
+            "stoch_k": 50.0,
+            "stoch_oversold_cross": False,
+            "macd_hist": 0.0,
+            "macd_histogram_reversal": False,
+            "hammer_candle": False,
+            "doji_candle": False,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -448,5 +460,11 @@ class CryptoDeskAgent(BaseAgent):
                 "vwap_deviation_long": bool(leader.get("vwap_deviation_long", False)),
                 "vwap_deviation_pct": float(leader.get("vwap_deviation_pct", 0.0) or 0.0),
                 "rsi_extreme_long": bool(leader.get("rsi_extreme_long", False)),
+                "stoch_k": float(leader.get("stoch_k", 50.0) or 50.0),
+                "stoch_oversold_cross": bool(leader.get("stoch_oversold_cross", False)),
+                "macd_hist": float(leader.get("macd_hist", 0.0) or 0.0),
+                "macd_histogram_reversal": bool(leader.get("macd_histogram_reversal", False)),
+                "hammer_candle": bool(leader.get("hammer_candle", False)),
+                "doji_candle": bool(leader.get("doji_candle", False)),
             },
         )
