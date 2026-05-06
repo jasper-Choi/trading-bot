@@ -998,6 +998,67 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     # RANGING 시장에서 핵심 진입 전략
     airborne = detect_airborne_signal(candles, ema_period=20, threshold_pct=1.5)
 
+    # --- BB Squeeze Bounce 신호 ---
+    # Bollinger Band 폭이 수축(스퀴즈)된 상태에서 하단 터치 후 반등
+    # 변동성 압축 → 이격도 복귀 가능성 높음
+    _bb = bollinger_bands(closes, period=20, std_mult=2.0)
+    _bb_widths: list[float] = []
+    for _i in range(len(_bb["upper"])):
+        _u, _l, _m = _bb["upper"][_i], _bb["lower"][_i], _bb["middle"][_i]
+        if _u is not None and _l is not None and _m is not None and _m > 0:
+            _bb_widths.append((_u - _l) / _m)
+    _last_bb_width = _bb_widths[-1] if _bb_widths else None
+    _recent_widths = _bb_widths[-20:] if len(_bb_widths) >= 20 else _bb_widths
+    _min_bb_width_20 = min(_recent_widths) if _recent_widths else None
+    # 현재 BB 폭이 최근 20봉 최솟값 대비 15% 이내 → 스퀴즈 상태
+    _bb_squeeze_now = (
+        _last_bb_width is not None
+        and _min_bb_width_20 is not None
+        and _last_bb_width <= _min_bb_width_20 * 1.15
+    )
+    bb_squeeze_bounce = (
+        _bb_squeeze_now
+        and bool(airborne.get("at_bb_lower", False))   # BB 하단에 있음
+        and last_rsi is not None and 22.0 <= last_rsi <= 52.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -5.0
+    )
+
+    # --- VWAP Deviation Long 신호 ---
+    # 최근 20봉 거래량 가중 평균(VWAP 근사) 대비 이격 과대 → 기관 평균단가 복귀 기대
+    _vwap_period = min(20, len(candles))
+    _vwap_candles = candles[-_vwap_period:]
+    _vols = [float(c.get("volume", c.get("candle_acc_trade_volume", 0.0)) or 0.0) for c in _vwap_candles]
+    _prices_vw = [float(c.get("close", c.get("trade_price", 0.0)) or 0.0) for c in _vwap_candles]
+    _total_vol = sum(_vols)
+    _vwap_val = (
+        sum(p * v for p, v in zip(_prices_vw, _vols)) / _total_vol
+        if _total_vol > 0 else None
+    )
+    vwap_approx = _vwap_val
+    vwap_deviation_pct = 0.0
+    if _vwap_val and _vwap_val > 0 and last_close:
+        vwap_deviation_pct = round((last_close - _vwap_val) / _vwap_val * 100, 2)
+    vwap_deviation_long = (
+        vwap_deviation_pct <= -1.5                      # VWAP 대비 1.5% 이상 아래
+        and last_rsi is not None and 20.0 <= last_rsi <= 50.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -6.0
+    )
+
+    # --- RSI Extreme Long (극단적 과매도) ---
+    # RSI ≤ 22: 매우 드물지만 리바운드 확률 높음
+    rsi_extreme_long = (
+        last_rsi is not None and last_rsi <= 22.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and float(recent_change) > -8.0
+    )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1084,6 +1145,11 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         # Range scalp 적격 판정 (RANGING 시장 진입용)
         "range_scalp_eligible": range_scalp_eligible,
         "rsi_mean_rev_long": rsi_mean_rev_long,
+        # RANGING 보조 전략 신호
+        "bb_squeeze_bounce": bb_squeeze_bounce,
+        "vwap_deviation_long": vwap_deviation_long,
+        "vwap_deviation_pct": vwap_deviation_pct,
+        "rsi_extreme_long": rsi_extreme_long,
     }
 
 

@@ -65,6 +65,11 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     at_bb_lower = bool(payload.get("at_bb_lower", False))
     range_scalp_eligible = bool(payload.get("range_scalp_eligible", False))
     rsi_mean_rev_long = bool(payload.get("rsi_mean_rev_long", False))
+    # RANGING 보조 전략 신호
+    bb_squeeze_bounce = bool(payload.get("bb_squeeze_bounce", False))
+    vwap_deviation_long = bool(payload.get("vwap_deviation_long", False))
+    vwap_deviation_pct = float(payload.get("vwap_deviation_pct", 0.0) or 0.0)
+    rsi_extreme_long = bool(payload.get("rsi_extreme_long", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -178,57 +183,87 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # 데이터: RANGING에서 추세 추종 승률 9%, 누적 -122% → 구조적 적자
     _choch_bearish_early = bool(payload.get("choch_bearish", False))
     if regime == "RANGING":
-        # 에어본 롱 + RSI 과매도 + BB 하단 + 호가 매수우위 → range scalp 진입
-        range_scalp_ok = (
-            (range_scalp_eligible or rsi_mean_rev_long)
-            and airborne_long
-            and airborne_score >= 0.35
-            and orderbook_bid_ask >= 1.05
-            and micro_move_3 >= -1.0          # 급락 중 아님
+        # ── 평균회귀 신호 조합 (멀티 컨펌 → 사이즈 확대) ──────────────────────
+        # 신호 1: 에어본 (EMA 이격 과대)
+        sig_airborne    = airborne_long and airborne_score >= 0.35
+        # 신호 2: BB 스퀴즈 반등 (변동성 수축 + 하단 터치)
+        sig_bb_squeeze  = bb_squeeze_bounce
+        # 신호 3: VWAP 이격 (기관 평균단가 복귀 기대)
+        sig_vwap_dev    = vwap_deviation_long
+        # 신호 4: RSI 극단 과매도 (≤22)
+        sig_rsi_extreme = rsi_extreme_long
+        # 신호 5: RSI 평균회귀 (≤35)
+        sig_rsi_rev     = rsi_mean_rev_long or range_scalp_eligible
+
+        mean_rev_count = sum([sig_airborne, sig_bb_squeeze, sig_vwap_dev, sig_rsi_extreme, sig_rsi_rev])
+
+        # 공통 필터: 급락 중 아님 + 베어리쉬 구조 아님 + 과열 아님
+        _ranging_guard = (
+            orderbook_bid_ask >= 1.05
+            and micro_move_3 >= -1.0
             and not rsi_bearish_divergence
             and not hard_overheat
             and not stream_reversal
-            and not _choch_bearish_early      # 하락 구조 아님
+            and not _choch_bearish_early
             and stance != "DEFENSE"
         )
+        # 최소 1개 신호 + 공통 필터 충족 시 진입
+        range_scalp_ok = mean_rev_count >= 1 and _ranging_guard
+
         airborne_note = (
             f"airborne dev={airborne_deviation_pct:.2f}% sigma={airborne_deviation_sigma:.1f}x "
             f"score={airborne_score:.2f} bb_lower={at_bb_lower}"
         )
+        ranging_signal_note = (
+            f"ranging signals({mean_rev_count}/5): airborne={sig_airborne} bb_squeeze={sig_bb_squeeze} "
+            f"vwap_dev={sig_vwap_dev}({vwap_deviation_pct:.1f}%) rsi_ext={sig_rsi_extreme} rsi_rev={sig_rsi_rev}"
+        )
+
         if range_scalp_ok:
-            # 신호 강도에 따른 사이즈 결정
-            if airborne_deviation_sigma >= 2.0 and at_bb_lower:
+            # 신호 수 + 신호 강도에 따른 사이즈 결정
+            if mean_rev_count >= 3 or (mean_rev_count >= 2 and (at_bb_lower or airborne_deviation_sigma >= 2.0)):
                 entry_size = "0.55x"
-            elif airborne_deviation_sigma >= 1.5:
+            elif mean_rev_count >= 2 or (airborne_deviation_sigma >= 1.5 and sig_airborne):
                 entry_size = "0.45x"
             else:
                 entry_size = "0.35x"
+            # 대표 진입 이유 결정
+            if sig_airborne:
+                primary_reason = f"airborne_long dev={airborne_deviation_pct:.2f}%"
+            elif sig_bb_squeeze:
+                primary_reason = "bb_squeeze_bounce"
+            elif sig_vwap_dev:
+                primary_reason = f"vwap_deviation {vwap_deviation_pct:.1f}%"
+            elif sig_rsi_extreme:
+                primary_reason = f"rsi_extreme rsi={rsi_value}"
+            else:
+                primary_reason = f"rsi_mean_rev rsi={rsi_value}"
             return {
                 "action": "probe_longs",
                 "size": entry_size,
-                "focus": f"range_scalp: {lead_market or 'KRW-BTC'} airborne_long dev={airborne_deviation_pct:.2f}% — mean reversion entry",
+                "focus": f"range_scalp: {lead_market or 'KRW-BTC'} {primary_reason} — mean reversion ({mean_rev_count} signals)",
                 "symbol": lead_market,
                 "candidate_symbols": candidate_symbols,
                 "notes": reasons + [
                     airborne_note,
+                    ranging_signal_note,
                     f"range scalp: ob={orderbook_bid_ask:.2f}x micro={micro_score:.2f} rsi={rsi_value}",
-                    "RANGING regime: 추세추종 차단, 평균회귀(에어본) 진입",
                 ],
             }
-        # RANGING이지만 에어본 조건 미충족 → 대기
+        # RANGING이지만 신호 없음 → 대기
         return {
             "action": "watchlist_only",
             "size": "0.00x",
             "focus": (
-                f"RANGING regime — 추세추종 차단. "
-                f"에어본 신호 대기 (dev={airborne_deviation_pct:.2f}%, score={airborne_score:.2f})"
+                f"RANGING — 추세추종 차단. 평균회귀 신호 대기 "
+                f"(dev={airborne_deviation_pct:.2f}% vwap={vwap_deviation_pct:.1f}% rsi={rsi_value})"
             ),
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [
                 airborne_note,
-                "에어본 롱 신호(이격도 하락) + RSI 과매도 + BB 하단 접근 시 진입",
-                f"현재: airborne_long={airborne_long} range_scalp_eligible={range_scalp_eligible}",
+                ranging_signal_note,
+                "진입 조건: 에어본/BB스퀴즈/VWAP이격/RSI극단 중 1개 이상 + OB매수우위",
             ],
         }
     # ── TRENDING / 기타 시장: 기존 추세추종 로직 유지 ──────────────────────────

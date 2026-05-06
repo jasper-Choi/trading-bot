@@ -276,6 +276,10 @@ class CryptoDeskAgent(BaseAgent):
                     "at_bb_lower": bool(signal.get("at_bb_lower", False)),
                     "range_scalp_eligible": bool(signal.get("range_scalp_eligible", False)),
                     "rsi_mean_rev_long": bool(signal.get("rsi_mean_rev_long", False)),
+                    "bb_squeeze_bounce": bool(signal.get("bb_squeeze_bounce", False)),
+                    "vwap_deviation_long": bool(signal.get("vwap_deviation_long", False)),
+                    "vwap_deviation_pct": float(signal.get("vwap_deviation_pct", 0.0) or 0.0),
+                    "rsi_extreme_long": bool(signal.get("rsi_extreme_long", False)),
                 }
             )
 
@@ -314,6 +318,10 @@ class CryptoDeskAgent(BaseAgent):
             "at_bb_lower": False,
             "range_scalp_eligible": False,
             "rsi_mean_rev_long": False,
+            "bb_squeeze_bounce": False,
+            "vwap_deviation_long": False,
+            "vwap_deviation_pct": 0.0,
+            "rsi_extreme_long": False,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -436,5 +444,9 @@ class CryptoDeskAgent(BaseAgent):
                 "at_bb_lower": bool(leader.get("at_bb_lower", False)),
                 "range_scalp_eligible": bool(leader.get("range_scalp_eligible", False)),
                 "rsi_mean_rev_long": bool(leader.get("rsi_mean_rev_long", False)),
+                "bb_squeeze_bounce": bool(leader.get("bb_squeeze_bounce", False)),
+                "vwap_deviation_long": bool(leader.get("vwap_deviation_long", False)),
+                "vwap_deviation_pct": float(leader.get("vwap_deviation_pct", 0.0) or 0.0),
+                "rsi_extreme_long": bool(leader.get("rsi_extreme_long", False)),
             },
         )

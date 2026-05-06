@@ -139,10 +139,18 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
 
     # ── RANGING regime: block all trend-following, only range_scalp allowed ──
     if regime == "RANGING":
+        bb_squeeze_bounce = bool(item.get("bb_squeeze_bounce", False))
+        vwap_deviation_long = bool(item.get("vwap_deviation_long", False))
+        rsi_extreme_long = bool(item.get("rsi_extreme_long", False))
+        # 멀티 신호: 에어본/BB스퀴즈/VWAP이격/RSI극단 중 1개 이상
+        ranging_signal = (
+            (range_scalp_eligible and airborne_long and airborne_score >= 0.40)
+            or bb_squeeze_bounce
+            or vwap_deviation_long
+            or (rsi_extreme_long and airborne_score >= 0.25)
+        )
         range_scalp_hot_ok = (
-            range_scalp_eligible
-            and airborne_long
-            and airborne_score >= 0.40
+            ranging_signal
             and orderbook_bid_ask >= 1.05
             and -1.0 <= micro_move_3 <= 1.50
             and not bool(item.get("rsi_bearish_divergence", False))
