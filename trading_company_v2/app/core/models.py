@@ -40,6 +40,8 @@ class PaperOrder(BaseModel):
     notional_pct: float = 0.0
     status: str = "planned"
     pnl_estimate_pct: float = 0.0
+    strategy_id: str = ""
+    entry_profile: str = ""
     rationale: list[Any] = Field(default_factory=list)
     created_at: str = Field(default_factory=utcnow_iso)
 
@@ -59,6 +61,8 @@ class PaperPosition(BaseModel):
     cycles_open: int = 0
     closed_reason: str = ""
     focus: str = ""
+    strategy_id: str = ""
+    entry_profile: str = ""
 
 
 class CycleJournalEntry(BaseModel):

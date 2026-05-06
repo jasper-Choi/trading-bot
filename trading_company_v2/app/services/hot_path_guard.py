@@ -460,6 +460,8 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
     orderbook_score = _float(candidate.get("orderbook_score", 0.0))
     orderbook_bid_ask = _float(candidate.get("orderbook_bid_ask_ratio", 0.0))
     stream_score = _float(stream.get("stream_score", 0.0))
+    entry_profile = str(candidate.get("entry_profile", "tick_ignition") or "tick_ignition")
+    strategy_id = f"crypto.{entry_profile}"
     meta = {
         "symbol": symbol,
         "reference_price": price,
@@ -478,7 +480,9 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         "trend_alignment": str(candidate.get("trend_alignment", "") or ""),
         "trend_entry_allowed": bool(candidate.get("trend_entry_allowed", False)),
         "bias": str(candidate.get("bias", "") or ""),
-        "entry_path": str(candidate.get("entry_profile", "tick_ignition_entry") or "tick_ignition_entry"),
+        "entry_path": entry_profile,
+        "strategy_id": strategy_id,
+        "entry_profile": entry_profile,
         "status": "planned",
     }
     entry_path = meta["entry_path"]
@@ -504,6 +508,8 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         reference_price=price,
         notional_pct=size_notional,
         status="planned",
+        strategy_id=strategy_id,
+        entry_profile=entry_profile,
         rationale=[
             meta,
             "tick ignition opened from websocket trade stream after cycle-prepared trend candidate",
@@ -553,6 +559,8 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
                 action=order.action,
                 focus=order.focus,
                 size=order.size,
+                strategy_id=order.strategy_id,
+                entry_profile=order.entry_profile,
                 rationale=order.rationale,
             )
         )
@@ -569,6 +577,8 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             peak_pnl_pct=0.0,
             cycles_open=0,
             focus=order.focus,
+            strategy_id=order.strategy_id,
+            entry_profile=order.entry_profile,
         )
         db.add(position)
         db.flush()

@@ -3,6 +3,55 @@
 Last updated: 2026-05-06
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Codex Notes - 2026-05-06 (strategy attribution foundation)
+
+### Session Goal
+Before adding more crypto strategies, make each entry path measurable. The bot has been losing because weak strategies and strong strategies were mixed together in aggregate PnL, so the next layer needs per-strategy attribution and future kill switches.
+
+### Implemented
+- Added `strategy_id` and `entry_profile` to `PaperOrder` and `PaperPosition` models.
+- Added SQLite columns/indexes for `paper_orders` and `paper_positions` with schema migration in `state_store.py`.
+- Added `infer_strategy_id()` mapping for legacy rows and future entries:
+  - `crypto.range_scalp`
+  - `crypto.tick_ignition`
+  - `crypto.pullback_entry`
+  - `crypto.trend_pullback`
+  - `crypto.direct_entry`
+  - `crypto.composite_entry`
+  - `crypto.stream_entry`
+  - `crypto.candidate_rotation`
+  - `crypto.balanced_swing`
+  - `crypto.offense_probe`
+  - fallback labels for unknown action/focus paths
+- Execution agent now writes `strategy_id` and `entry_profile` into order metadata and `PaperOrder`.
+- Hot path direct DB inserts now persist strategy metadata for websocket tick entries.
+- Dashboard/performance APIs now expose strategy-level stats:
+  - `/performance-data` -> `strategy_stats`
+  - `/performance?format=json` -> `strategy_stats`
+  - `ops_summary` / `mobile_summary` include strategy performance diagnostics.
+
+### Metrics Produced
+`load_strategy_performance_stats()` groups recent closed paper positions by strategy and calculates:
+- count / wins / losses / win_rate
+- raw_pnl_pct and capital_pnl_pct
+- avg_raw_pnl_pct and avg_capital_pnl_pct
+- peak0_pct
+- stop_like_pct
+- avg_size
+- health: `candidate`, `watch`, or `disabled_candidate`
+
+### Why This Matters
+This is the foundation for the next critical step: automatic strategy kill switches. Once enough fresh post-RANGING-gate trades accumulate, strategies with low win rate, high peak0%, or negative capital contribution can be blocked or moved to shadow mode instead of continuing to burn capital.
+
+### Verification
+- `python -m compileall app` passed locally.
+- Local smoke test passed: `init_db()`, `load_strategy_performance_stats()`, and `load_company_state()` all run with the new schema.
+
+### Suggested Next Work
+1. Add cached strategy blocklist in the execution/hot path so `disabled_candidate` strategies cannot open new positions.
+2. Add shadow-mode logging for disabled strategies so they can keep being measured without real/paper capital impact.
+3. Show strategy stats visibly on `/performance` and mobile summary instead of only JSON/API output.
+
 ## 0. Latest Claude Notes - 2026-05-06 (session 4)
 
 ### Session Goal

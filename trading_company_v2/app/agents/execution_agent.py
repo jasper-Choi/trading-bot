@@ -62,6 +62,35 @@ class ExecutionAgent(BaseAgent):
             return 0.0
 
     @staticmethod
+    def _infer_strategy_id(action: str = "", focus: str = "", entry_profile: str = "") -> str:
+        text = f"{entry_profile} {action} {focus}".lower()
+        if "range_scalp" in text:
+            return "crypto.range_scalp"
+        if "range_impulse" in text:
+            return "crypto.range_impulse"
+        if "obvious_trend" in text:
+            return "crypto.obvious_trend"
+        if "trend_ignition" in text or "tick ignition" in text or "tick entry" in text:
+            return "crypto.tick_ignition"
+        if "pullback entry" in text or "retracement near ema" in text:
+            return "crypto.pullback_entry"
+        if "trend pullback" in text:
+            return "crypto.trend_pullback"
+        if "direct entry" in text:
+            return "crypto.direct_entry"
+        if "composite signal" in text:
+            return "crypto.composite_entry"
+        if "stream ignition" in text:
+            return "crypto.stream_entry"
+        if "candidate-specific" in text or "multi-coin entry" in text:
+            return "crypto.candidate_rotation"
+        if "balanced" in text or "단타" in text:
+            return "crypto.balanced_swing"
+        if "offense" in text or "공격적" in text:
+            return "crypto.offense_probe"
+        return f"crypto.{entry_profile or action or 'unknown'}"
+
+    @staticmethod
     def _is_stop_like_exit(item: dict) -> bool:
         reason = str(item.get("closed_reason", "") or "")
         if reason in STOP_LIKE_EXIT_REASONS:
@@ -522,6 +551,10 @@ class ExecutionAgent(BaseAgent):
         ) or bool(plan.get("force_high_corr_cap", False))
         stale_signal_block = desk == "crypto" and action in actionable_entries and signal_freshness <= 0.55
         exit_status = "planned" if action in actionable_exits and existing_open else "idle"
+        entry_profile = str(plan.get("entry_profile", plan.get("entry_path", "")) or "")
+        strategy_id = str(plan.get("strategy_id", "") or self._infer_strategy_id(action, str(plan.get("focus", "")), entry_profile))
+        if not entry_profile:
+            entry_profile = strategy_id.split(".", 1)[-1] if "." in strategy_id else strategy_id
         meta = {
             "symbol": symbol,
             "reference_price": reference_price,
@@ -546,6 +579,8 @@ class ExecutionAgent(BaseAgent):
             "rsi_bearish_divergence": bool(plan.get("rsi_bearish_divergence", False)),
             "bias": str(plan.get("desk_bias", plan.get("bias", "")) or ""),
             "entry_path": action,
+            "strategy_id": strategy_id,
+            "entry_profile": entry_profile,
             "status": "planned"
             if action in actionable_entries
             and notional_pct > 0
@@ -656,6 +691,8 @@ class ExecutionAgent(BaseAgent):
             notional_pct=notional_pct,
             status=meta["status"],
             pnl_estimate_pct=pnl_estimate_pct,
+            strategy_id=strategy_id,
+            entry_profile=entry_profile,
             rationale=rationale,
         )
 

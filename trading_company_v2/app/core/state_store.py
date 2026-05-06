@@ -49,6 +49,8 @@ class PaperOrderRecord(Base):
     action: Mapped[str] = mapped_column(String(50), default="")
     focus: Mapped[str] = mapped_column(String(200), default="")
     size: Mapped[str] = mapped_column(String(20), default="")
+    strategy_id: Mapped[str] = mapped_column(String(80), default="")
+    entry_profile: Mapped[str] = mapped_column(String(80), default="")
     rationale: Mapped[list] = mapped_column(JSON, default=list)
 
 
@@ -83,6 +85,8 @@ class PaperPositionRecord(Base):
     cycles_open: Mapped[int] = mapped_column(Integer, default=0)
     closed_reason: Mapped[str] = mapped_column(String(100), default="")
     focus: Mapped[str] = mapped_column(String(200), default="")
+    strategy_id: Mapped[str] = mapped_column(String(80), default="")
+    entry_profile: Mapped[str] = mapped_column(String(80), default="")
 
 
 class PositionRecord(Base):
@@ -265,6 +269,8 @@ def _extract_order_meta(action: str, rationale: list) -> dict:
         "stream_score": float(meta.get("stream_score", 0.0) or 0.0),
         "bias": str(meta.get("bias", "") or ""),
         "entry_path": str(meta.get("entry_path", action) or action),
+        "strategy_id": str(meta.get("strategy_id", "") or ""),
+        "entry_profile": str(meta.get("entry_profile", meta.get("entry_path", "")) or ""),
         "status": str(meta.get("status", "idle") or "idle"),
         "pnl_estimate_pct": float(meta.get("pnl_estimate_pct", 0.0) or 0.0),
     }
@@ -274,9 +280,55 @@ def _extract_order_meta(action: str, rationale: list) -> dict:
     return normalized
 
 
+def infer_strategy_id(action: str = "", focus: str = "", meta: dict | None = None) -> str:
+    """Stable strategy label used for performance attribution and kill switches."""
+    meta = meta or {}
+    explicit = str(meta.get("strategy_id", "") or "").strip()
+    if explicit:
+        return explicit
+    entry_profile = str(meta.get("entry_profile", meta.get("entry_path", "")) or "").lower()
+    text = f"{entry_profile} {action} {focus}".lower()
+    if "range_scalp" in text:
+        return "crypto.range_scalp"
+    if "range_impulse" in text:
+        return "crypto.range_impulse"
+    if "obvious_trend" in text:
+        return "crypto.obvious_trend"
+    if "trend_ignition" in text or "tick ignition" in text or "tick entry" in text:
+        return "crypto.tick_ignition"
+    if "pullback entry" in text or "retracement near ema" in text:
+        return "crypto.pullback_entry"
+    if "trend pullback" in text:
+        return "crypto.trend_pullback"
+    if "direct entry" in text:
+        return "crypto.direct_entry"
+    if "composite signal" in text or "combined_score_ok" in text:
+        return "crypto.composite_entry"
+    if "stream ignition" in text:
+        return "crypto.stream_entry"
+    if "candidate-specific" in text or "multi-coin entry" in text:
+        return "crypto.candidate_rotation"
+    if "balanced" in text or "단타" in text:
+        return "crypto.balanced_swing"
+    if "공격적" in text or "offense" in text:
+        return "crypto.offense_probe"
+    return f"crypto.{entry_profile or action or 'unknown'}" if "crypto" not in text else (entry_profile or action or "crypto.unknown")
+
+
+def _entry_profile(action: str = "", focus: str = "", meta: dict | None = None) -> str:
+    meta = meta or {}
+    explicit = str(meta.get("entry_profile", meta.get("entry_path", "")) or "").strip()
+    if explicit:
+        return explicit
+    strategy_id = infer_strategy_id(action, focus, meta)
+    return strategy_id.split(".", 1)[-1] if "." in strategy_id else strategy_id
+
+
 def _paper_trade_payload(position: PaperPositionRecord, meta: dict | None = None) -> dict:
     meta = meta or {}
     notional_pct = float(meta.get("notional_pct", 0.0) or _size_to_notional(position.size))
+    strategy_id = str(getattr(position, "strategy_id", "") or infer_strategy_id(position.action, position.focus, meta))
+    entry_profile = str(getattr(position, "entry_profile", "") or _entry_profile(position.action, position.focus, meta))
     return {
         "desk": position.desk,
         "symbol": position.symbol,
@@ -291,6 +343,8 @@ def _paper_trade_payload(position: PaperPositionRecord, meta: dict | None = None
         "peak_pnl_pct": position.peak_pnl_pct,
         "closed_reason": position.closed_reason,
         "focus": position.focus,
+        "strategy_id": strategy_id,
+        "entry_profile": entry_profile,
         "notional_pct": notional_pct,
         "capital_krw": settings.paper_capital_krw,
         "combined_score": float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0),
@@ -559,10 +613,33 @@ def _ensure_schema() -> None:
     if "peak_pnl_pct" not in paper_position_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE paper_positions ADD COLUMN peak_pnl_pct FLOAT DEFAULT 0.0"))
+    paper_position_defs = {
+        "strategy_id": "ALTER TABLE paper_positions ADD COLUMN strategy_id VARCHAR(80) DEFAULT ''",
+        "entry_profile": "ALTER TABLE paper_positions ADD COLUMN entry_profile VARCHAR(80) DEFAULT ''",
+    }
+    missing_paper_position = [ddl for column, ddl in paper_position_defs.items() if column not in paper_position_columns]
+    if missing_paper_position:
+        with engine.begin() as connection:
+            for ddl in missing_paper_position:
+                connection.execute(text(ddl))
+    try:
+        paper_order_columns = {column["name"] for column in inspector.get_columns("paper_orders")}
+    except Exception:
+        paper_order_columns = set()
+    paper_order_defs = {
+        "strategy_id": "ALTER TABLE paper_orders ADD COLUMN strategy_id VARCHAR(80) DEFAULT ''",
+        "entry_profile": "ALTER TABLE paper_orders ADD COLUMN entry_profile VARCHAR(80) DEFAULT ''",
+    }
+    missing_paper_order = [ddl for column, ddl in paper_order_defs.items() if column not in paper_order_columns]
+    if missing_paper_order:
+        with engine.begin() as connection:
+            for ddl in missing_paper_order:
+                connection.execute(text(ddl))
     with engine.begin() as connection:
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_orders_created_at ON paper_orders(created_at)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_cycle_journal_run_at ON cycle_journal(run_at)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_positions_status ON paper_positions(status)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_paper_positions_strategy ON paper_positions(strategy_id)"))
 
 
 def _build_desk_stats(positions: list[PaperPositionRecord]) -> dict[str, dict]:
@@ -653,6 +730,70 @@ def _symbol_performance_stats(positions: list[PaperPositionRecord]) -> list[dict
         reverse=True,
     )
     return ranked[:6]
+
+
+def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int = 20) -> list[dict]:
+    buckets: dict[str, dict] = {}
+    for row in positions:
+        if row.status != "closed":
+            continue
+        strategy_id = str(row.strategy_id or infer_strategy_id(row.action, row.focus) or "unknown")
+        bucket = buckets.setdefault(
+            strategy_id,
+            {
+                "strategy_id": strategy_id,
+                "count": 0,
+                "wins": 0,
+                "losses": 0,
+                "raw_pnl_pct": 0.0,
+                "capital_pnl_pct": 0.0,
+                "peak0_count": 0,
+                "stop_like_count": 0,
+                "avg_size": 0.0,
+                "_size_sum": 0.0,
+            },
+        )
+        pnl = float(row.pnl_pct or 0.0)
+        notional = _paper_row_notional(row)
+        bucket["count"] += 1
+        bucket["_size_sum"] += notional
+        bucket["raw_pnl_pct"] = round(float(bucket["raw_pnl_pct"]) + pnl, 4)
+        bucket["capital_pnl_pct"] = round(float(bucket["capital_pnl_pct"]) + pnl * notional, 4)
+        if pnl > 0:
+            bucket["wins"] += 1
+        else:
+            bucket["losses"] += 1
+        if float(row.peak_pnl_pct or 0.0) <= 0.0001:
+            bucket["peak0_count"] += 1
+        if row.closed_reason in _STOP_LIKE_PAPER_REASONS or str(row.closed_reason or "").startswith("rapid_"):
+            bucket["stop_like_count"] += 1
+
+    results: list[dict] = []
+    for bucket in buckets.values():
+        count = int(bucket["count"] or 0)
+        if count <= 0:
+            continue
+        wins = int(bucket["wins"] or 0)
+        bucket["win_rate"] = round(wins / count * 100, 1)
+        bucket["avg_raw_pnl_pct"] = round(float(bucket["raw_pnl_pct"]) / count, 4)
+        bucket["avg_capital_pnl_pct"] = round(float(bucket["capital_pnl_pct"]) / count, 5)
+        bucket["peak0_pct"] = round(float(bucket["peak0_count"]) / count * 100, 1)
+        bucket["stop_like_pct"] = round(float(bucket["stop_like_count"]) / count * 100, 1)
+        bucket["avg_size"] = round(float(bucket.pop("_size_sum", 0.0)) / count, 4)
+        bucket["health"] = (
+            "disabled_candidate"
+            if count >= 20 and (bucket["win_rate"] < 30.0 or bucket["peak0_pct"] >= 60.0 or bucket["capital_pnl_pct"] < -1.0)
+            else "watch"
+            if count >= 8 and bucket["capital_pnl_pct"] < 0
+            else "candidate"
+        )
+        results.append(bucket)
+
+    return sorted(
+        results,
+        key=lambda item: (item["health"] == "disabled_candidate", abs(float(item["capital_pnl_pct"]))),
+        reverse=True,
+    )[:limit]
 
 
 def _close_position(position: PaperPositionRecord, reason: str) -> None:
@@ -774,6 +915,9 @@ def save_paper_orders(orders: list[PaperOrder]) -> None:
     init_db()
     with SessionLocal() as db:
         for order in orders:
+            meta = _extract_order_meta(order.action, order.rationale)
+            strategy_id = order.strategy_id or infer_strategy_id(order.action, order.focus, meta)
+            entry_profile = order.entry_profile or _entry_profile(order.action, order.focus, meta)
             db.add(
                 PaperOrderRecord(
                     created_at=order.created_at,
@@ -781,6 +925,8 @@ def save_paper_orders(orders: list[PaperOrder]) -> None:
                     action=order.action,
                     focus=order.focus,
                     size=order.size,
+                    strategy_id=strategy_id,
+                    entry_profile=entry_profile,
                     rationale=order.rationale,
                 )
             )
@@ -951,6 +1097,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             if (order.desk, symbol) in existing_open_keys:
                 continue
             entry_price = _paper_entry_price(reference_price, symbol, order.created_at) if order.desk == "crypto" else reference_price
+            strategy_id = order.strategy_id or infer_strategy_id(order.action, order.focus, meta)
+            entry_profile = order.entry_profile or _entry_profile(order.action, order.focus, meta)
             position = PaperPositionRecord(
                 desk=order.desk,
                 symbol=symbol,
@@ -964,6 +1112,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 peak_pnl_pct=0.0,
                 cycles_open=0,
                 focus=order.focus,
+                strategy_id=strategy_id,
+                entry_profile=entry_profile,
             )
             db.add(
                 position
@@ -1158,6 +1308,8 @@ def load_recent_orders(limit: int = 10) -> list[dict]:
                         "notional_pct": meta["notional_pct"],
                         "status": meta["status"],
                         "pnl_estimate_pct": meta["pnl_estimate_pct"],
+                        "strategy_id": row.strategy_id or infer_strategy_id(row.action, row.focus, meta),
+                        "entry_profile": row.entry_profile or _entry_profile(row.action, row.focus, meta),
                         "rationale": row.rationale or [],
                     })(_extract_order_meta(row.action, row.rationale or []))
                 }
@@ -1189,6 +1341,8 @@ def load_open_positions(limit: int = 10) -> list[dict]:
                     "peak_pnl_pct": row.peak_pnl_pct,
                     "cycles_open": row.cycles_open,
                     "focus": row.focus,
+                    "strategy_id": row.strategy_id or infer_strategy_id(row.action, row.focus),
+                    "entry_profile": row.entry_profile or _entry_profile(row.action, row.focus),
                 }
                 for row in rows
             ]
@@ -1219,6 +1373,8 @@ def load_closed_positions(limit: int = 10) -> list[dict]:
                     "cycles_open": row.cycles_open,
                     "closed_reason": row.closed_reason,
                     "focus": row.focus,
+                    "strategy_id": row.strategy_id or infer_strategy_id(row.action, row.focus),
+                    "entry_profile": row.entry_profile or _entry_profile(row.action, row.focus),
                 }
                 for row in rows
             ]
@@ -1331,6 +1487,7 @@ def load_daily_summary() -> dict:
                 "close_reason_stats": _close_reason_stats(closed_today),
                 "desk_close_reason_stats": _desk_close_reason_stats(closed_today),
                 "symbol_performance_stats": _symbol_performance_stats(positions),
+                "strategy_performance_stats": _strategy_performance_stats(positions),
                 "desk_stats": desk_stats,
                 "cumulative_realized_pnl_pct": cumulative_realized_pnl,
                 "cumulative_closed_positions": cumulative_closed,
@@ -1367,6 +1524,7 @@ def load_daily_summary() -> dict:
             "close_reason_stats": {},
             "desk_close_reason_stats": {},
             "symbol_performance_stats": [],
+            "strategy_performance_stats": [],
             "desk_stats": {
                 "crypto": {"open_positions": 0, "closed_positions": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "realized_pnl_pct": 0.0, "unrealized_pnl_pct": 0.0, "open_notional_pct": 0.0},
                 "korea": {"open_positions": 0, "closed_positions": 0, "wins": 0, "losses": 0, "win_rate": 0.0, "realized_pnl_pct": 0.0, "unrealized_pnl_pct": 0.0, "open_notional_pct": 0.0},
@@ -1743,6 +1901,8 @@ def load_paper_open_positions(limit: int = 20) -> list[dict]:
                     "cycles_open": row.cycles_open,
                     "opened_at": row.opened_at,
                     "focus": row.focus,
+                    "strategy_id": row.strategy_id or infer_strategy_id(row.action, row.focus),
+                    "entry_profile": row.entry_profile or _entry_profile(row.action, row.focus),
                 }
                 for row in rows
             ]
@@ -1778,9 +1938,28 @@ def load_paper_closed_positions(limit: int = 50) -> list[dict]:
                     "closed_at": row.closed_at,
                     "closed_reason": row.closed_reason or "",
                     "focus": row.focus,
+                    "strategy_id": row.strategy_id or infer_strategy_id(row.action, row.focus),
+                    "entry_profile": row.entry_profile or _entry_profile(row.action, row.focus),
                 }
                 for row in rows
             ]
+    except OperationalError:
+        rebuild_db()
+        return []
+
+
+def load_strategy_performance_stats(window: int = 300) -> list[dict]:
+    """Recent paper strategy attribution for gating and dashboard diagnostics."""
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "closed")
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(window)
+            ).scalars().all()
+            return _strategy_performance_stats(list(rows), limit=50)
     except OperationalError:
         rebuild_db()
         return []

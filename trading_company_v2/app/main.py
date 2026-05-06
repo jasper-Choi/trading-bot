@@ -43,6 +43,7 @@ from app.core.state_store import (
     load_performance_analytics,
     load_performance_quick_stats,
     load_recent_journal,
+    load_strategy_performance_stats,
 )
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
@@ -448,6 +449,7 @@ def _build_performance_payload(state: CompanyState, closed_positions: list[dict]
         "close_reason_stats": state.daily_summary.get("close_reason_stats", {}) or {},
         "desk_close_reason_stats": state.daily_summary.get("desk_close_reason_stats", {}) or {},
         "symbol_performance_stats": state.daily_summary.get("symbol_performance_stats", []) or [],
+        "strategy_performance_stats": state.daily_summary.get("strategy_performance_stats", []) or [],
         "closed_count": len(closed_positions),
         "trade_curve": trade_curve,
         "recent_closed": closed_positions[:6],
@@ -1648,6 +1650,7 @@ def ops_summary() -> dict:
             "close_reason_stats": state.daily_summary.get("close_reason_stats", {}),
             "desk_close_reason_stats": state.daily_summary.get("desk_close_reason_stats", {}),
             "symbol_performance_stats": state.daily_summary.get("symbol_performance_stats", []),
+            "strategy_performance_stats": state.daily_summary.get("strategy_performance_stats", []),
             "desk_stats": state.daily_summary.get("desk_stats", {}),
         },
         "capital_profile": state.strategy_book.get("capital_profile", {}) or {},
@@ -1706,6 +1709,7 @@ def mobile_summary() -> dict:
             "gross_open_notional_pct": daily.get("gross_open_notional_pct", 0.0),
         },
         "problem_symbols": (daily.get("symbol_performance_stats", []) or [])[:3],
+        "problem_strategies": (daily.get("strategy_performance_stats", []) or [])[:5],
         "desks": {
             "crypto": {
                 "plan": state.strategy_book.get("crypto_plan", {}),
@@ -2354,6 +2358,7 @@ def performance_data() -> dict:
         analytics = {"error": str(exc), "updated_at": None, "summary": {}}
     return {
         "quick_stats": load_performance_quick_stats(),
+        "strategy_stats": load_strategy_performance_stats(),
         "analytics": analytics,
         "bot_status": bot_status,
     }
@@ -2364,6 +2369,7 @@ def performance(request: Request):
     if request.query_params.get("format") == "json":
         return {
             "stats": load_performance_quick_stats(),
+            "strategy_stats": load_strategy_performance_stats(),
             "open_positions": [p.model_dump() for p in load_open_positions()],
             "closed_positions": load_closed_positions(limit=50),
             "analytics": load_performance_analytics(),
