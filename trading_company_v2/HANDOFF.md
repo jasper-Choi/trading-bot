@@ -70,6 +70,28 @@ This is the foundation for the next critical step: automatic strategy kill switc
   - `recent_shadow_signals`
 - This allows disabled strategies to keep being measured without opening paper/live positions.
 
+### Follow-up Patch: Performance UI + RANGING Strategy Expansion
+- `/performance` now renders:
+  - strategy-level performance table
+  - strategy health: allowed / watch / blocked
+  - shadow signal summary
+  - recent shadow signal rows
+- Added 2 more RANGING mean-reversion signals:
+  - `volume_climax_reversal`: abnormal volume + large lower wick + close recovery
+  - `support_reclaim_long`: recent range low probe + close reclaim
+- RANGING mean-reversion signal count is now 10:
+  1. Airborne EMA deviation
+  2. BB squeeze bounce
+  3. VWAP deviation
+  4. RSI extreme
+  5. RSI mean reversion
+  6. Stochastic oversold cross
+  7. MACD histogram reversal
+  8. Hammer/Doji candle reversal
+  9. Volume climax reversal
+  10. Support reclaim
+- `crypto_desk_agent`, `recommendation_engine`, and `hot_path_guard` now propagate/use the 2 new signals.
+
 ## 0. Latest Claude Notes - 2026-05-06 (session 4)
 
 ### Session Goal

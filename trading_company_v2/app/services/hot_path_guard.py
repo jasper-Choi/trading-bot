@@ -181,7 +181,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         macd_histogram_reversal = bool(item.get("macd_histogram_reversal", False))
         hammer_candle = bool(item.get("hammer_candle", False))
         doji_candle = bool(item.get("doji_candle", False))
-        # 멀티 신호: 8개 중 1개 이상
+        volume_climax_reversal = bool(item.get("volume_climax_reversal", False))
+        support_reclaim_long = bool(item.get("support_reclaim_long", False))
+        # 멀티 신호: 10개 중 1개 이상
         ranging_signal = (
             (range_scalp_eligible and airborne_long and airborne_score >= 0.40)
             or bb_squeeze_bounce
@@ -191,6 +193,8 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             or macd_histogram_reversal
             or hammer_candle
             or doji_candle
+            or volume_climax_reversal
+            or support_reclaim_long
         )
         range_scalp_hot_ok = (
             ranging_signal

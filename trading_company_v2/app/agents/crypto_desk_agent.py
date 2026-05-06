@@ -286,6 +286,10 @@ class CryptoDeskAgent(BaseAgent):
                     "macd_histogram_reversal": bool(signal.get("macd_histogram_reversal", False)),
                     "hammer_candle": bool(signal.get("hammer_candle", False)),
                     "doji_candle": bool(signal.get("doji_candle", False)),
+                    "volume_climax_reversal": bool(signal.get("volume_climax_reversal", False)),
+                    "volume_climax_ratio": float(signal.get("volume_climax_ratio", 0.0) or 0.0),
+                    "support_reclaim_long": bool(signal.get("support_reclaim_long", False)),
+                    "support_level": float(signal.get("support_level", 0.0) or 0.0),
                 }
             )
 
@@ -334,6 +338,10 @@ class CryptoDeskAgent(BaseAgent):
             "macd_histogram_reversal": False,
             "hammer_candle": False,
             "doji_candle": False,
+            "volume_climax_reversal": False,
+            "volume_climax_ratio": 0.0,
+            "support_reclaim_long": False,
+            "support_level": 0.0,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -466,5 +474,9 @@ class CryptoDeskAgent(BaseAgent):
                 "macd_histogram_reversal": bool(leader.get("macd_histogram_reversal", False)),
                 "hammer_candle": bool(leader.get("hammer_candle", False)),
                 "doji_candle": bool(leader.get("doji_candle", False)),
+                "volume_climax_reversal": bool(leader.get("volume_climax_reversal", False)),
+                "volume_climax_ratio": float(leader.get("volume_climax_ratio", 0.0) or 0.0),
+                "support_reclaim_long": bool(leader.get("support_reclaim_long", False)),
+                "support_level": float(leader.get("support_level", 0.0) or 0.0),
             },
         )

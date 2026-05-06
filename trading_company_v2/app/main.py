@@ -2517,6 +2517,16 @@ def _performance_html() -> str:  # noqa: PLR0915
       </div>
     </section>
 
+    <!-- 전략별 성과 / Shadow Mode -->
+    <section class="grid section">
+      <div class="card full">
+        <h2>전략별 성과 / Shadow Mode <span style="font-weight:400;color:var(--muted);font-size:.8rem">손실 전략은 자동 차단, 신호는 계속 기록</span></h2>
+        <div class="table-wrap" id="strategy-table"></div>
+        <h2 style="margin-top:18px">Shadow 신호 현황</h2>
+        <div class="table-wrap" id="shadow-table"></div>
+      </div>
+    </section>
+
     <!-- 진입/청산 사유 -->
     <section class="grid section">
       <div class="card wide"><h2>진입 사유별 승률</h2><div class="reason-list" id="entry-reasons"></div></div>
@@ -2706,6 +2716,64 @@ function sortTable(th,colIdx){
   _drawSymbolTable();
 }
 
+/* ── 전략별 성과 / Shadow Mode ── */
+function healthKo(h){
+  h=String(h||'candidate');
+  if(h==='disabled_candidate')return '차단';
+  if(h==='watch')return '관찰';
+  return '허용';
+}
+function healthCls(h){
+  h=String(h||'candidate');
+  if(h==='disabled_candidate')return 'red';
+  if(h==='watch')return 'yellow';
+  return 'green';
+}
+function renderStrategyStats(rows){
+  rows=rows||[];
+  if(!rows.length){document.getElementById('strategy-table').innerHTML='<div class="empty">전략별 성과 데이터 없음</div>';return;}
+  document.getElementById('strategy-table').innerHTML=table(['전략','상태','거래','승률','자본 PnL','Peak0','Stop성','평균 크기'],rows.slice(0,20).map(function(x){
+    return '<tr>'
+      +'<td><b>'+String(x.strategy_id||'unknown').replace('crypto.','')+'</b></td>'
+      +'<td class="'+healthCls(x.health)+'">'+healthKo(x.health)+'</td>'
+      +'<td>'+n(x.count)+'건</td>'
+      +'<td class="'+(n(x.win_rate)>=45?'green':n(x.win_rate)<30?'red':'yellow')+'">'+n(x.win_rate).toFixed(1)+'%</td>'
+      +'<td class="'+cls(x.capital_pnl_pct)+'">'+pct(x.capital_pnl_pct)+'</td>'
+      +'<td class="'+(n(x.peak0_pct)>=60?'red':'blue')+'">'+n(x.peak0_pct).toFixed(1)+'%</td>'
+      +'<td class="'+(n(x.stop_like_pct)>=60?'red':'blue')+'">'+n(x.stop_like_pct).toFixed(1)+'%</td>'
+      +'<td>'+n(x.avg_size).toFixed(2)+'x</td>'
+      +'</tr>';
+  }));
+}
+function renderShadowStats(stats,recent){
+  stats=stats||[];recent=recent||[];
+  if(!stats.length&&!recent.length){document.getElementById('shadow-table').innerHTML='<div class="empty">Shadow 신호 없음</div>';return;}
+  var statRows=stats.slice(0,10).map(function(x){
+    return '<tr>'
+      +'<td><b>'+String(x.strategy_id||'unknown').replace('crypto.','')+'</b></td>'
+      +'<td>'+n(x.count)+'회</td>'
+      +'<td>'+((x.symbols||[]).slice(0,4).join(', ')||'--')+'</td>'
+      +'<td>'+String(x.top_reason||'--')+'</td>'
+      +'<td class="blue">'+n(x.avg_score).toFixed(2)+'</td>'
+      +'<td class="blue">'+n(x.avg_stream_score).toFixed(2)+'</td>'
+      +'<td>'+kst(x.latest_at)+'</td>'
+      +'</tr>';
+  });
+  var recentRows=recent.slice(0,8).map(function(x){
+    return '<tr>'
+      +'<td>'+kst(x.created_at)+'</td>'
+      +'<td><b>'+String(x.symbol||'--').replace('KRW-','')+'</b></td>'
+      +'<td>'+String(x.strategy_id||'').replace('crypto.','')+'</td>'
+      +'<td>'+String(x.source||'--')+'</td>'
+      +'<td>'+String(x.reason||'--')+'</td>'
+      +'<td class="blue">'+n(x.score).toFixed(2)+'</td>'
+      +'</tr>';
+  });
+  document.getElementById('shadow-table').innerHTML =
+    '<div style="margin-bottom:10px">'+table(['전략','신호','종목','사유','평균점수','평균틱','최근'],statRows)+'</div>'
+    + table(['시각','종목','전략','출처','사유','점수'],recentRows);
+}
+
 /* ── 사유별 리스트 ── */
 function renderReasons(id,rows){
   document.getElementById(id).innerHTML=(rows||[]).slice(0,10).map(function(x){
@@ -2738,6 +2806,8 @@ async function load(){
     renderDaily(a);
     renderBars(a);
     renderSymbolTable(a);
+    renderStrategyStats(data.strategy_stats||[]);
+    renderShadowStats(data.shadow_signal_stats||[],data.recent_shadow_signals||[]);
     renderReasons('entry-reasons',a.entry_reason_stats);
     renderReasons('exit-reasons',a.exit_reason_stats);
     renderTables(a);

@@ -75,6 +75,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     macd_histogram_reversal = bool(payload.get("macd_histogram_reversal", False))
     hammer_candle = bool(payload.get("hammer_candle", False))
     doji_candle = bool(payload.get("doji_candle", False))
+    volume_climax_reversal = bool(payload.get("volume_climax_reversal", False))
+    volume_climax_ratio = float(payload.get("volume_climax_ratio", 0.0) or 0.0)
+    support_reclaim_long = bool(payload.get("support_reclaim_long", False))
+    support_level = float(payload.get("support_level", 0.0) or 0.0)
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -205,10 +209,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         sig_macd_rev    = macd_histogram_reversal
         # 신호 8: 캔들 반전 패턴 (Hammer / Doji)
         sig_candle_rev  = hammer_candle or doji_candle
+        # 신호 9: 거래량 클라이맥스 반전
+        sig_vol_climax  = volume_climax_reversal
+        # 신호 10: 레인지 하단 지지선 리클레임
+        sig_support_reclaim = support_reclaim_long
 
         mean_rev_count = sum([
             sig_airborne, sig_bb_squeeze, sig_vwap_dev, sig_rsi_extreme, sig_rsi_rev,
-            sig_stoch_cross, sig_macd_rev, sig_candle_rev,
+            sig_stoch_cross, sig_macd_rev, sig_candle_rev, sig_vol_climax, sig_support_reclaim,
         ])
 
         # 공통 필터: 급락 중 아님 + 베어리쉬 구조 아님 + 과열 아님
@@ -229,9 +237,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             f"score={airborne_score:.2f} bb_lower={at_bb_lower}"
         )
         ranging_signal_note = (
-            f"ranging signals({mean_rev_count}/8): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
+            f"ranging signals({mean_rev_count}/10): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
             f"vwap={sig_vwap_dev}({vwap_deviation_pct:.1f}%) rsi_ext={sig_rsi_extreme} rsi_rev={sig_rsi_rev} "
-            f"stoch={sig_stoch_cross}(k={stoch_k:.0f}) macd_rev={sig_macd_rev} candle={sig_candle_rev}"
+            f"stoch={sig_stoch_cross}(k={stoch_k:.0f}) macd_rev={sig_macd_rev} candle={sig_candle_rev} "
+            f"vol_climax={sig_vol_climax}({volume_climax_ratio:.1f}x) support_reclaim={sig_support_reclaim}"
         )
 
         if range_scalp_ok:
@@ -251,6 +260,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 primary_reason = f"vwap_deviation {vwap_deviation_pct:.1f}%"
             elif sig_rsi_extreme:
                 primary_reason = f"rsi_extreme rsi={rsi_value}"
+            elif sig_vol_climax:
+                primary_reason = f"volume_climax {volume_climax_ratio:.1f}x"
+            elif sig_support_reclaim:
+                primary_reason = f"support_reclaim {support_level:.4f}"
             else:
                 primary_reason = f"rsi_mean_rev rsi={rsi_value}"
             return {
@@ -278,7 +291,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [
                 airborne_note,
                 ranging_signal_note,
-                "진입 조건: 에어본/BB스퀴즈/VWAP이격/RSI극단/스토캐스틱/MACD반전/캔들패턴 중 1개 이상 + OB매수우위",
+                "진입 조건: 에어본/BB스퀴즈/VWAP이격/RSI극단/스토캐스틱/MACD반전/캔들패턴/거래량클라이맥스/지지선리클레임 중 1개 이상 + OB매수우위",
             ],
         }
     # ── TRENDING / 기타 시장: 기존 추세추종 로직 유지 ──────────────────────────

@@ -1160,6 +1160,38 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         and not choch_bearish
     )
 
+    # --- Volume Climax Reversal ---
+    # Panic/forced selling often prints a large lower wick on abnormal volume.
+    # In RANGING markets this is a higher-quality bounce setup than a naked RSI signal.
+    _all_volumes = [float(c.get("volume", c.get("candle_acc_trade_volume", 0.0)) or 0.0) for c in candles]
+    _avg_vol20 = sum(_all_volumes[-21:-1]) / 20 if len(_all_volumes) >= 21 and sum(_all_volumes[-21:-1]) > 0 else 0.0
+    volume_climax_ratio = round(_all_volumes[-1] / _avg_vol20, 2) if _avg_vol20 > 0 else 0.0
+    _lower_wick_ratio = _lower_wick / _total_range if _total_range > 0 else 0.0
+    _close_position = (_c_close - _c_low) / _total_range if _total_range > 0 else 0.0
+    volume_climax_reversal = (
+        volume_climax_ratio >= 2.2
+        and _lower_wick_ratio >= 0.40
+        and _close_position >= 0.55
+        and last_rsi is not None and last_rsi <= 55.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and float(recent_change) > -8.0
+    )
+
+    # --- Support Reclaim Long ---
+    # Price probes the recent range low, then closes back above it.
+    _support_level = min(lows[-21:-1]) if len(lows) >= 21 else min(lows[:-1] or lows)
+    support_reclaim_long = (
+        _support_level > 0
+        and _c_low <= _support_level * 1.004
+        and _c_close >= _support_level * 1.002
+        and _lower_wick_ratio >= 0.22
+        and last_rsi is not None and last_rsi <= 55.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and float(recent_change) > -8.0
+    )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1258,6 +1290,10 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "macd_histogram_reversal": macd_histogram_reversal,
         "hammer_candle": hammer_candle,
         "doji_candle": doji_candle,
+        "volume_climax_reversal": volume_climax_reversal,
+        "volume_climax_ratio": volume_climax_ratio,
+        "support_reclaim_long": support_reclaim_long,
+        "support_level": round(_support_level, 8),
     }
 
 
