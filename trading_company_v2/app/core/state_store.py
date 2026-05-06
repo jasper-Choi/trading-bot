@@ -430,8 +430,8 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     # @ ~8s/cycle: 450=1h, 225=30min, 75=10min, 25=3min
     if desk == "crypto" and "range_scalp" in focus:
         # 평균회귀(에어본) 전략: 작은 목표/타이트한 손절/빠른 만기
-        # target=1.2% (EMA 복귀), stop=-0.70%, max 75사이클(~10분)
-        return 1.20, -0.70, 75
+        # stop -0.70% → -0.50%: 즉시실패 시 손실 축소 (avg -0.895% → -0.50% 목표)
+        return 1.20, -0.50, 75
     if desk == "crypto" and "range_breakout" in focus:
         return 2.20, -1.00, 90
     if desk == "crypto" and "high_tight_flag" in focus:
@@ -455,12 +455,14 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
     """Return (giveback_pct, floor_pct) for crypto profit protection.
 
     Tiers (partial-profit-capture style):
-      peak >= 5.0%  → floor 2.20%  (let big winners breathe)
+      peak >= 5.0%  → floor 2.20%
       peak >= 3.0%  → floor 1.20%
       peak >= 1.8%  → floor 0.70%
-      peak >= 1.0%  → floor 0.35%  (lock in ≥0.35% once +1% seen)
-      peak >= 0.80% → floor 0.12%  (near breakeven lock once +0.8% seen)
-      peak >= 0.40% → floor 0.00%  (추세 반전 시 즉시 수익 보호; 0.30% 되돌리면 청산)
+      peak >= 1.0%  → floor 0.35%
+      peak >= 0.80% → floor 0.18%
+      peak >= 0.55% → floor 0.08% (giveback 0.20, was 0.30: 수익반납 -0.28% 사례 방지)
+      peak >= 0.40% → floor 0.05% (giveback 0.20, was 0.30)
+      peak >= 0.25% → floor 0.00% (new tier: 조기 반전 감지)
     """
     if peak_pnl >= 5.0:
         return 1.20, 2.20
@@ -473,11 +475,13 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
     if peak_pnl >= 1.0:
         return 0.45, 0.35
     if peak_pnl >= 0.80:
-        return 0.35, 0.18  # raise the exit line once +0.8% has paid
+        return 0.35, 0.18
     if peak_pnl >= 0.55:
-        return 0.30, 0.05
+        return 0.20, 0.08  # 0.30→0.20 giveback: peak=0.55% → floor 0.35% (was 0.25%)
     if peak_pnl >= 0.40:
-        return 0.30, 0.00  # once +0.40% seen: exit if falls 0.30% from peak → near breakeven
+        return 0.20, 0.05  # 0.30→0.20 giveback: peak=0.40% → floor 0.20% (was 0.10%)
+    if peak_pnl >= 0.25:
+        return 0.15, 0.00  # 신규 tier: 소폭 수익이라도 원금 보호 시작
     return 0.0, 0.0
 
 
@@ -1236,8 +1240,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                     closed_symbols.append((position.symbol, "rapid_range_scalp_trail"))
                     _close_position(position, "rapid_range_scalp_trail")
                     paper_closed += 1
-                elif peak_pnl <= 0.05 and minutes_open >= 3.0 and position.pnl_pct <= -0.25:
-                    # 반등이 없으면 빠르게 자름
+                elif peak_pnl <= 0.05 and minutes_open >= 1.5 and position.pnl_pct <= -0.22:
+                    # 반등이 없으면 빠르게 자름 (3.0min→1.5min, -0.25%→-0.22%)
                     closed_symbols.append((position.symbol, "rapid_range_scalp_no_lift"))
                     _close_position(position, "rapid_range_scalp_no_lift")
                     paper_closed += 1
@@ -1292,6 +1296,17 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 # Not added to STOP_LIKE_EXIT_REASONS so it doesn't cascade into risk throttling.
                 closed_symbols.append((position.symbol, "failed_breakout_exit"))
                 _close_position(position, "failed_breakout_exit")
+                paper_closed += 1
+            elif (
+                # fallback: stream 없어도 peak=0 AND 빠른 역행 → 즉시 청산
+                # avg rapid_tick_failed_start -0.612% → -0.25%로 손실 절반 이상 감소 목표
+                not is_range_scalp_rapid
+                and peak_pnl <= 0.05
+                and minutes_open >= 0.5
+                and position.pnl_pct <= -0.25
+            ):
+                closed_symbols.append((position.symbol, "rapid_tick_failed_start"))
+                _close_position(position, "rapid_tick_failed_start")
                 paper_closed += 1
             elif (
                 (stream := summarize_stream_momentum(position.symbol, max_age_seconds=3.5))

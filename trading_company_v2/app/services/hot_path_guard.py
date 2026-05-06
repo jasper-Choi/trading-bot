@@ -240,8 +240,13 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             or volume_climax_reversal
             or support_reclaim_long
         )
+        # dev > +1.0%: 가격이 EMA 위에서 롱 평균회귀 진입 차단
+        # STORJ dev=+1.32% 진입 → 방향 반대(EMA 위에서 long mean-reversion = wrong)
+        airborne_dev_pct = _float(item.get("airborne_deviation_pct", 0.0))
+        dev_blocks_long_meanrev = airborne_dev_pct > 1.0
         range_scalp_hot_ok = (
             ranging_signal
+            and not dev_blocks_long_meanrev
             and orderbook_bid_ask >= 1.05
             and -1.0 <= micro_move_3 <= 1.50
             and not bool(item.get("rsi_bearish_divergence", False))
