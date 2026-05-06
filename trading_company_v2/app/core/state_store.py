@@ -466,12 +466,18 @@ def _has_recent_failed_paper_symbol(db: Session, position: PaperPositionRecord) 
             PaperPositionRecord.status == "closed",
         )
         .order_by(PaperPositionRecord.id.desc())
-        .limit(3)
+        .limit(4)                              # 3 → 4: 더 넓은 이력 확인
     ).scalars().all()
+    fail_count = 0
     for row in prior:
-        if row.closed_reason in _STOP_LIKE_PAPER_REASONS and float(row.pnl_pct or 0.0) <= -0.30:
-            return True
-    return False
+        pnl = float(row.pnl_pct or 0.0)
+        if row.closed_reason in _STOP_LIKE_PAPER_REASONS:
+            if pnl <= -0.15:                   # -0.30% → -0.15%: 작은 손실도 실패로 인식
+                return True
+            if pnl < 0.0:
+                fail_count += 1
+    # 소손실 실패 2건 이상이면 반복 패턴으로 판단
+    return fail_count >= 2
 
 
 def _build_cycle_signal_meta(paper_orders: list[PaperOrder]) -> dict[str, dict]:
@@ -1111,8 +1117,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 _close_position(position, "rapid_failed_start")
                 paper_closed += 1
             elif (
-                minutes_open >= 4.0
-                and peak_pnl <= 0.05
+                minutes_open >= 3.0                # 4.0 → 3.0: 더 빨리 감지
+                and peak_pnl <= 0.08               # 0.05 → 0.08: 살짝 여유
                 and position.pnl_pct <= -0.10
                 and _has_recent_failed_paper_symbol(db, position)
             ):

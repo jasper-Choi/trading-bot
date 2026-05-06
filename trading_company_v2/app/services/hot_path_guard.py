@@ -34,9 +34,9 @@ _entry_candidates: dict[str, dict[str, Any]] = {}
 _entry_loaded_at = 0.0
 _entry_last_opened_by_symbol: dict[str, float] = {}
 _ENTRY_CANDIDATE_TTL_SECONDS = 18.0
-_ENTRY_COOLDOWN_SECONDS = 75.0
-_MAX_HOT_OPEN_POSITIONS = 5
-_MAX_HOT_OPEN_NOTIONAL = 1.15
+_ENTRY_COOLDOWN_SECONDS = 150.0          # 75s → 150s: 같은 코인 재진입 최소 2.5분 대기
+_MAX_HOT_OPEN_POSITIONS = 4             # 5 → 4: 동시 오픈 포지션 제한
+_MAX_HOT_OPEN_NOTIONAL = 1.00           # 1.15 → 1.00: 전체 노출 축소
 _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES = False
 _HOT_RECENT_FAILURE_REASONS = {
     "rapid_tick_failed_start",
@@ -45,7 +45,12 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_failed_start",
     "rapid_stop_hit",
     "rapid_repeat_symbol_failure",
+    "rapid_range_scalp_stop",
+    "rapid_range_scalp_no_lift",
 }
+# 실패 후 블랙리스트 쿨다운 (초): 연속 2회 실패 시 이 시간만큼 재진입 차단
+_FAILURE_BLACKLIST_SECONDS = 360.0      # 6분
+_failure_blacklist: dict[str, float] = {}
 
 
 def _minutes_open(opened_at: str) -> float:
@@ -151,9 +156,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         return False
 
     common_guards = (
-        signal_freshness >= 0.55
-        and -0.45 <= micro_move_3 <= 1.20
-        and micro_vwap_gap <= 1.80
+        signal_freshness >= 0.58               # 0.55 → 0.58: 더 신선한 신호만
+        and -0.30 <= micro_move_3 <= 0.95      # 상한 1.20 → 0.95: 이미 올라간 뒤 진입 차단
+        and micro_vwap_gap <= 1.50             # 1.80 → 1.50: VWAP 이격 타이트
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
         and not hard_overheat
@@ -162,20 +167,19 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     standard_ok = (
         bool(item.get("trend_entry_allowed", False))
         and trend_alignment in {"trend_long", "pullback_long"}
-        and trend_score >= 0.76
-        and combined >= 0.72
-        and orderbook_bid_ask >= 1.08
-        and trend_extension_pct <= 3.0
+        and trend_score >= 0.78               # 0.76 → 0.78
+        and combined >= 0.74                  # 0.72 → 0.74
+        and orderbook_bid_ask >= 1.10         # 1.08 → 1.10
+        and trend_extension_pct <= 2.8        # 3.0 → 2.8: 과확장 구간 차단 강화
     )
     # Early trend path: CHoCH/BOS structural break before EMA stack catches up
-    # Requires stricter score + stronger orderbook since structure is less confirmed
     early_ok = (
         bool(item.get("trend_early_entry", False))
         and trend_alignment not in {"downtrend", "late_extension"}
-        and trend_score >= 0.70
-        and combined >= 0.74
-        and orderbook_bid_ask >= 1.20
-        and trend_extension_pct <= 2.0
+        and trend_score >= 0.72               # 0.70 → 0.72
+        and combined >= 0.76                  # 0.74 → 0.76
+        and orderbook_bid_ask >= 1.22         # 1.20 → 1.22
+        and trend_extension_pct <= 1.8        # 2.0 → 1.8
     )
     # RANGING impulse path:
     # In box/ranging markets, scanner leaders can show weak orderbook at the snapshot
@@ -429,7 +433,10 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
     last_opened = _entry_last_opened_by_symbol.get(symbol, 0.0)
     if now - last_opened < _ENTRY_COOLDOWN_SECONDS:
         return {"entry_opened": 0, "reason": "entry_symbol_cooldown"}
-    _entry_last_opened_by_symbol[symbol] = now
+    # 연속 실패 블랙리스트 확인 (in-memory)
+    blacklist_until = _failure_blacklist.get(symbol, 0.0)
+    if now < blacklist_until:
+        return {"entry_opened": 0, "reason": "entry_failure_blacklist"}
 
     combined = _float(candidate.get("combined_score", candidate.get("signal_score", 0.0)))
     trend = _float(candidate.get("trend_follow_score", 0.0))
@@ -500,7 +507,7 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         ).scalar_one_or_none()
         if existing is not None:
             return {"entry_opened": 0, "reason": "entry_already_open"}
-        recent_failure = db.execute(
+        recent_closed = db.execute(
             select(PaperPositionRecord)
             .where(
                 PaperPositionRecord.status == "closed",
@@ -508,11 +515,21 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
                 PaperPositionRecord.symbol == symbol,
             )
             .order_by(PaperPositionRecord.id.desc())
-            .limit(2)
+            .limit(3)                              # 2 → 3: 최근 3건 확인
         ).scalars().all()
-        for row in recent_failure:
-            if row.closed_reason in _HOT_RECENT_FAILURE_REASONS and float(row.pnl_pct or 0.0) <= -0.30:
+        fail_count = 0
+        for row in recent_closed:
+            is_failure = row.closed_reason in _HOT_RECENT_FAILURE_REASONS
+            pnl = float(row.pnl_pct or 0.0)
+            # -0.15% 이상 손실로 실패한 경우 차단 (기존 -0.30% → -0.15%)
+            if is_failure and pnl <= -0.15:
                 return {"entry_opened": 0, "reason": "entry_recent_failure_cooldown"}
+            if is_failure and pnl < 0.0:
+                fail_count += 1
+        # 소손실 실패가 2건 이상이면 블랙리스트 등록 후 차단
+        if fail_count >= 2:
+            _failure_blacklist[symbol] = now + _FAILURE_BLACKLIST_SECONDS
+            return {"entry_opened": 0, "reason": "entry_failure_blacklist"}
         db.add(
             PaperOrderRecord(
                 created_at=order.created_at,
@@ -543,6 +560,9 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         db.commit()
     if opened_payload is not None:
         _notify_trade_entry(opened_payload)
+    # 진입 성공 시 블랙리스트 해제
+    _failure_blacklist.pop(symbol, None)
+    _entry_last_opened_by_symbol[symbol] = now
     refresh_hot_crypto_positions(force=True)
     return {
         "entry_opened": 1,
@@ -604,14 +624,19 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and buy_ratio >= 0.52
         )
     else:
+        # trend_ignition: 추세 확인 + 틱 모멘텀 동시 충족
+        # 핵심 원칙: 이미 오른 뒤가 아니라 '지금 오르는 중'에 진입
         ignition = (
             stream_ok
-            and ticks_15 >= 3
-            and stream_score >= 0.70
-            and move_5 >= 0.08
-            and 0.28 <= move_15 <= 0.85
-            and move_60 >= -0.12
-            and buy_ratio >= 0.60
+            and ticks_15 >= 4                      # 3 → 4: 틱 밀도 강화
+            and stream_score >= 0.74               # 0.70 → 0.74
+            and move_5 >= 0.12                     # 0.08 → 0.12: 현재 5초 모멘텀 강해야
+            and 0.35 <= move_15 <= 0.75            # 0.28 → 0.35: 너무 작은 움직임 제외
+                                                   # 0.85 → 0.75: 너무 많이 오른 것도 제외
+            and -0.10 <= move_60 <= 1.20           # 상한 추가: 60초에 1.2% 이상 오른 건 늦은 진입
+            and buy_ratio >= 0.63                  # 0.60 → 0.63
+            # 모멘텀 지속 확인: 5초 움직임이 15초 움직임 대비 너무 약하면 모멘텀 죽은 것
+            and move_5 >= move_15 * 0.20
         )
     if not ignition:
         return {**guard_summary, "entry_opened": 0, "reason": "entry_wait_tick_ignition"}
