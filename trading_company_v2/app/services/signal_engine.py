@@ -14,6 +14,124 @@ def ema(values: list[float], span: int) -> list[float]:
     return result
 
 
+def sma(values: list[float], period: int) -> list[float | None]:
+    result: list[float | None] = [None] * len(values)
+    for i in range(period - 1, len(values)):
+        result[i] = sum(values[i - period + 1 : i + 1]) / period
+    return result
+
+
+def bollinger_bands(
+    values: list[float], period: int = 20, std_mult: float = 2.0
+) -> dict[str, list[float | None]]:
+    """Return upper, middle (SMA), lower Bollinger Bands."""
+    middle = sma(values, period)
+    upper: list[float | None] = [None] * len(values)
+    lower: list[float | None] = [None] * len(values)
+    for i in range(period - 1, len(values)):
+        window = values[i - period + 1 : i + 1]
+        mean = middle[i]
+        if mean is None:
+            continue
+        std = (sum((v - mean) ** 2 for v in window) / period) ** 0.5
+        upper[i] = mean + std_mult * std
+        lower[i] = mean - std_mult * std
+    return {"upper": upper, "middle": middle, "lower": lower}
+
+
+def detect_airborne_signal(
+    candles: list[dict[str, Any]],
+    ema_period: int = 20,
+    threshold_pct: float = 1.5,
+) -> dict[str, Any]:
+    """MG 단타 에어본(Airborne) 이격도 신호.
+
+    가격이 EMA에서 임계값(threshold_pct %) 이상 이탈했을 때 평균회귀 진입 신호.
+    - airborne_long  : 가격이 EMA 아래로 너무 많이 이격 → 롱 진입 타점
+    - airborne_short : 가격이 EMA 위로 너무 많이 이격 → 숏 진입 타점
+    - deviation_sigma: 최근 변동성 기준 이탈 강도 (클수록 강한 신호)
+    """
+    closes = [float(c["close"]) for c in candles]
+    if len(closes) < ema_period + 5:
+        return {
+            "airborne_long": False,
+            "airborne_short": False,
+            "deviation_pct": 0.0,
+            "deviation_sigma": 0.0,
+            "airborne_score": 0.0,
+            "airborne_ema": 0.0,
+            "airborne_reasons": ["not enough candles"],
+        }
+    ema_vals = ema(closes, ema_period)
+    last_close = closes[-1]
+    last_ema = ema_vals[-1]
+    if not last_ema:
+        return {
+            "airborne_long": False, "airborne_short": False,
+            "deviation_pct": 0.0, "deviation_sigma": 0.0,
+            "airborne_score": 0.0, "airborne_ema": 0.0,
+            "airborne_reasons": ["ema zero"],
+        }
+    deviation_pct = (last_close - last_ema) / last_ema * 100
+
+    # 동적 임계값: 최근 20봉의 평균 이격도로 정규화
+    lookback = min(20, len(closes))
+    avg_abs_dev = sum(
+        abs((closes[-(i + 1)] - ema_vals[-(i + 1)]) / ema_vals[-(i + 1)] * 100)
+        for i in range(lookback)
+        if ema_vals[-(i + 1)]
+    ) / lookback
+    deviation_sigma = abs(deviation_pct) / avg_abs_dev if avg_abs_dev > 0 else 0.0
+
+    # 에어본 롱: 가격이 EMA 밑으로 이격 (평균회귀 롱 타점)
+    airborne_long = deviation_pct <= -threshold_pct
+    # 에어본 숏: 가격이 EMA 위로 이격 (평균회귀 숏 타점)
+    airborne_short = deviation_pct >= threshold_pct
+
+    # 볼린저밴드 위치
+    bb = bollinger_bands(closes, period=20, std_mult=2.0)
+    bb_upper = bb["upper"][-1]
+    bb_lower = bb["lower"][-1]
+    bb_mid = bb["middle"][-1]
+    bb_pct_b: float = 0.5  # 기본값 (밴드 중간)
+    if bb_upper is not None and bb_lower is not None and bb_upper != bb_lower:
+        bb_pct_b = (last_close - bb_lower) / (bb_upper - bb_lower)
+    # %B < 0.20 → 하단 밴드 근처 (추가 롱 신호)
+    # %B > 0.80 → 상단 밴드 근처 (추가 숏 신호)
+    at_bb_lower = bb_pct_b < 0.20
+    at_bb_upper = bb_pct_b > 0.80
+
+    # 최종 score: 이격 강도 + BB 위치 보정
+    airborne_score = min(1.0, deviation_sigma / 2.5)
+    if airborne_long and at_bb_lower:
+        airborne_score = min(1.0, airborne_score + 0.15)
+    if airborne_short and at_bb_upper:
+        airborne_score = min(1.0, airborne_score + 0.15)
+
+    reasons: list[str] = []
+    if airborne_long:
+        reasons.append(f"airborne_long dev={deviation_pct:.2f}% sigma={deviation_sigma:.1f}x")
+    if airborne_short:
+        reasons.append(f"airborne_short dev={deviation_pct:.2f}% sigma={deviation_sigma:.1f}x")
+    if at_bb_lower:
+        reasons.append(f"bb_lower touch pctB={bb_pct_b:.2f}")
+    if at_bb_upper:
+        reasons.append(f"bb_upper touch pctB={bb_pct_b:.2f}")
+
+    return {
+        "airborne_long": airborne_long,
+        "airborne_short": airborne_short,
+        "deviation_pct": round(deviation_pct, 3),
+        "deviation_sigma": round(deviation_sigma, 2),
+        "airborne_score": round(airborne_score, 3),
+        "airborne_ema": round(last_ema, 6),
+        "bb_pct_b": round(bb_pct_b, 3),
+        "at_bb_lower": at_bb_lower,
+        "at_bb_upper": at_bb_upper,
+        "airborne_reasons": reasons,
+    }
+
+
 def rsi(values: list[float], period: int = 14) -> float | None:
     if len(values) < period + 1:
         return None
@@ -862,13 +980,10 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     else:
         bias = "balanced"
     pullback = detect_pullback_entry(candles)
-    # Early trend entry: structural break (CHoCH/BOS) before full EMA stack confirms.
-    # Fires 1-2 candles (15-30 min) earlier than trend_entry_allowed — captures the
-    # moment the market STARTS the uptrend, not after it's already confirmed.
-    # Requires: price above EMA21 + rising slope + CHoCH/BOS structure + no bearish reversal.
     choch_bullish = bool(ict.get("choch_bullish"))
     bos_bullish = bool(ict.get("bos_bullish"))
     choch_bearish = bool(ict.get("choch_bearish"))
+    # Early trend entry: structural break (CHoCH/BOS) before full EMA stack confirms.
     trend_early_entry = (
         bool(trend.get("price_above_trend_ema", False))
         and float(trend.get("trend_slope_pct", 0.0) or 0.0) >= 0.08
@@ -877,6 +992,37 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         and not choch_bearish
         and not bool(bk.get("rsi_bearish_divergence", False))
     )
+
+    # --- 에어본(Airborne) 이격도 신호 (MG 단타 매매법) ---
+    # 가격이 EMA에서 너무 많이 이탈 → 평균회귀 타점 포착
+    # RANGING 시장에서 핵심 진입 전략
+    airborne = detect_airborne_signal(candles, ema_period=20, threshold_pct=1.5)
+
+    # --- Range Scalp 종합 적격 판정 ---
+    # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
+    # RANGING 시장에서 사용하는 평균회귀 전략
+    rsi_oversold_range = last_rsi is not None and last_rsi <= 48.0
+    rsi_not_crashed = last_rsi is not None and last_rsi >= 22.0  # 완전 붕괴는 제외
+    slope_flat = abs(float(trend.get("trend_slope_pct", 0.0) or 0.0)) < 0.60
+    range_scalp_eligible = (
+        bool(airborne.get("airborne_long"))
+        and rsi_oversold_range
+        and rsi_not_crashed
+        and slope_flat
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -5.0  # 급락 중 아님
+    )
+
+    # --- RSI Mean Reversion (레인징 보조 전략) ---
+    rsi_mean_rev_long = (
+        last_rsi is not None and last_rsi <= 35.0
+        and trend_alignment not in {"downtrend"}
+        and not choch_bearish
+        and float(recent_change) > -4.0
+    )
+
     return {
         "bias": bias,
         "score": score,
@@ -924,6 +1070,20 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "spike_pct_15m": float(pullback.get("spike_pct", 0.0) or 0.0),
         "retrace_from_high_pct": float(pullback.get("retrace_from_high_pct", 0.0) or 0.0),
         "vol_contracted_on_pullback": bool(pullback.get("vol_contracted_on_pullback", False)),
+        # 에어본(Airborne) 이격도 신호 (MG 단타 / 평균회귀)
+        "airborne_long": bool(airborne.get("airborne_long", False)),
+        "airborne_short": bool(airborne.get("airborne_short", False)),
+        "airborne_deviation_pct": float(airborne.get("deviation_pct", 0.0) or 0.0),
+        "airborne_deviation_sigma": float(airborne.get("deviation_sigma", 0.0) or 0.0),
+        "airborne_score": float(airborne.get("airborne_score", 0.0) or 0.0),
+        "airborne_ema": float(airborne.get("airborne_ema", 0.0) or 0.0),
+        "bb_pct_b": float(airborne.get("bb_pct_b", 0.5) or 0.5),
+        "at_bb_lower": bool(airborne.get("at_bb_lower", False)),
+        "at_bb_upper": bool(airborne.get("at_bb_upper", False)),
+        "airborne_reasons": list(airborne.get("airborne_reasons", [])),
+        # Range scalp 적격 판정 (RANGING 시장 진입용)
+        "range_scalp_eligible": range_scalp_eligible,
+        "rsi_mean_rev_long": rsi_mean_rev_long,
     }
 
 

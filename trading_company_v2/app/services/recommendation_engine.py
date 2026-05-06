@@ -57,6 +57,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     spike_pct_15m = float(payload.get("spike_pct_15m", 0.0) or 0.0)
     retrace_from_high_pct = float(payload.get("retrace_from_high_pct", 0.0) or 0.0)
     vol_contracted_on_pullback = bool(payload.get("vol_contracted_on_pullback", False))
+    # 에어본 / range scalp 필드
+    airborne_long = bool(payload.get("airborne_long", False))
+    airborne_score = float(payload.get("airborne_score", 0.0) or 0.0)
+    airborne_deviation_pct = float(payload.get("airborne_deviation_pct", 0.0) or 0.0)
+    airborne_deviation_sigma = float(payload.get("airborne_deviation_sigma", 0.0) or 0.0)
+    at_bb_lower = bool(payload.get("at_bb_lower", False))
+    range_scalp_eligible = bool(payload.get("range_scalp_eligible", False))
+    rsi_mean_rev_long = bool(payload.get("rsi_mean_rev_long", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -162,7 +170,68 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + ["Stress regime blocks aggressive crypto entries."],
         }
+
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
+
+    # ── RANGING 시장 라우팅 ─────────────────────────────────────────────────────
+    # RANGING = 추세 추종 전략 완전 차단 → 평균회귀(에어본/레인지 스캘프) 전략만 허용
+    # 데이터: RANGING에서 추세 추종 승률 9%, 누적 -122% → 구조적 적자
+    _choch_bearish_early = bool(payload.get("choch_bearish", False))
+    if regime == "RANGING":
+        # 에어본 롱 + RSI 과매도 + BB 하단 + 호가 매수우위 → range scalp 진입
+        range_scalp_ok = (
+            (range_scalp_eligible or rsi_mean_rev_long)
+            and airborne_long
+            and airborne_score >= 0.35
+            and orderbook_bid_ask >= 1.05
+            and micro_move_3 >= -1.0          # 급락 중 아님
+            and not rsi_bearish_divergence
+            and not hard_overheat
+            and not stream_reversal
+            and not _choch_bearish_early      # 하락 구조 아님
+            and stance != "DEFENSE"
+        )
+        airborne_note = (
+            f"airborne dev={airborne_deviation_pct:.2f}% sigma={airborne_deviation_sigma:.1f}x "
+            f"score={airborne_score:.2f} bb_lower={at_bb_lower}"
+        )
+        if range_scalp_ok:
+            # 신호 강도에 따른 사이즈 결정
+            if airborne_deviation_sigma >= 2.0 and at_bb_lower:
+                entry_size = "0.55x"
+            elif airborne_deviation_sigma >= 1.5:
+                entry_size = "0.45x"
+            else:
+                entry_size = "0.35x"
+            return {
+                "action": "probe_longs",
+                "size": entry_size,
+                "focus": f"range_scalp: {lead_market or 'KRW-BTC'} airborne_long dev={airborne_deviation_pct:.2f}% — mean reversion entry",
+                "symbol": lead_market,
+                "candidate_symbols": candidate_symbols,
+                "notes": reasons + [
+                    airborne_note,
+                    f"range scalp: ob={orderbook_bid_ask:.2f}x micro={micro_score:.2f} rsi={rsi_value}",
+                    "RANGING regime: 추세추종 차단, 평균회귀(에어본) 진입",
+                ],
+            }
+        # RANGING이지만 에어본 조건 미충족 → 대기
+        return {
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": (
+                f"RANGING regime — 추세추종 차단. "
+                f"에어본 신호 대기 (dev={airborne_deviation_pct:.2f}%, score={airborne_score:.2f})"
+            ),
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                airborne_note,
+                "에어본 롱 신호(이격도 하락) + RSI 과매도 + BB 하단 접근 시 진입",
+                f"현재: airborne_long={airborne_long} range_scalp_eligible={range_scalp_eligible}",
+            ],
+        }
+    # ── TRENDING / 기타 시장: 기존 추세추종 로직 유지 ──────────────────────────
     soft_overheat = recent_change >= 6.0 or burst_change >= 6.5 or ema_gap >= 5.0 or (rsi_value is not None and float(rsi_value) >= 85.0)
     try:
         rsi_numeric = float(rsi_value) if rsi_value is not None else 0.0

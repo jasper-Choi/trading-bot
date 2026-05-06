@@ -266,6 +266,16 @@ class CryptoDeskAgent(BaseAgent):
                     "spike_pct_15m": float(signal.get("spike_pct_15m", 0.0) or 0.0),
                     "retrace_from_high_pct": float(signal.get("retrace_from_high_pct", 0.0) or 0.0),
                     "vol_contracted_on_pullback": bool(signal.get("vol_contracted_on_pullback", False)),
+                    # 에어본 / range scalp
+                    "airborne_long": bool(signal.get("airborne_long", False)),
+                    "airborne_short": bool(signal.get("airborne_short", False)),
+                    "airborne_deviation_pct": float(signal.get("airborne_deviation_pct", 0.0) or 0.0),
+                    "airborne_deviation_sigma": float(signal.get("airborne_deviation_sigma", 0.0) or 0.0),
+                    "airborne_score": float(signal.get("airborne_score", 0.0) or 0.0),
+                    "bb_pct_b": float(signal.get("bb_pct_b", 0.5) or 0.5),
+                    "at_bb_lower": bool(signal.get("at_bb_lower", False)),
+                    "range_scalp_eligible": bool(signal.get("range_scalp_eligible", False)),
+                    "rsi_mean_rev_long": bool(signal.get("rsi_mean_rev_long", False)),
                 }
             )
 
@@ -295,6 +305,15 @@ class CryptoDeskAgent(BaseAgent):
             "trend_entry_allowed": False,
             "trend_early_entry": False,
             "trend_reasons": [],
+            "airborne_long": False,
+            "airborne_short": False,
+            "airborne_deviation_pct": 0.0,
+            "airborne_deviation_sigma": 0.0,
+            "airborne_score": 0.0,
+            "bb_pct_b": 0.5,
+            "at_bb_lower": False,
+            "range_scalp_eligible": False,
+            "rsi_mean_rev_long": False,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -407,5 +426,15 @@ class CryptoDeskAgent(BaseAgent):
                 "vol_contracted_on_pullback": bool(leader.get("vol_contracted_on_pullback", False)),
                 "ict_bullish_count": int(leader.get("ict_bullish_count", 0) or 0),
                 "ict_structure": str(leader.get("ict_structure", "undecided") or "undecided"),
+                # 에어본 / range scalp
+                "airborne_long": bool(leader.get("airborne_long", False)),
+                "airborne_short": bool(leader.get("airborne_short", False)),
+                "airborne_deviation_pct": float(leader.get("airborne_deviation_pct", 0.0) or 0.0),
+                "airborne_deviation_sigma": float(leader.get("airborne_deviation_sigma", 0.0) or 0.0),
+                "airborne_score": float(leader.get("airborne_score", 0.0) or 0.0),
+                "bb_pct_b": float(leader.get("bb_pct_b", 0.5) or 0.5),
+                "at_bb_lower": bool(leader.get("at_bb_lower", False)),
+                "range_scalp_eligible": bool(leader.get("range_scalp_eligible", False)),
+                "rsi_mean_rev_long": bool(leader.get("rsi_mean_rev_long", False)),
             },
         )

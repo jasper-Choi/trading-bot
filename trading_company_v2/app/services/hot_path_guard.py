@@ -19,6 +19,8 @@ from app.core.state_store import (
     _paper_net_pnl_pct,
     _paper_trade_payload,
     _position_thresholds,
+    _range_scalp_trail_rules,
+    _range_scalp_no_lift_exit,
     init_db,
     rapid_guard_crypto_positions,
 )
@@ -83,6 +85,11 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.62 and stream_score >= 0.84:
             return 0.04
         return 0.03
+    if entry_profile == "range_scalp":
+        airborne_score = _float(candidate.get("airborne_score", 0.0))
+        if airborne_score >= 0.70:
+            return 0.06
+        return 0.04
     if combined >= 0.86 and trend >= 0.82 and stream_score >= 0.76:
         return 0.12
     if combined >= 0.78 and stream_score >= 0.70:
@@ -119,7 +126,30 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     rsi = item.get("rsi")
     rsi_value = _float(rsi, 0.0) if rsi is not None else 0.0
     trend_extension_pct = _float(item.get("trend_extension_pct", 0.0))
+    regime = str(item.get("regime", "") or "")
+    range_scalp_eligible = bool(item.get("range_scalp_eligible", False))
+    airborne_long = bool(item.get("airborne_long", False))
+    airborne_score = _float(item.get("airborne_score", 0.0))
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or rsi_value >= 92.0
+
+    # ── RANGING regime: block all trend-following, only range_scalp allowed ──
+    if regime == "RANGING":
+        range_scalp_hot_ok = (
+            range_scalp_eligible
+            and airborne_long
+            and airborne_score >= 0.40
+            and orderbook_bid_ask >= 1.05
+            and -1.0 <= micro_move_3 <= 1.50
+            and not bool(item.get("rsi_bearish_divergence", False))
+            and not bool(item.get("micro_exhausted", False))
+            and signal_freshness >= 0.50
+            and not hard_overheat
+        )
+        if range_scalp_hot_ok:
+            item["entry_profile"] = "range_scalp"
+            return True
+        return False
+
     common_guards = (
         signal_freshness >= 0.55
         and -0.45 <= micro_move_3 <= 1.20
@@ -213,13 +243,18 @@ def refresh_hot_entry_candidates(state: dict[str, Any] | None = None, force: boo
     desk_views = state.get("desk_views", {}) or {}
     crypto_view = desk_views.get("crypto_desk", {}) or {}
     raw_candidates = list(crypto_view.get("all_candidates") or crypto_view.get("candidate_markets") or [])
+    cycle_regime = str(state.get("regime", "") or "")
     prepared: dict[str, dict[str, Any]] = {}
     for item in raw_candidates:
-        if not isinstance(item, dict) or not _candidate_is_hot_entry_eligible(item):
+        if not isinstance(item, dict):
             continue
-        symbol = str(item.get("market") or item.get("symbol") or "").strip()
+        # Inject cycle-level regime so _candidate_is_hot_entry_eligible can gate on it
+        item_with_regime = {**item, "regime": cycle_regime}
+        if not _candidate_is_hot_entry_eligible(item_with_regime):
+            continue
+        symbol = str(item_with_regime.get("market") or item_with_regime.get("symbol") or "").strip()
         prepared[symbol] = {
-            **item,
+            **item_with_regime,
             "symbol": symbol,
             "loaded_at": now,
         }
@@ -301,13 +336,40 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         entry_price = float(item.get("entry_price", 0.0) or 0.0)
         pnl_pct = _paper_net_pnl_pct(entry_price, price, symbol, "hot")
         peak_pnl = max(float(item.get("peak_pnl_pct", 0.0) or 0.0), pnl_pct)
-        target_pct, stop_pct, _ = _position_thresholds("crypto", str(item.get("action") or ""))
+        pos_focus = str(item.get("focus", "") or "")
+        target_pct, stop_pct, _ = _position_thresholds("crypto", str(item.get("action") or ""), focus=pos_focus)
+        is_range_scalp_hot = "range_scalp" in pos_focus
+        is_range_impulse = "range_impulse" in pos_focus
+        is_obvious_trend = "obvious_trend" in pos_focus
+        minutes_open = _minutes_open(str(item.get("opened_at") or ""))
+        reason = ""
+
+        # ── Range Scalp: dedicated rapid guard (tight target/stop/trail) ──
+        if is_range_scalp_hot:
+            rs_trail_giveback, rs_profit_floor = _range_scalp_trail_rules(peak_pnl)
+            rs_protect = max(rs_profit_floor, peak_pnl - rs_trail_giveback) if rs_trail_giveback else 0.0
+            if pnl_pct >= target_pct:
+                reason = "rapid_range_scalp_target"
+            elif pnl_pct <= stop_pct:
+                reason = "rapid_range_scalp_stop"
+            elif rs_trail_giveback and pnl_pct <= rs_protect:
+                reason = "rapid_range_scalp_trail"
+            elif (no_lift := _range_scalp_no_lift_exit(minutes_open, peak_pnl, pnl_pct)):
+                reason = no_lift
+            if reason:
+                result = rapid_guard_crypto_positions({symbol: price})
+                refresh_hot_crypto_positions(force=True)
+                return {
+                    "checked": checked,
+                    "paper_closed": int(result.get("paper_closed", 0) or 0),
+                    "live_closed": int(result.get("live_closed", 0) or 0),
+                    "reason": reason,
+                }
+            _update_cached_position(symbol, int(item.get("id", 0) or 0), pnl_pct, peak_pnl, price)
+            continue
+
         trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
         protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
-        minutes_open = _minutes_open(str(item.get("opened_at") or ""))
-        is_range_impulse = "range_impulse" in str(item.get("focus", "") or "")
-        is_obvious_trend = "obvious_trend" in str(item.get("focus", "") or "")
-        reason = ""
         if pnl_pct >= target_pct:
             reason = "rapid_target_hit"
         elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.35:
@@ -396,13 +458,24 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
         "entry_path": str(candidate.get("entry_profile", "tick_ignition_entry") or "tick_ignition_entry"),
         "status": "planned",
     }
+    entry_path = meta["entry_path"]
+    move15_val = _float(stream.get("stream_move_15s_pct", 0.0))
+    if entry_path == "range_scalp":
+        airborne_score_val = _float(candidate.get("airborne_score", 0.0))
+        deviation_pct_val = _float(candidate.get("airborne_deviation_pct", 0.0))
+        order_focus = (
+            f"range_scalp: {symbol} hot tick entry - airborne {airborne_score_val:.2f} "
+            f"dev {deviation_pct_val:+.2f}%, stream {stream_score:.2f}, move15 {move15_val:.2f}%."
+        )
+    else:
+        order_focus = (
+            f"{symbol} {entry_path} tick entry - combined {combined:.2f}, "
+            f"stream {stream_score:.2f}, move15 {move15_val:.2f}%."
+        )
     order = PaperOrder(
         desk="crypto",
         action="probe_longs",
-        focus=(
-            f"{symbol} {meta['entry_path']} tick entry - combined {combined:.2f}, "
-            f"stream {stream_score:.2f}, move15 {_float(stream.get('stream_move_15s_pct', 0.0)):.2f}%."
-        ),
+        focus=order_focus,
         size=f"{size_notional:.2f}x",
         symbol=symbol,
         reference_price=price,
@@ -517,6 +590,18 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and 0.35 <= move_15 <= 1.15
             and move_60 >= -0.08
             and buy_ratio >= 0.64
+        )
+    elif entry_profile == "range_scalp":
+        # Mean reversion entry: price overextended below EMA, expect bounce.
+        # Lower momentum bar — we need a small lift, not a breakout.
+        ignition = (
+            stream_ok
+            and ticks_15 >= 2
+            and stream_score >= 0.52
+            and move_5 >= 0.05
+            and move_15 >= 0.08
+            and move_60 >= -0.35
+            and buy_ratio >= 0.52
         )
     else:
         ignition = (

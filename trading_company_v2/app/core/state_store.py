@@ -345,12 +345,16 @@ def _build_price_lookup(market_snapshot: dict) -> dict[tuple[str, str], float]:
     return lookup
 
 
-def _position_thresholds(desk: str, action: str) -> tuple[float, float, int]:
+def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float, float, int]:
     # Returns (target_pct, stop_pct, max_cycles)
     # Backtest-validated (2025-04):
     #   coin_backtest_v5  → +4% TP / -2.0% stop / ≤48h  (60-min vol-breakout)
     #   stock_backtest_v3 → +4% TP / -2.5% stop / ≤5 days (daily momentum breakout)
-    # @ 2 min/cycle: 720 = 24h, 360 = 12h, 195 = 6.5h (1 KRX session)
+    # @ ~8s/cycle: 450=1h, 225=30min, 75=10min, 25=3min
+    if desk == "crypto" and "range_scalp" in focus:
+        # 평균회귀(에어본) 전략: 작은 목표/타이트한 손절/빠른 만기
+        # target=1.2% (EMA 복귀), stop=-0.70%, max 75사이클(~10분)
+        return 1.20, -0.70, 75
     if desk == "crypto":
         # Trend mode: cut failed ignitions fast, let winners run with trailing.
         return 10.0, -2.0, 180
@@ -394,6 +398,40 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
     if peak_pnl >= 0.40:
         return 0.30, 0.00  # once +0.40% seen: exit if falls 0.30% from peak → near breakeven
     return 0.0, 0.0
+
+
+def _range_scalp_trail_rules(peak_pnl: float) -> tuple[float, float]:
+    """Range scalp(평균회귀) 포지션 트레일 규칙.
+
+    목표가 작기 때문에 수익 보호를 더 빠르게:
+      peak >= 1.0%  → floor 0.55%  (목표 1.2% 근접, 절반 이상 확보)
+      peak >= 0.70% → floor 0.30%  (의미있는 수익 발생, 절반 확보)
+      peak >= 0.40% → floor 0.10%  (소폭 수익이라도 확보)
+      peak >= 0.20% → floor 0.00%  (원금 부근에서 되돌아오면 즉시 청산)
+    """
+    if peak_pnl >= 1.0:
+        return 0.30, 0.55
+    if peak_pnl >= 0.70:
+        return 0.25, 0.30
+    if peak_pnl >= 0.40:
+        return 0.20, 0.10
+    if peak_pnl >= 0.20:
+        return 0.15, 0.00
+    return 0.0, 0.0
+
+
+def _range_scalp_no_lift_exit(minutes_open: float, peak_pnl: float, pnl_pct: float) -> str | None:
+    """Range scalp 전용 no-lift 청산 (추세추종보다 훨씬 빠름).
+
+    평균회귀는 단기에 반등이 오지 않으면 신호 자체가 틀린 것 → 빠른 청산.
+    """
+    if minutes_open >= 4.0 and peak_pnl <= 0.05 and pnl_pct <= -0.25:
+        return "range_scalp_no_lift"
+    if minutes_open >= 7.0 and peak_pnl <= 0.15 and pnl_pct <= 0.00:
+        return "range_scalp_timeout"
+    if minutes_open >= 12.0:
+        return "range_scalp_timeout"  # 최대 12분 → 타임아웃
+    return None
 
 
 def _crypto_no_lift_exit_reason(minutes_open: float, peak_pnl: float, pnl_pct: float, rapid: bool = False) -> str | None:
@@ -819,11 +857,13 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
                 position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
             position.cycles_open += 1
-            target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action)
+            pos_focus = str(position.focus or "")
+            target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action, pos_focus)
+            is_range_scalp = "range_scalp" in pos_focus
             # early_failure: exit if still deeply losing after fast_fail_cycle cycles
             # stale_floor:   exit near max_cycles if barely profitable
-            early_failure_pct = round(stop_pct * 0.7, 2)   # 70% of full stop (e.g. -1.4% at -2% stop)
-            stale_floor_pct = round(max(target_pct * 0.15, 0.20), 2)   # 15% of target (e.g. +0.60% at +4% target)
+            early_failure_pct = round(stop_pct * 0.7, 2)
+            stale_floor_pct = round(max(target_pct * 0.15, 0.20), 2)
             # Time-based fast_fail (cycle-length agnostic). With fast cycle (8s) + rapid guard,
             # cycle counts are no longer a reliable proxy for elapsed time. Use opened_at directly.
             minutes_open = 0.0
@@ -849,15 +889,28 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 fast_fail_cycle = 20
             if position.desk == "crypto":
                 peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
+                if is_range_scalp:
+                    # ── Range Scalp(평균회귀) 청산 로직 ──
+                    trail_giveback, profit_floor = _range_scalp_trail_rules(peak_pnl)
+                    protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+                    if position.pnl_pct >= target_pct:
+                        _close_position(position, "range_scalp_target")
+                    elif position.pnl_pct <= stop_pct:
+                        _close_position(position, "range_scalp_stop")
+                    elif (rs_no_lift := _range_scalp_no_lift_exit(minutes_open, peak_pnl, position.pnl_pct)):
+                        _close_position(position, rs_no_lift)
+                    elif trail_giveback and position.pnl_pct <= protect_level:
+                        _close_position(position, "range_scalp_trail")
+                    elif position.cycles_open >= max_cycles:
+                        _close_position(position, "range_scalp_timeout")
+                    continue
+                # ── 추세추종 청산 로직 (기존) ──
                 trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
                 protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
                 if position.pnl_pct >= target_pct:
                     _close_position(position, "target_hit")
                 elif position.pnl_pct <= stop_pct:
                     _close_position(position, "stop_hit")
-                # Time-based failed_ignition: only fire after the intended 24-min window AND
-                # only when the position never showed life (peak <= 0.10%). This protects
-                # against fast-cycle noise and ensures "failed ignition" really means failed.
                 elif (no_lift_reason := _crypto_no_lift_exit_reason(minutes_open, peak_pnl, position.pnl_pct)):
                     _close_position(position, no_lift_reason)
                 elif trend_exit_reason := _crypto_trend_exit_reason(cycle_signal_meta.get(position.symbol, {}), position.pnl_pct, minutes_open):
@@ -867,8 +920,6 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 elif trail_giveback and position.pnl_pct <= protect_level:
                     _close_position(position, "profit_protect" if peak_pnl < 1.8 else "trend_trail")
                 elif peak_pnl >= 0.40 and minutes_open >= 3.0 and position.pnl_pct <= max(-0.50, peak_pnl - 1.20):
-                    # Wider failed_followthrough: covers smaller peaks (0.40%+) and fires earlier (3 min).
-                    # Catches reversals before they reach the hard -2% stop.
                     _close_position(position, "failed_followthrough")
                 elif position.cycles_open >= max_cycles and position.pnl_pct < 0.8:
                     _close_position(position, "time_exit")
@@ -963,12 +1014,17 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             position.current_price = current_price
             position.pnl_pct = _paper_net_pnl_pct(position.entry_price, current_price, position.symbol, "rapid")
             position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
-            target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action)
+            pos_focus_rapid = str(position.focus or "")
+            target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action, pos_focus_rapid)
             peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
-            trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
+            is_range_scalp_rapid = "range_scalp" in pos_focus_rapid
+            if is_range_scalp_rapid:
+                trail_giveback, profit_floor = _range_scalp_trail_rules(peak_pnl)
+            else:
+                trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
             protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
-            is_range_impulse = "range_impulse" in str(position.focus or "")
-            is_obvious_trend = "obvious_trend" in str(position.focus or "")
+            is_range_impulse = "range_impulse" in pos_focus_rapid
+            is_obvious_trend = "obvious_trend" in pos_focus_rapid
             minutes_open = 0.0
             try:
                 opened_dt = datetime.fromisoformat(str(position.opened_at).replace("Z", "+00:00"))
@@ -977,6 +1033,26 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 minutes_open = (datetime.now(timezone.utc) - opened_dt).total_seconds() / 60.0
             except (ValueError, TypeError):
                 minutes_open = 0.0
+            if is_range_scalp_rapid:
+                # ── Range Scalp rapid guard: 빠른 손절/트레일 ──
+                if position.pnl_pct >= target_pct:
+                    closed_symbols.append((position.symbol, "rapid_range_scalp_target"))
+                    _close_position(position, "rapid_range_scalp_target")
+                    paper_closed += 1
+                elif position.pnl_pct <= stop_pct:
+                    closed_symbols.append((position.symbol, "rapid_range_scalp_stop"))
+                    _close_position(position, "rapid_range_scalp_stop")
+                    paper_closed += 1
+                elif trail_giveback and position.pnl_pct <= protect_level:
+                    closed_symbols.append((position.symbol, "rapid_range_scalp_trail"))
+                    _close_position(position, "rapid_range_scalp_trail")
+                    paper_closed += 1
+                elif peak_pnl <= 0.05 and minutes_open >= 3.0 and position.pnl_pct <= -0.25:
+                    # 반등이 없으면 빠르게 자름
+                    closed_symbols.append((position.symbol, "rapid_range_scalp_no_lift"))
+                    _close_position(position, "rapid_range_scalp_no_lift")
+                    paper_closed += 1
+                continue
             if position.pnl_pct >= target_pct:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
