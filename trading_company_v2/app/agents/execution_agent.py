@@ -90,6 +90,12 @@ class ExecutionAgent(BaseAgent):
             return "crypto.offense_probe"
         return f"crypto.{entry_profile or action or 'unknown'}"
 
+    def _strategy_disabled(self, strategy_id: str) -> dict | None:
+        for item in self.daily_summary.get("strategy_performance_stats", []) or []:
+            if str(item.get("strategy_id", "") or "") == strategy_id and item.get("health") == "disabled_candidate":
+                return item
+        return None
+
     @staticmethod
     def _is_stop_like_exit(item: dict) -> bool:
         reason = str(item.get("closed_reason", "") or "")
@@ -555,6 +561,7 @@ class ExecutionAgent(BaseAgent):
         strategy_id = str(plan.get("strategy_id", "") or self._infer_strategy_id(action, str(plan.get("focus", "")), entry_profile))
         if not entry_profile:
             entry_profile = strategy_id.split(".", 1)[-1] if "." in strategy_id else strategy_id
+        strategy_disabled = self._strategy_disabled(strategy_id) if action in actionable_entries else None
         meta = {
             "symbol": symbol,
             "reference_price": reference_price,
@@ -600,6 +607,7 @@ class ExecutionAgent(BaseAgent):
             and not gross_notional_cap_hit
             and not high_corr_cap_hit
             and not stale_signal_block
+            and not strategy_disabled
             else exit_status,
             "pnl_estimate_pct": pnl_estimate_pct,
         }
@@ -679,6 +687,13 @@ class ExecutionAgent(BaseAgent):
             notes.append(
                 f"stale signal blocked entry: freshness {signal_freshness:.2f} "
                 f"({plan.get('freshness_reason', 'no freshness detail')})"
+            )
+        if strategy_disabled:
+            notes.append(
+                f"{strategy_id} disabled by strategy performance: "
+                f"win {float(strategy_disabled.get('win_rate', 0.0) or 0.0):.1f}%, "
+                f"capital pnl {float(strategy_disabled.get('capital_pnl_pct', 0.0) or 0.0):+.2f}%, "
+                f"peak0 {float(strategy_disabled.get('peak0_pct', 0.0) or 0.0):.1f}%"
             )
         rationale = [meta, *notes]
         return PaperOrder(

@@ -22,6 +22,7 @@ from app.core.state_store import (
     _range_scalp_trail_rules,
     _range_scalp_no_lift_exit,
     init_db,
+    load_strategy_performance_stats,
     rapid_guard_crypto_positions,
 )
 from app.services.upbit_stream_cache import summarize_stream_momentum
@@ -51,6 +52,32 @@ _HOT_RECENT_FAILURE_REASONS = {
 # 실패 후 블랙리스트 쿨다운 (초): 연속 2회 실패 시 이 시간만큼 재진입 차단
 _FAILURE_BLACKLIST_SECONDS = 360.0      # 6분
 _failure_blacklist: dict[str, float] = {}
+_STRATEGY_BLOCKLIST_TTL_SECONDS = 60.0
+_strategy_blocklist_loaded_at = 0.0
+_strategy_blocklist: set[str] = set()
+
+
+def _disabled_strategy_ids(force: bool = False) -> set[str]:
+    """Cache disabled strategies so websocket ticks do not hit SQLite per tick."""
+    global _strategy_blocklist_loaded_at, _strategy_blocklist
+    now = time.monotonic()
+    if not force and now - _strategy_blocklist_loaded_at < _STRATEGY_BLOCKLIST_TTL_SECONDS:
+        return set(_strategy_blocklist)
+    try:
+        _strategy_blocklist = {
+            str(item.get("strategy_id", "") or "")
+            for item in load_strategy_performance_stats(window=300)
+            if item.get("health") == "disabled_candidate" and str(item.get("strategy_id", "") or "")
+        }
+    except Exception:
+        # Hot path must never stall because diagnostics failed.
+        pass
+    _strategy_blocklist_loaded_at = now
+    return set(_strategy_blocklist)
+
+
+def _strategy_is_disabled(strategy_id: str) -> bool:
+    return bool(strategy_id) and strategy_id in _disabled_strategy_ids()
 
 
 def _minutes_open(opened_at: str) -> float:
@@ -168,6 +195,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         )
         if range_scalp_hot_ok:
             item["entry_profile"] = "range_scalp"
+            if _strategy_is_disabled("crypto.range_scalp"):
+                item["hot_block_reason"] = "strategy_disabled"
+                return False
             return True
         return False
 
@@ -234,12 +264,21 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     )
     if common_guards and (standard_ok or early_ok):
         item["entry_profile"] = "trend_ignition"
+        if _strategy_is_disabled("crypto.trend_ignition"):
+            item["hot_block_reason"] = "strategy_disabled"
+            return False
         return True
     if obvious_trend_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
         item["entry_profile"] = "obvious_trend"
+        if _strategy_is_disabled("crypto.obvious_trend"):
+            item["hot_block_reason"] = "strategy_disabled"
+            return False
         return True
     if range_impulse_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
         item["entry_profile"] = "range_impulse"
+        if _strategy_is_disabled("crypto.range_impulse"):
+            item["hot_block_reason"] = "strategy_disabled"
+            return False
         return True
     return False
 
@@ -462,6 +501,8 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
     stream_score = _float(stream.get("stream_score", 0.0))
     entry_profile = str(candidate.get("entry_profile", "tick_ignition") or "tick_ignition")
     strategy_id = f"crypto.{entry_profile}"
+    if _strategy_is_disabled(strategy_id):
+        return {"entry_opened": 0, "reason": "entry_strategy_disabled", "strategy_id": strategy_id}
     meta = {
         "symbol": symbol,
         "reference_price": price,

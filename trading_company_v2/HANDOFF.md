@@ -48,9 +48,16 @@ This is the foundation for the next critical step: automatic strategy kill switc
 - Local smoke test passed: `init_db()`, `load_strategy_performance_stats()`, and `load_company_state()` all run with the new schema.
 
 ### Suggested Next Work
-1. Add cached strategy blocklist in the execution/hot path so `disabled_candidate` strategies cannot open new positions.
-2. Add shadow-mode logging for disabled strategies so they can keep being measured without real/paper capital impact.
-3. Show strategy stats visibly on `/performance` and mobile summary instead of only JSON/API output.
+1. Add shadow-mode logging for disabled strategies so they can keep being measured without real/paper capital impact.
+2. Show strategy stats visibly on `/performance` and mobile summary instead of only JSON/API output.
+3. Add strategy reset controls so old pre-fix data can be archived without deleting raw history.
+
+### Follow-up Patch: Strategy Kill Switch
+- Added cycle-level strategy disable gate in `ExecutionAgent`.
+- Added websocket hot-path strategy disable gate in `hot_path_guard.py`.
+- Hot-path blocklist is cached for 60 seconds so tick callbacks do not query SQLite on every tick.
+- Disabled strategies now produce an explanatory note with win rate, capital PnL, and peak0%.
+- This converts attribution from passive reporting into active capital protection.
 
 ## 0. Latest Claude Notes - 2026-05-06 (session 4)
 
