@@ -3,6 +3,35 @@
 Last updated: 2026-05-06
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Claude Notes - 2026-05-06 (session 6 — 전략 확장 Batch 2)
+
+### 추가된 전략 신호 6개 (커밋 ece4116)
+
+**RANGING 신호 4개 추가 (총 10→14개)**
+- `williams_r_oversold`: Williams %R ≤ -80 → -80 이상으로 교차 (과매도 탈출)
+- `cci_oversold_bounce`: CCI ≤ -100 상태에서 상승 전환 (CCI 과매도 반등)
+- `keltner_lower_touch`: 가격 ≤ EMA20 - 1.5×ATR14 (켈트너 채널 하단 터치)
+- `mfi_oversold`: MFI ≤ 25 (거래량 가중 RSI 과매도)
+
+**TRENDING 신호 2개 추가 (신규 진입 경로)**
+- `ema_cross_long`: EMA8이 EMA21 위로 교차 (골든크로스 변형, 조기 진입)
+  - hot_path_guard: trend_score ≥ 0.65, combined ≥ 0.60, ob ≥ 1.08
+  - rapid fail: min≥0.3 peak≤0.05 pnl≤-0.30 또는 pnl≤-0.50
+- `vwap_cross_long`: 가격이 VWAP 아래에서 위로 복귀 (기관 평균단가 재탈환)
+  - hot_path_guard: trend_score ≥ 0.62, combined ≥ 0.58, ob ≥ 1.06
+  - rapid fail: min≥0.3 peak≤0.05 pnl≤-0.30 또는 pnl≤-0.50
+
+**전파 경로**
+- `signal_engine.py`: 6개 신호 계산 로직 추가
+- `crypto_desk_agent.py`: ranked_candidates, fallback dict, payload 3곳 추가
+- `recommendation_engine.py`: 변수 추출 + RANGING /14 + ema_cross/vwap_reclaim TRENDING 경로 추가
+- `hot_path_guard.py`: RANGING gate /14 + ema_cross/vwap_reclaim 경로 + 진입 크기 + 빠른 청산 guard
+
+**현재 전략 수**: ~23개 distinct entry path (목표 50개 대비 46%)
+
+### 배포
+- 2026-05-06 UTC, Oracle VM pull+restart 완료
+
 ## 0. Latest Claude Notes - 2026-05-06 (session 5 — 수익률 개선)
 
 ### 데이터 기반 분석 (300건 closed positions)
