@@ -3,6 +3,61 @@
 Last updated: 2026-05-06
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Claude Notes - 2026-05-06 (session 4)
+
+### Session Goal
+Fix 8.8% win rate / -26.72% PnL (all pre-RANGING gate). Strategy count: 8 RANGING signals.
+
+### Fix 1: Hot path entry quality tightened (`hot_path_guard.py`)
+- `common_guards`: micro_move_3 ≤0.95 (was 1.20), vwap_gap ≤1.50 (was 1.80), freshness ≥0.58
+- `standard_ok`: trend_score ≥0.78, combined ≥0.74, ob ≥1.10, extension ≤2.8
+- `early_ok`: trend_score ≥0.72, combined ≥0.76, ob ≥1.22, extension ≤1.8
+- `trend_ignition`: ticks≥4, score≥0.74, move5≥0.12, 0.35≤move15≤0.75, move60≤1.20, buy_ratio≥0.63, move5≥move15×0.20
+
+### Fix 2: Repeat failure blacklist (`hot_path_guard.py`, `state_store.py`)
+- Failure threshold: -0.30% → -0.15%
+- Limit: 2 → 3 lookback; 2+ small failures → 6-min blacklist
+- `_failure_blacklist: dict[str, float]`; cleared on success
+- Cooldown update moved to success path only
+
+### Fix 3: RANGING strategy expansion — first batch (session 3, commit 7eb5129)
+Added 3 new signals to `summarize_crypto_signal()`:
+- `bb_squeeze_bounce`: BB폭 수축 + 하단 터치 + RSI 22-52
+- `vwap_deviation_long`: 20봉 VWAP 대비 -1.5% 이하 + RSI 20-50
+- `rsi_extreme_long`: RSI ≤22
+RANGING block: 5-signal composite (mean_rev_count/5), 0.35x/0.45x/0.55x sizing
+
+### Fix 4: RANGING strategy expansion — second batch (this session, commit b5e1d9b)
+Added 3 more signal groups → total 8 RANGING signals:
+
+**signal_engine.py**:
+- `stochastic()` helper: %K=(close-ll)/(hh-ll)×100, %D=SMA(K,3)
+- `stoch_oversold_cross`: %K<25 AND K crosses above D (직전 K<D, 현재 K≥D)
+- `macd_histogram_reversal`: EMA12-EMA26 히스토그램이 음수 구간에서 2봉 연속 반등
+- `hammer_candle`: 양봉, 하단꼬리≥몸통2배, 상단꼬리≤몸통0.5배, RSI≤50
+- `doji_candle`: 몸통≤범위10%, 범위≥0.3%, RSI≤50
+- Return fields added: stoch_k, stoch_oversold_cross, macd_hist, macd_histogram_reversal, hammer_candle, doji_candle
+
+**crypto_desk_agent.py**: 6 new fields in ranked_candidates, fallback, leader payload
+
+**recommendation_engine.py**:
+- sig_stoch_cross, sig_macd_rev, sig_candle_rev added
+- mean_rev_count now /8 (was /5)
+- ranging_signal_note updated
+
+**hot_path_guard.py**: 4 new booleans in RANGING gate (stoch_oversold_cross, macd_histogram_reversal, hammer_candle, doji_candle)
+
+### Current State
+- Deployed: 2026-05-06 01:11 UTC, no errors
+- Regime: RANGING (market still ranging, dev=6%)
+- Bot operational, waiting for mean-reversion conditions
+
+### Pending
+- Monitor: stoch/MACD/hammer signals firing rate
+- Strategy count: 8 RANGING signals + TRENDING path = ~15 total combinations → target 50
+- Next expansion ideas: multi-timeframe confirmation, volume profile, Ichimoku cloud support
+- Merge remaining tmp file cleanup
+
 ## 0. Latest Claude Notes - 2026-05-06 (session 3)
 
 ### Root Cause Analysis: 9% win rate, -122% PnL (322 trades)
