@@ -3,6 +3,35 @@
 Last updated: 2026-05-06
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Codex Notes - 2026-05-06 (RANGING local breakout strategies)
+
+### Session Goal
+Continue strategy expansion while fixing the scanner-observed issue where the global regime is `RANGING` but individual coins such as HYPER/BIO/SPK can still show strong local continuation.
+
+### Implemented
+- Added 2 crypto continuation strategies:
+  - `crypto.range_breakout`: local 20-candle range high reclaim with volume and no bearish RSI/ICT warning.
+  - `crypto.high_tight_flag`: strong impulse followed by compact consolidation near highs.
+- Propagated both signals through:
+  - `signal_engine.py`
+  - `crypto_desk_agent.py`
+  - `recommendation_engine.py`
+  - `hot_path_guard.py`
+  - `state_store.py`
+- RANGING routing now has two explicit paths:
+  - Mean reversion path: Airborne/BB/VWAP/RSI/Stoch/MACD/candle/volume climax/support reclaim.
+  - Local continuation exception: range breakout or high-tight flag only, so generic trend chasing stays blocked.
+- Hot path now arms `range_breakout` and `high_tight_flag` candidates and opens only after websocket tick confirmation.
+- Added strategy attribution labels and tighter thresholds:
+  - `range_breakout`: target +2.20%, stop -1.00%, max ~12 minutes.
+  - `high_tight_flag`: target +1.80%, stop -0.90%, max ~12 minutes.
+- Added rapid guards:
+  - Fail fast if no lift shortly after entry.
+  - Protect profits once peak reaches ~0.35-0.45%.
+
+### Why This Matters
+This avoids the previous binary mistake of “RANGING means no trend trades at all.” The bot still blocks weak CHoCH/BOS noise in a range, but can now participate when a single coin genuinely breaks its own box and live ticks confirm continuation.
+
 ## 0. Latest Codex Notes - 2026-05-06 (strategy attribution foundation)
 
 ### Session Goal

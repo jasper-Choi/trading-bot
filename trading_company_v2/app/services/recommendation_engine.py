@@ -79,6 +79,12 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     volume_climax_ratio = float(payload.get("volume_climax_ratio", 0.0) or 0.0)
     support_reclaim_long = bool(payload.get("support_reclaim_long", False))
     support_level = float(payload.get("support_level", 0.0) or 0.0)
+    range_breakout_long = bool(payload.get("range_breakout_long", False))
+    range_high_20 = float(payload.get("range_high_20", 0.0) or 0.0)
+    range_width_pct = float(payload.get("range_width_pct", 0.0) or 0.0)
+    high_tight_flag_long = bool(payload.get("high_tight_flag_long", False))
+    impulse_12_pct = float(payload.get("impulse_12_pct", 0.0) or 0.0)
+    flag_range_pct = float(payload.get("flag_range_pct", 0.0) or 0.0)
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -192,6 +198,44 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # 데이터: RANGING에서 추세 추종 승률 9%, 누적 -122% → 구조적 적자
     _choch_bearish_early = bool(payload.get("choch_bearish", False))
     if regime == "RANGING":
+        local_continuation_ok = (
+            (range_breakout_long or high_tight_flag_long)
+            and orderbook_bid_ask >= 0.98
+            and micro_move_3 >= -0.35
+            and micro_vwap_gap <= 4.8
+            and not rsi_bearish_divergence
+            and not hard_overheat
+            and not stream_reversal
+            and not _choch_bearish_early
+            and stance != "DEFENSE"
+        )
+        if local_continuation_ok:
+            if range_breakout_long and high_tight_flag_long:
+                entry_size = "0.50x"
+                primary_reason = "range_breakout + high_tight_flag"
+                profile = "range_breakout"
+            elif range_breakout_long:
+                entry_size = "0.45x"
+                primary_reason = f"range_breakout above {range_high_20:.4f}"
+                profile = "range_breakout"
+            else:
+                entry_size = "0.38x"
+                primary_reason = f"high_tight_flag impulse={impulse_12_pct:.1f}% flag={flag_range_pct:.1f}%"
+                profile = "high_tight_flag"
+            return {
+                "action": "probe_longs",
+                "size": entry_size,
+                "focus": f"{profile}: {lead_market or 'KRW-BTC'} {primary_reason} - local continuation in RANGING",
+                "symbol": lead_market,
+                "candidate_symbols": candidate_symbols,
+                "notes": reasons + [
+                    f"local continuation: breakout={range_breakout_long} high_tight={high_tight_flag_long} "
+                    f"range_width={range_width_pct:.1f}% high20={range_high_20:.4f}",
+                    f"timing: ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% "
+                    f"vwap_gap={micro_vwap_gap:.2f}% rsi={rsi_value}",
+                    "RANGING gate blocks generic trend-following; explicit local breakout/flag patterns pass.",
+                ],
+            }
         # ── 평균회귀 신호 조합 (멀티 컨펌 → 사이즈 확대) ──────────────────────
         # 신호 1: 에어본 (EMA 이격 과대)
         sig_airborne    = airborne_long and airborne_score >= 0.35
@@ -240,7 +284,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             f"ranging signals({mean_rev_count}/10): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
             f"vwap={sig_vwap_dev}({vwap_deviation_pct:.1f}%) rsi_ext={sig_rsi_extreme} rsi_rev={sig_rsi_rev} "
             f"stoch={sig_stoch_cross}(k={stoch_k:.0f}) macd_rev={sig_macd_rev} candle={sig_candle_rev} "
-            f"vol_climax={sig_vol_climax}({volume_climax_ratio:.1f}x) support_reclaim={sig_support_reclaim}"
+            f"vol_climax={sig_vol_climax}({volume_climax_ratio:.1f}x) support_reclaim={sig_support_reclaim} "
+            f"local_breakout={range_breakout_long} high_tight={high_tight_flag_long}"
         )
 
         if range_scalp_ok:

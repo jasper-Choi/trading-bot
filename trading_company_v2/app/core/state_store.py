@@ -309,6 +309,10 @@ def infer_strategy_id(action: str = "", focus: str = "", meta: dict | None = Non
     text = f"{entry_profile} {action} {focus}".lower()
     if "range_scalp" in text:
         return "crypto.range_scalp"
+    if "range_breakout" in text:
+        return "crypto.range_breakout"
+    if "high_tight_flag" in text:
+        return "crypto.high_tight_flag"
     if "range_impulse" in text:
         return "crypto.range_impulse"
     if "obvious_trend" in text:
@@ -428,6 +432,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 평균회귀(에어본) 전략: 작은 목표/타이트한 손절/빠른 만기
         # target=1.2% (EMA 복귀), stop=-0.70%, max 75사이클(~10분)
         return 1.20, -0.70, 75
+    if desk == "crypto" and "range_breakout" in focus:
+        return 2.20, -1.00, 90
+    if desk == "crypto" and "high_tight_flag" in focus:
+        return 1.80, -0.90, 90
     if desk == "crypto":
         # Trend mode: cut failed ignitions fast, let winners run with trailing.
         return 10.0, -2.0, 180
@@ -525,6 +533,8 @@ _STOP_LIKE_PAPER_REASONS = {
     "rapid_tick_failed_start",
     "rapid_obvious_trend_fail",
     "rapid_range_impulse_fail",
+    "rapid_range_breakout_fail",
+    "rapid_high_tight_flag_fail",
     "rapid_failed_start",
     "rapid_repeat_symbol_failure",
 }
@@ -1201,6 +1211,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)
             protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
             is_range_impulse = "range_impulse" in pos_focus_rapid
+            is_range_breakout = "range_breakout" in pos_focus_rapid
+            is_high_tight_flag = "high_tight_flag" in pos_focus_rapid
             is_obvious_trend = "obvious_trend" in pos_focus_rapid
             minutes_open = 0.0
             try:
@@ -1253,6 +1265,22 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             elif is_range_impulse and peak_pnl >= 0.28 and position.pnl_pct <= max(0.02, peak_pnl - 0.35):
                 closed_symbols.append((position.symbol, "rapid_range_impulse_protect"))
                 _close_position(position, "rapid_range_impulse_protect")
+                paper_closed += 1
+            elif is_range_breakout and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.35:
+                closed_symbols.append((position.symbol, "rapid_range_breakout_fail"))
+                _close_position(position, "rapid_range_breakout_fail")
+                paper_closed += 1
+            elif is_range_breakout and peak_pnl >= 0.45 and position.pnl_pct <= max(0.08, peak_pnl - 0.45):
+                closed_symbols.append((position.symbol, "rapid_range_breakout_protect"))
+                _close_position(position, "rapid_range_breakout_protect")
+                paper_closed += 1
+            elif is_high_tight_flag and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.30:
+                closed_symbols.append((position.symbol, "rapid_high_tight_flag_fail"))
+                _close_position(position, "rapid_high_tight_flag_fail")
+                paper_closed += 1
+            elif is_high_tight_flag and peak_pnl >= 0.35 and position.pnl_pct <= max(0.05, peak_pnl - 0.38):
+                closed_symbols.append((position.symbol, "rapid_high_tight_flag_protect"))
+                _close_position(position, "rapid_high_tight_flag_protect")
                 paper_closed += 1
             elif (
                 0.40 <= peak_pnl < 0.80

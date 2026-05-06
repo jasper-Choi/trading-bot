@@ -290,6 +290,12 @@ class CryptoDeskAgent(BaseAgent):
                     "volume_climax_ratio": float(signal.get("volume_climax_ratio", 0.0) or 0.0),
                     "support_reclaim_long": bool(signal.get("support_reclaim_long", False)),
                     "support_level": float(signal.get("support_level", 0.0) or 0.0),
+                    "range_breakout_long": bool(signal.get("range_breakout_long", False)),
+                    "range_high_20": float(signal.get("range_high_20", 0.0) or 0.0),
+                    "range_width_pct": float(signal.get("range_width_pct", 0.0) or 0.0),
+                    "high_tight_flag_long": bool(signal.get("high_tight_flag_long", False)),
+                    "impulse_12_pct": float(signal.get("impulse_12_pct", 0.0) or 0.0),
+                    "flag_range_pct": float(signal.get("flag_range_pct", 0.0) or 0.0),
                 }
             )
 
@@ -342,6 +348,12 @@ class CryptoDeskAgent(BaseAgent):
             "volume_climax_ratio": 0.0,
             "support_reclaim_long": False,
             "support_level": 0.0,
+            "range_breakout_long": False,
+            "range_high_20": 0.0,
+            "range_width_pct": 0.0,
+            "high_tight_flag_long": False,
+            "impulse_12_pct": 0.0,
+            "flag_range_pct": 0.0,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -478,5 +490,11 @@ class CryptoDeskAgent(BaseAgent):
                 "volume_climax_ratio": float(leader.get("volume_climax_ratio", 0.0) or 0.0),
                 "support_reclaim_long": bool(leader.get("support_reclaim_long", False)),
                 "support_level": float(leader.get("support_level", 0.0) or 0.0),
+                "range_breakout_long": bool(leader.get("range_breakout_long", False)),
+                "range_high_20": float(leader.get("range_high_20", 0.0) or 0.0),
+                "range_width_pct": float(leader.get("range_width_pct", 0.0) or 0.0),
+                "high_tight_flag_long": bool(leader.get("high_tight_flag_long", False)),
+                "impulse_12_pct": float(leader.get("impulse_12_pct", 0.0) or 0.0),
+                "flag_range_pct": float(leader.get("flag_range_pct", 0.0) or 0.0),
             },
         )

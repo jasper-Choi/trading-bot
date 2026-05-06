@@ -1192,6 +1192,53 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         and float(recent_change) > -8.0
     )
 
+    # --- Range Breakout Long ---
+    # Global regime can be RANGING while a single coin is breaking out of its own box.
+    # This path is for HYPER/BIO/SPK-style scanner leaders: recent range high reclaimed
+    # with volume and no bearish RSI/ICT warning. It is a continuation setup, not mean reversion.
+    _range_high_20 = max(highs[-21:-1]) if len(highs) >= 21 else max(highs[:-1] or highs)
+    _range_low_20 = min(lows[-21:-1]) if len(lows) >= 21 else min(lows[:-1] or lows)
+    range_width_pct = (
+        round((_range_high_20 - _range_low_20) / _range_low_20 * 100, 2)
+        if _range_low_20 > 0 else 0.0
+    )
+    range_breakout_long = (
+        _range_high_20 > 0
+        and _c_close >= _range_high_20 * 1.002
+        and volume_climax_ratio >= 1.35
+        and last_rsi is not None and 52.0 <= last_rsi <= 82.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and float(trend.get("trend_extension_pct", 0.0) or 0.0) <= 5.5
+        and _close_position >= 0.60
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    # --- High Tight Flag Long ---
+    # Strong coin pauses near the highs instead of giving back the move. We wait for a
+    # compact last-4-candle range and price holding close to the 20-bar high.
+    _pre_flag_low = min(lows[-18:-5]) if len(lows) >= 18 else _range_low_20
+    _recent_high_12 = max(highs[-13:-1]) if len(highs) >= 13 else _range_high_20
+    impulse_12_pct = (
+        round((_recent_high_12 - _pre_flag_low) / _pre_flag_low * 100, 2)
+        if _pre_flag_low > 0 else 0.0
+    )
+    flag_range_pct = (
+        round((max(highs[-5:-1]) - min(lows[-5:-1])) / min(lows[-5:-1]) * 100, 2)
+        if len(lows) >= 5 and min(lows[-5:-1]) > 0 else 0.0
+    )
+    high_tight_flag_long = (
+        impulse_12_pct >= 4.0
+        and 0.15 <= flag_range_pct <= 2.2
+        and _c_close >= _recent_high_12 * 0.985
+        and last_rsi is not None and 50.0 <= last_rsi <= 82.0
+        and volume_climax_ratio >= 0.65
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and float(trend.get("trend_extension_pct", 0.0) or 0.0) <= 6.5
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1294,6 +1341,12 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "volume_climax_ratio": volume_climax_ratio,
         "support_reclaim_long": support_reclaim_long,
         "support_level": round(_support_level, 8),
+        "range_breakout_long": range_breakout_long,
+        "range_high_20": round(_range_high_20, 8),
+        "range_width_pct": range_width_pct,
+        "high_tight_flag_long": high_tight_flag_long,
+        "impulse_12_pct": impulse_12_pct,
+        "flag_range_pct": flag_range_pct,
     }
 
 

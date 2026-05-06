@@ -44,6 +44,8 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_tick_failed_start",
     "rapid_obvious_trend_fail",
     "rapid_range_impulse_fail",
+    "rapid_range_breakout_fail",
+    "rapid_high_tight_flag_fail",
     "rapid_failed_start",
     "rapid_stop_hit",
     "rapid_repeat_symbol_failure",
@@ -125,6 +127,14 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.62 and stream_score >= 0.84:
             return 0.04
         return 0.03
+    if entry_profile == "range_breakout":
+        if combined >= 0.60 and stream_score >= 0.82:
+            return 0.06
+        return 0.04
+    if entry_profile == "high_tight_flag":
+        if combined >= 0.58 and stream_score >= 0.78:
+            return 0.05
+        return 0.035
     if entry_profile == "range_scalp":
         airborne_score = _float(candidate.get("airborne_score", 0.0))
         if airborne_score >= 0.70:
@@ -183,6 +193,40 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         doji_candle = bool(item.get("doji_candle", False))
         volume_climax_reversal = bool(item.get("volume_climax_reversal", False))
         support_reclaim_long = bool(item.get("support_reclaim_long", False))
+        range_breakout_long = bool(item.get("range_breakout_long", False))
+        high_tight_flag_long = bool(item.get("high_tight_flag_long", False))
+        local_continuation_ok = (
+            (range_breakout_long or high_tight_flag_long)
+            and orderbook_bid_ask >= 0.98
+            and -0.35 <= micro_move_3 <= 1.55
+            and micro_vwap_gap <= 4.8
+            and signal_freshness >= 0.50
+            and not bool(item.get("rsi_bearish_divergence", False))
+            and not bool(item.get("micro_exhausted", False))
+            and not hard_overheat
+        )
+        if local_continuation_ok:
+            profile = "range_breakout" if range_breakout_long else "high_tight_flag"
+            strategy_id = f"crypto.{profile}"
+            item["entry_profile"] = profile
+            if _strategy_is_disabled(strategy_id):
+                item["hot_block_reason"] = "strategy_disabled"
+                save_shadow_signal(
+                    desk="crypto",
+                    symbol=symbol,
+                    strategy_id=strategy_id,
+                    entry_profile=profile,
+                    source="hot_candidate",
+                    action="probe_longs",
+                    focus=str(item.get("focus", f"{profile} hot candidate") or f"{profile} hot candidate"),
+                    reason="strategy_disabled",
+                    score=combined,
+                    stream_score=_float(item.get("stream_score", 0.0)),
+                    payload={"candidate": item},
+                    dedupe_seconds=60,
+                )
+                return False
+            return True
         # 멀티 신호: 10개 중 1개 이상
         ranging_signal = (
             (range_scalp_eligible and airborne_long and airborne_score >= 0.40)
@@ -619,6 +663,19 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             f"range_scalp: {symbol} hot tick entry - airborne {airborne_score_val:.2f} "
             f"dev {deviation_pct_val:+.2f}%, stream {stream_score:.2f}, move15 {move15_val:.2f}%."
         )
+    elif entry_path == "range_breakout":
+        range_high_val = _float(candidate.get("range_high_20", 0.0))
+        order_focus = (
+            f"range_breakout: {symbol} hot tick entry - range high {range_high_val:.4f}, "
+            f"stream {stream_score:.2f}, move15 {move15_val:.2f}%."
+        )
+    elif entry_path == "high_tight_flag":
+        impulse_val = _float(candidate.get("impulse_12_pct", 0.0))
+        flag_val = _float(candidate.get("flag_range_pct", 0.0))
+        order_focus = (
+            f"high_tight_flag: {symbol} hot tick entry - impulse {impulse_val:.2f}% "
+            f"flag {flag_val:.2f}%, stream {stream_score:.2f}, move15 {move15_val:.2f}%."
+        )
     else:
         order_focus = (
             f"{symbol} {entry_path} tick entry - combined {combined:.2f}, "
@@ -761,6 +818,26 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and 0.35 <= move_15 <= 1.15
             and move_60 >= -0.08
             and buy_ratio >= 0.64
+        )
+    elif entry_profile == "range_breakout":
+        ignition = (
+            stream_ok
+            and ticks_15 >= 4
+            and stream_score >= 0.74
+            and move_5 >= 0.10
+            and 0.25 <= move_15 <= 1.25
+            and move_60 >= -0.12
+            and buy_ratio >= 0.60
+        )
+    elif entry_profile == "high_tight_flag":
+        ignition = (
+            stream_ok
+            and ticks_15 >= 3
+            and stream_score >= 0.68
+            and move_5 >= 0.06
+            and 0.12 <= move_15 <= 0.95
+            and move_60 >= -0.18
+            and buy_ratio >= 0.57
         )
     elif entry_profile == "range_scalp":
         # Mean reversion entry: price overextended below EMA, expect bounce.
