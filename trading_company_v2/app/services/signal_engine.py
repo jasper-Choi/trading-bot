@@ -1239,6 +1239,144 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         and not bool(bk.get("rsi_bearish_divergence", False))
     )
 
+    # --- Williams %R Oversold Cross (RANGING) ---
+    # %R = (highest_high - close) / (highest_high - lowest_low) × -100
+    # 과매도 구간(-80 이하)에서 -80 위로 교차 → 단기 반등 신호
+    _wr_period = 14
+    _wr_vals: list[float | None] = [None] * len(closes)
+    for _wi in range(_wr_period - 1, len(closes)):
+        _wh = max(highs[_wi - _wr_period + 1 : _wi + 1])
+        _wl = min(lows[_wi - _wr_period + 1 : _wi + 1])
+        _wd = _wh - _wl
+        _wr_vals[_wi] = (closes[_wi] - _wh) / _wd * 100.0 if _wd > 0 else -50.0
+    _wr_curr = _wr_vals[-1]
+    _wr_prev = _wr_vals[-2] if len(_wr_vals) >= 2 else None
+    wr_val = round(float(_wr_curr), 1) if _wr_curr is not None else -50.0
+    williams_r_oversold = (
+        _wr_curr is not None and _wr_prev is not None
+        and _wr_curr > -80.0            # 현재 과매도 탈출
+        and _wr_prev <= -80.0           # 직전 과매도 구간에 있었음
+        and _wr_curr < -50.0            # 아직 중립 이하
+        and last_rsi is not None and last_rsi <= 50.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -6.0
+    )
+
+    # --- CCI Oversold Bounce (RANGING) ---
+    # CCI = (Typical Price - SMA(TP, 20)) / (0.015 × Mean Deviation)
+    # CCI ≤ -100 (과매도) 상태에서 반등 시작 → 평균회귀 신호
+    _cci_period = 20
+    _tp_cci = [(highs[i] + lows[i] + closes[i]) / 3 for i in range(len(closes))]
+    _cci_vals: list[float | None] = [None] * len(_tp_cci)
+    for _ci in range(_cci_period - 1, len(_tp_cci)):
+        _tp_window = _tp_cci[_ci - _cci_period + 1 : _ci + 1]
+        _tp_mean = sum(_tp_window) / _cci_period
+        _mean_dev = sum(abs(v - _tp_mean) for v in _tp_window) / _cci_period
+        _cci_vals[_ci] = (_tp_cci[_ci] - _tp_mean) / (0.015 * _mean_dev) if _mean_dev > 0 else 0.0
+    _cci_curr = _cci_vals[-1]
+    _cci_prev = _cci_vals[-2] if len(_cci_vals) >= 2 else None
+    cci_val = round(float(_cci_curr), 1) if _cci_curr is not None else 0.0
+    cci_oversold_bounce = (
+        _cci_curr is not None and _cci_prev is not None
+        and _cci_curr <= -100.0         # 과매도 구간
+        and _cci_curr > _cci_prev       # 반등 시작 (상승 전환)
+        and last_rsi is not None and last_rsi <= 52.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -6.0
+    )
+
+    # --- Keltner Channel Lower Touch (RANGING) ---
+    # KC Middle = EMA20, KC Lower = EMA20 - 1.5 × ATR14
+    # 가격이 켈트너 하단 밴드 터치 → 저변동성 구간 평균회귀 설정
+    _kc_ema = ema(closes, 20)
+    _tr_kc = [
+        max(
+            highs[_ki] - lows[_ki],
+            abs(highs[_ki] - closes[_ki - 1]) if _ki > 0 else highs[_ki] - lows[_ki],
+            abs(lows[_ki] - closes[_ki - 1]) if _ki > 0 else highs[_ki] - lows[_ki],
+        )
+        for _ki in range(len(closes))
+    ]
+    _atr_kc = ema(_tr_kc, 14)
+    _kc_lower_val = _kc_ema[-1] - 1.5 * _atr_kc[-1]
+    keltner_lower_touch = (
+        last_close <= _kc_lower_val * 1.005   # 켈트너 하단 터치 (0.5% 허용오차)
+        and last_rsi is not None and last_rsi <= 52.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -6.0
+    )
+
+    # --- MFI (Money Flow Index) Oversold (RANGING) ---
+    # 거래량 가중 RSI; MFI ≤ 25 = 자금 유출 극단 → 반등 설정
+    _mfi_period = 14
+    _tp_mfi = [(highs[i] + lows[i] + closes[i]) / 3 for i in range(len(closes))]
+    _mf_pos_list: list[float] = []
+    _mf_neg_list: list[float] = []
+    for _mi in range(1, len(_tp_mfi)):
+        _mf = _tp_mfi[_mi] * _all_volumes[_mi]
+        if _tp_mfi[_mi] > _tp_mfi[_mi - 1]:
+            _mf_pos_list.append(_mf)
+            _mf_neg_list.append(0.0)
+        elif _tp_mfi[_mi] < _tp_mfi[_mi - 1]:
+            _mf_pos_list.append(0.0)
+            _mf_neg_list.append(_mf)
+        else:
+            _mf_pos_list.append(0.0)
+            _mf_neg_list.append(0.0)
+    _mfi_vals: list[float | None] = [None] * len(closes)
+    for _mi in range(_mfi_period, len(closes)):
+        _pos_s = sum(_mf_pos_list[_mi - _mfi_period : _mi])
+        _neg_s = sum(_mf_neg_list[_mi - _mfi_period : _mi])
+        if _neg_s > 0:
+            _mfi_vals[_mi] = 100.0 - 100.0 / (1.0 + _pos_s / _neg_s)
+        elif _pos_s > 0:
+            _mfi_vals[_mi] = 100.0
+        else:
+            _mfi_vals[_mi] = 50.0
+    _mfi_curr = _mfi_vals[-1]
+    mfi_val = round(float(_mfi_curr), 1) if _mfi_curr is not None else 50.0
+    mfi_oversold = (
+        _mfi_curr is not None
+        and _mfi_curr <= 25.0
+        and last_rsi is not None and last_rsi <= 55.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -6.0
+    )
+
+    # --- EMA Crossover Long (TRENDING) ---
+    # EMA8이 EMA21을 위로 교차 → 단기 모멘텀 전환 신호 (골든크로스 변형)
+    _ema8 = ema(closes, 8)
+    _ema21 = ema(closes, 21)
+    ema_cross_long = (
+        len(_ema8) >= 2 and len(_ema21) >= 2
+        and _ema8[-1] > _ema21[-1]           # 현재 EMA8 > EMA21
+        and _ema8[-2] <= _ema21[-2]          # 직전 EMA8 ≤ EMA21 (교차 직후)
+        and last_rsi is not None and 40.0 <= last_rsi <= 72.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    # --- VWAP Reclaim Long (TRENDING) ---
+    # 가격이 VWAP 아래에서 VWAP 위로 복귀 → 기관 평균단가 재탈환 신호
+    vwap_cross_long = (
+        vwap_approx is not None and vwap_approx > 0
+        and last_close > vwap_approx            # 현재 봉: VWAP 위
+        and float(closes[-2]) <= vwap_approx    # 직전 봉: VWAP 아래
+        and last_rsi is not None and 40.0 <= last_rsi <= 72.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1347,6 +1485,18 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "high_tight_flag_long": high_tight_flag_long,
         "impulse_12_pct": impulse_12_pct,
         "flag_range_pct": flag_range_pct,
+        # 추가 RANGING 신호 (Batch 2)
+        "williams_r": wr_val,
+        "williams_r_oversold": williams_r_oversold,
+        "cci": cci_val,
+        "cci_oversold_bounce": cci_oversold_bounce,
+        "keltner_lower_touch": keltner_lower_touch,
+        "kc_lower": round(_kc_lower_val, 8),
+        "mfi": mfi_val,
+        "mfi_oversold": mfi_oversold,
+        # 추가 TRENDING 신호 (Batch 2)
+        "ema_cross_long": ema_cross_long,
+        "vwap_cross_long": vwap_cross_long,
     }
 
 

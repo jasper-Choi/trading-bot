@@ -46,6 +46,8 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_range_impulse_fail",
     "rapid_range_breakout_fail",
     "rapid_high_tight_flag_fail",
+    "rapid_ema_cross_fail",
+    "rapid_vwap_reclaim_fail",
     "rapid_failed_start",
     "rapid_stop_hit",
     "rapid_repeat_symbol_failure",
@@ -135,6 +137,14 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.58 and stream_score >= 0.78:
             return 0.05
         return 0.035
+    if entry_profile == "ema_cross":
+        if combined >= 0.62 and stream_score >= 0.72:
+            return 0.06
+        return 0.045
+    if entry_profile == "vwap_reclaim":
+        if combined >= 0.60 and stream_score >= 0.70:
+            return 0.055
+        return 0.04
     if entry_profile == "range_scalp":
         airborne_score = _float(candidate.get("airborne_score", 0.0))
         if airborne_score >= 0.70:
@@ -195,6 +205,11 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         support_reclaim_long = bool(item.get("support_reclaim_long", False))
         range_breakout_long = bool(item.get("range_breakout_long", False))
         high_tight_flag_long = bool(item.get("high_tight_flag_long", False))
+        # Batch 2 RANGING 신호
+        williams_r_oversold = bool(item.get("williams_r_oversold", False))
+        cci_oversold_bounce = bool(item.get("cci_oversold_bounce", False))
+        keltner_lower_touch = bool(item.get("keltner_lower_touch", False))
+        mfi_oversold = bool(item.get("mfi_oversold", False))
         local_continuation_ok = (
             (range_breakout_long or high_tight_flag_long)
             and orderbook_bid_ask >= 0.98
@@ -227,7 +242,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 )
                 return False
             return True
-        # 멀티 신호: 10개 중 1개 이상
+        # 멀티 신호: 14개 중 1개 이상
         ranging_signal = (
             (range_scalp_eligible and airborne_long and airborne_score >= 0.40)
             or bb_squeeze_bounce
@@ -239,6 +254,10 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             or doji_candle
             or volume_climax_reversal
             or support_reclaim_long
+            or williams_r_oversold
+            or cci_oversold_bounce
+            or keltner_lower_touch
+            or mfi_oversold
         )
         # dev > +1.0%: 가격이 EMA 위에서 롱 평균회귀 진입 차단
         # STORJ dev=+1.32% 진입 → 방향 반대(EMA 위에서 long mean-reversion = wrong)
@@ -275,6 +294,82 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 return False
             return True
         return False
+
+    # ── Batch 2 TRENDING 신호 추출 ─────────────────────────────────────────
+    ema_cross_long = bool(item.get("ema_cross_long", False))
+    vwap_cross_long_signal = bool(item.get("vwap_cross_long", False))
+
+    # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
+    # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성
+    ema_cross_ok = (
+        ema_cross_long
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.65
+        and combined >= 0.60
+        and orderbook_bid_ask >= 1.08
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.55
+        and trend_extension_pct <= 4.0
+    )
+    if ema_cross_ok:
+        item["entry_profile"] = "ema_cross"
+        if _strategy_is_disabled("crypto.ema_cross"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.ema_cross",
+                entry_profile="ema_cross",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "ema_cross hot candidate") or "ema_cross hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # VWAP Reclaim Long: 가격이 VWAP 아래 → 위로 재탈환
+    # 기관 평균단가 복귀 — trend_entry_allowed 또는 pullback_long이면 진입
+    vwap_reclaim_ok = (
+        vwap_cross_long_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.62
+        and combined >= 0.58
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.55
+        and trend_extension_pct <= 4.5
+    )
+    if vwap_reclaim_ok:
+        item["entry_profile"] = "vwap_reclaim"
+        if _strategy_is_disabled("crypto.vwap_reclaim"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.vwap_reclaim",
+                entry_profile="vwap_reclaim",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "vwap_reclaim hot candidate") or "vwap_reclaim hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
 
     common_guards = (
         signal_freshness >= 0.58               # 0.55 → 0.58: 더 신선한 신호만
@@ -518,6 +613,8 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         is_range_scalp_hot = "range_scalp" in pos_focus
         is_range_impulse = "range_impulse" in pos_focus
         is_obvious_trend = "obvious_trend" in pos_focus
+        is_ema_cross = "ema_cross" in pos_focus
+        is_vwap_reclaim = "vwap_reclaim" in pos_focus
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
         reason = ""
 
@@ -559,6 +656,14 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             reason = "rapid_range_impulse_fail"
         elif is_range_impulse and peak_pnl >= 0.28 and pnl_pct <= max(0.02, peak_pnl - 0.35):
             reason = "rapid_range_impulse_protect"
+        elif is_ema_cross and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+            reason = "rapid_ema_cross_fail"
+        elif is_ema_cross and pnl_pct <= -0.50:
+            reason = "rapid_ema_cross_fail"
+        elif is_vwap_reclaim and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+            reason = "rapid_vwap_reclaim_fail"
+        elif is_vwap_reclaim and pnl_pct <= -0.50:
+            reason = "rapid_vwap_reclaim_fail"
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
         else:

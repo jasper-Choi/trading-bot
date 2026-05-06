@@ -296,6 +296,17 @@ class CryptoDeskAgent(BaseAgent):
                     "high_tight_flag_long": bool(signal.get("high_tight_flag_long", False)),
                     "impulse_12_pct": float(signal.get("impulse_12_pct", 0.0) or 0.0),
                     "flag_range_pct": float(signal.get("flag_range_pct", 0.0) or 0.0),
+                    # Batch 2 signals
+                    "williams_r": float(signal.get("williams_r", -50.0) or -50.0),
+                    "williams_r_oversold": bool(signal.get("williams_r_oversold", False)),
+                    "cci": float(signal.get("cci", 0.0) or 0.0),
+                    "cci_oversold_bounce": bool(signal.get("cci_oversold_bounce", False)),
+                    "keltner_lower_touch": bool(signal.get("keltner_lower_touch", False)),
+                    "kc_lower": float(signal.get("kc_lower", 0.0) or 0.0),
+                    "mfi": float(signal.get("mfi", 50.0) or 50.0),
+                    "mfi_oversold": bool(signal.get("mfi_oversold", False)),
+                    "ema_cross_long": bool(signal.get("ema_cross_long", False)),
+                    "vwap_cross_long": bool(signal.get("vwap_cross_long", False)),
                 }
             )
 
@@ -354,6 +365,17 @@ class CryptoDeskAgent(BaseAgent):
             "high_tight_flag_long": False,
             "impulse_12_pct": 0.0,
             "flag_range_pct": 0.0,
+            # Batch 2 signals
+            "williams_r": -50.0,
+            "williams_r_oversold": False,
+            "cci": 0.0,
+            "cci_oversold_bounce": False,
+            "keltner_lower_touch": False,
+            "kc_lower": 0.0,
+            "mfi": 50.0,
+            "mfi_oversold": False,
+            "ema_cross_long": False,
+            "vwap_cross_long": False,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -496,5 +518,16 @@ class CryptoDeskAgent(BaseAgent):
                 "high_tight_flag_long": bool(leader.get("high_tight_flag_long", False)),
                 "impulse_12_pct": float(leader.get("impulse_12_pct", 0.0) or 0.0),
                 "flag_range_pct": float(leader.get("flag_range_pct", 0.0) or 0.0),
+                # Batch 2 signals
+                "williams_r": float(leader.get("williams_r", -50.0) or -50.0),
+                "williams_r_oversold": bool(leader.get("williams_r_oversold", False)),
+                "cci": float(leader.get("cci", 0.0) or 0.0),
+                "cci_oversold_bounce": bool(leader.get("cci_oversold_bounce", False)),
+                "keltner_lower_touch": bool(leader.get("keltner_lower_touch", False)),
+                "kc_lower": float(leader.get("kc_lower", 0.0) or 0.0),
+                "mfi": float(leader.get("mfi", 50.0) or 50.0),
+                "mfi_oversold": bool(leader.get("mfi_oversold", False)),
+                "ema_cross_long": bool(leader.get("ema_cross_long", False)),
+                "vwap_cross_long": bool(leader.get("vwap_cross_long", False)),
             },
         )

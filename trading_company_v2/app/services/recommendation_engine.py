@@ -85,6 +85,17 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     high_tight_flag_long = bool(payload.get("high_tight_flag_long", False))
     impulse_12_pct = float(payload.get("impulse_12_pct", 0.0) or 0.0)
     flag_range_pct = float(payload.get("flag_range_pct", 0.0) or 0.0)
+    # Batch 2 RANGING 신호
+    williams_r_oversold = bool(payload.get("williams_r_oversold", False))
+    williams_r_val = float(payload.get("williams_r", -50.0) or -50.0)
+    cci_oversold_bounce = bool(payload.get("cci_oversold_bounce", False))
+    cci_val = float(payload.get("cci", 0.0) or 0.0)
+    keltner_lower_touch = bool(payload.get("keltner_lower_touch", False))
+    mfi_oversold = bool(payload.get("mfi_oversold", False))
+    mfi_val = float(payload.get("mfi", 50.0) or 50.0)
+    # Batch 2 TRENDING 신호
+    ema_cross_long = bool(payload.get("ema_cross_long", False))
+    vwap_cross_long = bool(payload.get("vwap_cross_long", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -257,10 +268,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         sig_vol_climax  = volume_climax_reversal
         # 신호 10: 레인지 하단 지지선 리클레임
         sig_support_reclaim = support_reclaim_long
+        # 신호 11: Williams %R 과매도 교차
+        sig_williams_r = williams_r_oversold
+        # 신호 12: CCI 과매도 반등
+        sig_cci = cci_oversold_bounce
+        # 신호 13: 켈트너 채널 하단 터치
+        sig_keltner = keltner_lower_touch
+        # 신호 14: MFI 과매도
+        sig_mfi = mfi_oversold
 
         mean_rev_count = sum([
             sig_airborne, sig_bb_squeeze, sig_vwap_dev, sig_rsi_extreme, sig_rsi_rev,
             sig_stoch_cross, sig_macd_rev, sig_candle_rev, sig_vol_climax, sig_support_reclaim,
+            sig_williams_r, sig_cci, sig_keltner, sig_mfi,
         ])
 
         # 공통 필터: 급락 중 아님 + 베어리쉬 구조 아님 + 과열 아님
@@ -281,10 +301,12 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             f"score={airborne_score:.2f} bb_lower={at_bb_lower}"
         )
         ranging_signal_note = (
-            f"ranging signals({mean_rev_count}/10): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
+            f"ranging signals({mean_rev_count}/14): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
             f"vwap={sig_vwap_dev}({vwap_deviation_pct:.1f}%) rsi_ext={sig_rsi_extreme} rsi_rev={sig_rsi_rev} "
             f"stoch={sig_stoch_cross}(k={stoch_k:.0f}) macd_rev={sig_macd_rev} candle={sig_candle_rev} "
             f"vol_climax={sig_vol_climax}({volume_climax_ratio:.1f}x) support_reclaim={sig_support_reclaim} "
+            f"wr={sig_williams_r}({williams_r_val:.0f}) cci={sig_cci}({cci_val:.0f}) "
+            f"keltner={sig_keltner} mfi={sig_mfi}({mfi_val:.0f}) "
             f"local_breakout={range_breakout_long} high_tight={high_tight_flag_long}"
         )
 
@@ -309,6 +331,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 primary_reason = f"volume_climax {volume_climax_ratio:.1f}x"
             elif sig_support_reclaim:
                 primary_reason = f"support_reclaim {support_level:.4f}"
+            elif sig_williams_r:
+                primary_reason = f"williams_r_cross wr={williams_r_val:.0f}"
+            elif sig_cci:
+                primary_reason = f"cci_bounce cci={cci_val:.0f}"
+            elif sig_keltner:
+                primary_reason = "keltner_lower_touch"
+            elif sig_mfi:
+                primary_reason = f"mfi_oversold mfi={mfi_val:.0f}"
             else:
                 primary_reason = f"rsi_mean_rev rsi={rsi_value}"
             return {
@@ -336,7 +366,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [
                 airborne_note,
                 ranging_signal_note,
-                "진입 조건: 에어본/BB스퀴즈/VWAP이격/RSI극단/스토캐스틱/MACD반전/캔들패턴/거래량클라이맥스/지지선리클레임 중 1개 이상 + OB매수우위",
+                "진입 조건(14): 에어본/BB스퀴즈/VWAP이격/RSI극단/스토캐스틱/MACD반전/캔들패턴/거래량클라이맥스/지지선리클레임/WilliamsR/CCI/Keltner/MFI 중 1개 이상 + OB매수우위",
             ],
         }
     # ── TRENDING / 기타 시장: 기존 추세추종 로직 유지 ──────────────────────────
@@ -652,6 +682,59 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [trend_note, ignition_note, support_note, "RSI is treated as momentum context, not an automatic sell signal."],
+        }
+
+    # ── EMA Crossover Long (TRENDING) ───────────────────────────────────────
+    # EMA8이 EMA21을 위로 교차 — 단기 모멘텀 전환 조기 진입
+    # 과열/발산/베어리쉬 구조 차단, micro or orderbook 확인 필요
+    ema_cross_entry_ok = (
+        ema_cross_long
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.45
+        and (micro_entry_ok or orderbook_bid_ask >= 1.05 or stream_ignition)
+    )
+    if ema_cross_entry_ok:
+        entry_size = "0.50x" if signal_score >= 0.55 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"ema_cross_long: {lead_market or 'KRW-BTC'} EMA8/21 골든크로스 — 추세 조기 진입",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"ema_cross: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── VWAP Reclaim Long (TRENDING) ────────────────────────────────────────
+    # 가격이 VWAP 아래에서 위로 재탈환 — 기관 평균단가 복귀 후 속도 붙는 구간
+    vwap_reclaim_entry_ok = (
+        vwap_cross_long
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.45
+        and (micro_entry_ok or orderbook_bid_ask >= 1.05 or stream_ignition)
+    )
+    if vwap_reclaim_entry_ok:
+        entry_size = "0.50x" if signal_score >= 0.55 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"vwap_reclaim_long: {lead_market or 'KRW-BTC'} VWAP 재탈환 — 기관 매수 재개 신호",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"vwap_cross: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
         }
 
     # Combined-score fallback: fires when ignition/direct paths didn't match but composite
