@@ -3,6 +3,42 @@
 Last updated: 2026-05-07 (session 9)
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Claude Notes - 2026-05-07 (session 11 — RANGING 레짐 Batch 3-6 활성화)
+
+### 핵심 발견: Batch 2-6 전략이 72시간 단 1건도 발화 안 된 원인
+```
+hot_path_guard.py line 296-403:
+if regime == "RANGING":
+    ...  # range_scalp / range_breakout만 체크
+    return False  ← 모든 Batch 3-6 전략 완전 차단!
+```
+- 18개 현재 candidate 중 consecutive_higher_lows=3/18, adx_trend_strong=2/18, 
+  inside_bar_breakout=1/18, breakout_vol_confirm=1/18 발화 중이었으나 전부 차단
+- recommendation_engine도 `watchlist_only` 반환 중 (사이클 레벨 진입 없음)
+- hot_path가 유일한 진입 경로인데 RANGING 블록이 막고 있었음
+
+### 수정 (커밋 64e2b45)
+RANGING 블록 내 `_ranging_b_check()` 헬퍼 추가, 10개 RANGING 호환 전략 활성화:
+1. `multi_ranging_combo` (combined≥0.52)
+2. `demand_zone_bounce` (combined≥0.52)
+3. `vwap_rsi_combo` (combined≥0.53)
+4. `hammer_at_support` (combined≥0.52)
+5. `consecutive_higher_lows` → higher_lows (combined≥0.55)
+6. `inside_bar_breakout` → inside_bar_break (combined≥0.55)
+7. `bb_squeeze_breakout` → bb_squeeze_break (combined≥0.56)
+8. `breakout_vol_confirm` (combined≥0.56)
+9. `rsi_bullish_div` (combined≥0.52)
+10. `trend_reversal_early` (combined≥0.54)
+
+### 배포
+- 2026-05-07, Oracle VM pull+restart 완료 (64e2b45)
+
+### 다음 관찰 포인트
+- Batch 3-6 전략이 entry_profile에 나타나는지 확인 (목표: daily 10건 이상)
+- RANGING에서 consecutive_higher_lows, inside_bar_breakout 첫 발화 확인
+- multi_ranging_combo / demand_zone_bounce 수익성 확인
+- 여전히 cycle-level은 watchlist_only → hot_path가 유일한 진입 수단
+
 ## 0. Latest Claude Notes - 2026-05-07 (session 10 — 급속 청산 + 블랙리스트 + range_scalp 개선)
 
 ### 배경: 72h 손실 원인 딥다이브
