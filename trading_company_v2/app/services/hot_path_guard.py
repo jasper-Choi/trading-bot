@@ -1147,19 +1147,20 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     # behind orderbook/micro snapshot gates. The websocket still checks that
     # the current tick is not an immediate sell reversal before opening.
     obvious_top_risk = ema_gap >= 10.0 or rsi_value >= 88.0 or bool(item.get("rsi_bearish_divergence", False))
+    # obvious_trend: 진단 결과 13건 ALL peak=0.000% (RANGING 시장에서 방향 오류)
+    # 강화 조건: "range" 제거, stream_ignition 필수, 임계값 대폭 상향
+    stream_ignition_val = bool(item.get("stream_ignition", False))
     obvious_trend_ok = (
-        trend_alignment in {"trend_long", "pullback_long", "range"}
-        and (bool(item.get("trend_entry_allowed", False)) or bool(item.get("trend_early_entry", False)) or trend_score >= 0.76)
-        and chart_score >= 0.76
-        and recent_change >= 0.00
-        and (
-            combined >= 0.52
-            or (chart_score >= 0.90 and trend_score >= 0.90 and max(change_rate, burst_change) >= 3.0)
-            or (chart_score >= 0.76 and change_rate >= 20.0 and rsi_value <= 70.0)
-        )
-        and signal_freshness >= 0.50
-        and trend_extension_pct <= 8.5
-        and micro_vwap_gap <= 6.5
+        trend_alignment in {"trend_long", "pullback_long"}   # "range" 제거
+        and trend_alignment != "range"                        # 명시적 이중 차단
+        and bool(item.get("trend_entry_allowed", False))      # trend_early 불인정
+        and trend_score >= 0.85                               # 0.68 → 0.85
+        and chart_score >= 0.82                               # 0.76 → 0.82
+        and combined >= 0.72                                  # 0.52 → 0.72
+        and stream_ignition_val                               # stream_ignition 필수
+        and signal_freshness >= 0.55                          # 0.50 → 0.55
+        and trend_extension_pct <= 6.0                        # 8.5 → 6.0
+        and micro_vwap_gap <= 4.0                             # 6.5 → 4.0
         and not obvious_top_risk
     )
     if common_guards and (standard_ok or early_ok):

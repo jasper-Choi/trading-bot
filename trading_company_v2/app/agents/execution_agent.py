@@ -820,12 +820,16 @@ class ExecutionAgent(BaseAgent):
                     f"ob={orderbook_bid_ask:.2f}x timing stream={stream_timing_ok} micro={micro_timing_ok}",
                 )
         # --- Standard path ---
-        if score < 0.76:
+        # 진단: combined 0.76-0.84 사이 cycle-level 진입이 모두 손실 → 임계값 상향
+        micro_entry_ok = micro_score >= 0.55 and micro_vol_ratio >= 1.1
+        if score < 0.82:                                         # 0.76 → 0.82
             return False, f"combined score too low ({score:.2f})"
-        if not trend_allowed or trend_score < 0.58:
+        if not trend_allowed or trend_score < 0.62:              # 0.58 → 0.62
             return False, f"trend gate failed ({trend_alignment} {trend_score:.2f})"
-        if orderbook_bid_ask < 1.08:
+        if orderbook_bid_ask < 1.12:                             # 1.08 → 1.12
             return False, f"orderbook not supportive ({orderbook_bid_ask:.2f}x)"
+        if not micro_entry_ok:                                   # micro_entry 필수화
+            return False, f"micro entry not ready (micro={micro_score:.2f} vol={micro_vol_ratio:.2f})"
         if not launch_confirmed:
             return (
                 False,
@@ -872,20 +876,19 @@ class ExecutionAgent(BaseAgent):
         stream_reversal = bool(meta.get("stream_reversal", False))
         stream_fresh = bool(meta.get("stream_fresh", False))
         top_risk = ema_gap >= 10.0 or rsi_float >= 88.0 or bool(meta.get("rsi_bearish_divergence", False))
+        stream_ignition = bool(meta.get("stream_ignition", False))
+        # obvious_trend: 진단 결과 전건 peak=0.000% → 조건 대폭 강화
+        # "range" alignment 제거, stream_ignition 필수, 임계값 상향
         ok = (
-            trend_alignment in {"trend_long", "pullback_long", "range"}
-            and (trend_allowed or trend_early or trend_score >= 0.76)
-            and trend_score >= 0.68
-            and chart_score >= 0.76
-            and recent_change >= 0.00
-            and (
-                combined >= 0.52
-                or (chart_score >= 0.90 and trend_score >= 0.90 and max(change_rate, burst_change) >= 3.0)
-                or (chart_score >= 0.76 and change_rate >= 20.0 and rsi_float <= 70.0)
-            )
-            and freshness >= 0.50
-            and trend_extension <= 8.5
-            and micro_vwap_gap <= 6.5
+            trend_alignment in {"trend_long", "pullback_long"}   # "range" 제거
+            and trend_allowed                                     # trend_early 불인정
+            and trend_score >= 0.82                              # 0.68 → 0.82
+            and chart_score >= 0.82                              # 0.76 → 0.82
+            and combined >= 0.72                                 # 0.52 → 0.72
+            and stream_ignition                                  # stream_ignition 필수
+            and freshness >= 0.55                                # 0.50 → 0.55
+            and trend_extension <= 6.0                           # 8.5 → 6.0
+            and micro_vwap_gap <= 4.0                            # 6.5 → 4.0
             and not top_risk
             and not (stream_fresh and stream_reversal)
         )
