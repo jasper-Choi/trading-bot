@@ -820,16 +820,19 @@ class ExecutionAgent(BaseAgent):
                     f"ob={orderbook_bid_ask:.2f}x timing stream={stream_timing_ok} micro={micro_timing_ok}",
                 )
         # --- Standard path ---
-        # 진단: combined 0.76-0.84 사이 cycle-level 진입이 모두 손실 → 임계값 상향
+        # 진단: combined 0.76-0.84 cycle-level 전건 손실 → 문턱 상향
+        # 단, 0.82 완전 차단시 거래 89% 감소 → 0.79로 절충 + micro OR stream 보강
         micro_entry_ok = micro_score >= 0.55 and micro_vol_ratio >= 1.1
-        if score < 0.82:                                         # 0.76 → 0.82
+        stream_entry_ok = stream_score >= 0.55 and stream_fresh and not stream_reversal
+        micro_or_stream_ok = micro_entry_ok or stream_entry_ok
+        if score < 0.79:                                         # 0.76→0.82→0.79 절충
             return False, f"combined score too low ({score:.2f})"
-        if not trend_allowed or trend_score < 0.62:              # 0.58 → 0.62
+        if not trend_allowed or trend_score < 0.62:              # 0.58 → 0.62 유지
             return False, f"trend gate failed ({trend_alignment} {trend_score:.2f})"
-        if orderbook_bid_ask < 1.12:                             # 1.08 → 1.12
+        if orderbook_bid_ask < 1.10:                             # 1.08→1.12→1.10 절충
             return False, f"orderbook not supportive ({orderbook_bid_ask:.2f}x)"
-        if not micro_entry_ok:                                   # micro_entry 필수화
-            return False, f"micro entry not ready (micro={micro_score:.2f} vol={micro_vol_ratio:.2f})"
+        if not micro_or_stream_ok:                               # micro 단독필수→OR stream
+            return False, f"micro/stream not ready (micro={micro_score:.2f} vol={micro_vol_ratio:.2f} stream={stream_score:.2f})"
         if not launch_confirmed:
             return (
                 False,
@@ -843,7 +846,7 @@ class ExecutionAgent(BaseAgent):
         if hard_overheat:
             return False, "hard overheat"
         recent_failure = self._recent_crypto_symbol_failure(symbol)
-        if recent_failure and (score < 0.82 or trend_score < 0.62 or orderbook_bid_ask < 1.15):
+        if recent_failure and (score < 0.82 or trend_score < 0.65 or orderbook_bid_ask < 1.15):
             return (
                 False,
                 "recent failed symbol requires stronger re-entry "
