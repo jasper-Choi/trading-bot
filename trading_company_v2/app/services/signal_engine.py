@@ -1594,6 +1594,113 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
             and bool(trend.get("trend_entry_allowed", False))
         )
 
+    # === BATCH 5: 추가 전략 신호 ===
+
+    # --- Pin Bar Long (RANGING/TRENDING 반전) ---
+    # 위꼬리 없이 아래꼬리가 몸통의 2배 이상 → 매도 거부 + 매수 개입 신호
+    _pb_opens = [float(c.get("open") or c["close"]) for c in candles]
+    pin_bar_long = False
+    if len(closes) >= 2:
+        _pb_body = abs(closes[-1] - _pb_opens[-1])
+        _pb_lower = min(closes[-1], _pb_opens[-1]) - lows[-1]
+        _pb_upper = highs[-1] - max(closes[-1], _pb_opens[-1])
+        _pb_range = highs[-1] - lows[-1]
+        pin_bar_long = (
+            _pb_range > 0
+            and _pb_lower >= _pb_body * 2.0       # 아래꼬리 ≥ 몸통 2배
+            and _pb_lower >= _pb_range * 0.45     # 아래꼬리가 전체 봉 45% 이상
+            and _pb_upper <= _pb_body * 0.5       # 위꼬리 작음
+            and closes[-1] > _pb_opens[-1]        # 양봉 마감 (강한 버전)
+            and last_rsi is not None and last_rsi <= 65.0
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+        )
+
+    # --- Morning Star (RANGING 3봉 반전 패턴) ---
+    # 큰 음봉 → 도지/소형봉 → 큰 양봉: 바닥 반전 신호
+    morning_star = False
+    if len(closes) >= 4:
+        _ms_o = _pb_opens
+        _ms_b1_bear = _ms_o[-3] > closes[-3] and (_ms_o[-3] - closes[-3]) >= (highs[-3] - lows[-3]) * 0.5
+        _ms_b2_small = abs(closes[-2] - _ms_o[-2]) <= (highs[-2] - lows[-2]) * 0.35
+        _ms_b3_bull = closes[-1] > _ms_o[-1] and (closes[-1] - _ms_o[-1]) >= (highs[-1] - lows[-1]) * 0.45
+        _ms_b3_recovers = closes[-1] >= (_ms_o[-3] + closes[-3]) / 2
+        morning_star = (
+            _ms_b1_bear and _ms_b2_small and _ms_b3_bull and _ms_b3_recovers
+            and last_rsi is not None and 22.0 <= last_rsi <= 52.0
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+        )
+
+    # --- Inside Bar Breakout (RANGING → TRENDING 전환) ---
+    # 직전봉 안에서 현재봉이 벗어날 때 → 압축 후 방향성 출현
+    inside_bar_breakout = False
+    if len(closes) >= 3:
+        _ib_mother_high = highs[-2]
+        _ib_mother_low = lows[-2]
+        _ib_prev_inside = highs[-2] <= highs[-3] and lows[-2] >= lows[-3]  # 직전봉이 inside
+        _ib_breakout_up = closes[-1] > _ib_mother_high and closes[-1] > _pb_opens[-1]
+        inside_bar_breakout = (
+            _ib_prev_inside
+            and _ib_breakout_up
+            and last_rsi is not None and 45.0 <= last_rsi <= 75.0
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+            and float(recent_change) > -3.0
+        )
+
+    # --- RSI Momentum Keep (TRENDING 지속 확인) ---
+    # RSI 55~72 유지 + 추세 중 → 추세 지속 가능성 높은 구간
+    rsi_momentum_keep = (
+        last_rsi is not None and 55.0 <= last_rsi <= 72.0
+        and bool(trend.get("trend_entry_allowed", False))
+        and trend_alignment in {"trend_long", "pullback_long"}
+        and float(trend.get("trend_follow_score", 0.0) or 0.0) >= 0.70
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) >= 0.0
+        and float(recent_change) < 6.0
+    )
+
+    # --- Open Interest Momentum (거래량 기반 강도 확인) ---
+    # 현재봉 거래량 > 1.8x avg AND 3봉 연속 볼륨 증가 + 가격 상승
+    oi_momentum_long = False
+    if len(volumes) >= 5 and _vol20_avg > 0:
+        _oi_vol_3 = all(volumes[-i] > volumes[-i - 1] for i in range(1, 4))  # 3봉 연속 증가
+        _oi_price_3 = closes[-1] > closes[-2] > closes[-3]                   # 3봉 연속 상승
+        oi_momentum_long = (
+            _oi_vol_3
+            and _oi_price_3
+            and volumes[-1] >= _vol20_avg * 1.8
+            and last_rsi is not None and 45.0 <= last_rsi <= 74.0
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+        )
+
+    # --- Demand Zone Bounce (기관 수요 구간 반등) ---
+    # 가격이 최근 20봉 지지선 근처에서 반등 + 볼륨 확인
+    demand_zone_bounce = False
+    if len(closes) >= 21 and _vol20_avg > 0:
+        _dz_support = min(lows[-21:-1])
+        _dz_resistance = max(highs[-21:-1])
+        _dz_range = _dz_resistance - _dz_support
+        _dz_zone_bottom = _dz_support + _dz_range * 0.15  # 하위 15%
+        _dz_near_support = lows[-1] <= _dz_zone_bottom
+        _dz_bounce = closes[-1] > lows[-1] + (highs[-1] - lows[-1]) * 0.6  # 하단에서 60% 회복
+        demand_zone_bounce = (
+            _dz_near_support
+            and _dz_bounce
+            and volumes[-1] >= _vol20_avg * 1.2
+            and last_rsi is not None and 25.0 <= last_rsi <= 52.0
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+        )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1729,6 +1836,13 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "bb_squeeze_breakout": bb_squeeze_breakout,
         "bb_sq_width": round(bb_sq_width_curr * 100, 3),
         "consecutive_higher_lows": consecutive_higher_lows,
+        # 추가 신호 (Batch 5)
+        "pin_bar_long": pin_bar_long,
+        "morning_star": morning_star,
+        "inside_bar_breakout": inside_bar_breakout,
+        "rsi_momentum_keep": rsi_momentum_keep,
+        "oi_momentum_long": oi_momentum_long,
+        "demand_zone_bounce": demand_zone_bounce,
     }
 
 

@@ -317,6 +317,12 @@ class CryptoDeskAgent(BaseAgent):
                     "adx_val": float(signal.get("adx_val", 0.0) or 0.0),
                     "bb_squeeze_breakout": bool(signal.get("bb_squeeze_breakout", False)),
                     "consecutive_higher_lows": bool(signal.get("consecutive_higher_lows", False)),
+                    "pin_bar_long": bool(signal.get("pin_bar_long", False)),
+                    "morning_star": bool(signal.get("morning_star", False)),
+                    "inside_bar_breakout": bool(signal.get("inside_bar_breakout", False)),
+                    "rsi_momentum_keep": bool(signal.get("rsi_momentum_keep", False)),
+                    "oi_momentum_long": bool(signal.get("oi_momentum_long", False)),
+                    "demand_zone_bounce": bool(signal.get("demand_zone_bounce", False)),
                 }
             )
 
@@ -396,6 +402,12 @@ class CryptoDeskAgent(BaseAgent):
             "adx_val": 0.0,
             "bb_squeeze_breakout": False,
             "consecutive_higher_lows": False,
+            "pin_bar_long": False,
+            "morning_star": False,
+            "inside_bar_breakout": False,
+            "rsi_momentum_keep": False,
+            "oi_momentum_long": False,
+            "demand_zone_bounce": False,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -559,5 +571,11 @@ class CryptoDeskAgent(BaseAgent):
                 "adx_val": float(leader.get("adx_val", 0.0) or 0.0),
                 "bb_squeeze_breakout": bool(leader.get("bb_squeeze_breakout", False)),
                 "consecutive_higher_lows": bool(leader.get("consecutive_higher_lows", False)),
+                "pin_bar_long": bool(leader.get("pin_bar_long", False)),
+                "morning_star": bool(leader.get("morning_star", False)),
+                "inside_bar_breakout": bool(leader.get("inside_bar_breakout", False)),
+                "rsi_momentum_keep": bool(leader.get("rsi_momentum_keep", False)),
+                "oi_momentum_long": bool(leader.get("oi_momentum_long", False)),
+                "demand_zone_bounce": bool(leader.get("demand_zone_bounce", False)),
             },
         )

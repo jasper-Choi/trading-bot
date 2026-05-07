@@ -60,6 +60,12 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_adx_trend_fail",
     "rapid_bb_squeeze_fail",
     "rapid_higher_lows_fail",
+    "rapid_pin_bar_fail",
+    "rapid_morning_star_fail",
+    "rapid_inside_bar_fail",
+    "rapid_rsi_keep_fail",
+    "rapid_oi_momentum_fail",
+    "rapid_demand_zone_fail",
     "rapid_failed_start",
     "rapid_stop_hit",
     "rapid_repeat_symbol_failure",
@@ -205,6 +211,30 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.63 and stream_score >= 0.72:
             return 0.055
         return 0.042
+    if entry_profile == "pin_bar":
+        if combined >= 0.58 and stream_score >= 0.68:
+            return 0.045
+        return 0.035
+    if entry_profile == "morning_star":
+        if combined >= 0.58 and stream_score >= 0.68:
+            return 0.048
+        return 0.036
+    if entry_profile == "inside_bar_break":
+        if combined >= 0.60 and stream_score >= 0.70:
+            return 0.05
+        return 0.038
+    if entry_profile == "rsi_keep":
+        if combined >= 0.64 and stream_score >= 0.72:
+            return 0.055
+        return 0.042
+    if entry_profile == "oi_momentum":
+        if combined >= 0.60 and stream_score >= 0.70:
+            return 0.052
+        return 0.040
+    if entry_profile == "demand_zone":
+        if combined >= 0.58 and stream_score >= 0.68:
+            return 0.048
+        return 0.036
     if entry_profile == "range_scalp":
         airborne_score = _float(candidate.get("airborne_score", 0.0))
         if airborne_score >= 0.70:
@@ -370,6 +400,13 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     adx_val_hp = float(item.get("adx_val", 0.0) or 0.0)
     bb_squeeze_breakout_signal = bool(item.get("bb_squeeze_breakout", False))
     consecutive_higher_lows_signal = bool(item.get("consecutive_higher_lows", False))
+    # ── Batch 5 신호 추출 ───────────────────────────────────────────────────
+    pin_bar_long_signal = bool(item.get("pin_bar_long", False))
+    morning_star_signal = bool(item.get("morning_star", False))
+    inside_bar_breakout_signal = bool(item.get("inside_bar_breakout", False))
+    rsi_momentum_keep_signal = bool(item.get("rsi_momentum_keep", False))
+    oi_momentum_long_signal = bool(item.get("oi_momentum_long", False))
+    demand_zone_bounce_signal = bool(item.get("demand_zone_bounce", False))
 
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성
@@ -832,6 +869,173 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             return False
         return True
 
+    # ── Batch 5 진입 경로 ───────────────────────────────────────────────────
+    # Pin Bar Long: 아래꼬리 매수 캔들 — RANGING/TRENDING 반전
+    pin_bar_ok = (
+        pin_bar_long_signal
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and combined >= 0.52
+        and orderbook_bid_ask >= 1.04
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.48
+    )
+    if pin_bar_ok:
+        item["entry_profile"] = "pin_bar"
+        if _strategy_is_disabled("crypto.pin_bar"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.pin_bar", entry_profile="pin_bar",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "pin_bar hot") or "pin_bar hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Morning Star: 3봉 반전 패턴 — 바닥 확인
+    morning_star_ok = (
+        morning_star_signal
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and combined >= 0.52
+        and orderbook_bid_ask >= 1.04
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.48
+    )
+    if morning_star_ok:
+        item["entry_profile"] = "morning_star"
+        if _strategy_is_disabled("crypto.morning_star"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.morning_star", entry_profile="morning_star",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "morning_star hot") or "morning_star hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Inside Bar Breakout: 압축 후 상단 돌파 — 방향성 발생
+    inside_bar_ok = (
+        inside_bar_breakout_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.60
+        and combined >= 0.56
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.52
+    )
+    if inside_bar_ok:
+        item["entry_profile"] = "inside_bar_break"
+        if _strategy_is_disabled("crypto.inside_bar_break"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.inside_bar_break", entry_profile="inside_bar_break",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "inside_bar_break hot") or "inside_bar_break hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # RSI Momentum Keep: RSI 55~72 유지 추세 — 지속 진입
+    rsi_keep_ok = (
+        rsi_momentum_keep_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_score >= 0.68
+        and combined >= 0.62
+        and orderbook_bid_ask >= 1.07
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.55
+        and trend_extension_pct <= 3.5
+    )
+    if rsi_keep_ok:
+        item["entry_profile"] = "rsi_keep"
+        if _strategy_is_disabled("crypto.rsi_keep"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.rsi_keep", entry_profile="rsi_keep",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "rsi_keep hot") or "rsi_keep hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # OI Momentum Long: 3봉 연속 거래량+가격 상승 — 매수 압력
+    oi_mom_hp_ok = (
+        oi_momentum_long_signal
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and combined >= 0.55
+        and orderbook_bid_ask >= 1.05
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.50
+    )
+    if oi_mom_hp_ok:
+        item["entry_profile"] = "oi_momentum"
+        if _strategy_is_disabled("crypto.oi_momentum"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.oi_momentum", entry_profile="oi_momentum",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "oi_momentum hot") or "oi_momentum hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Demand Zone Bounce: 수요 구간 하단 터치 후 반등 — 기관 지지
+    demand_zone_ok = (
+        demand_zone_bounce_signal
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and combined >= 0.52
+        and orderbook_bid_ask >= 1.04
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.48
+    )
+    if demand_zone_ok:
+        item["entry_profile"] = "demand_zone"
+        if _strategy_is_disabled("crypto.demand_zone"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.demand_zone", entry_profile="demand_zone",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "demand_zone hot") or "demand_zone hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
     common_guards = (
         signal_freshness >= 0.58               # 0.55 → 0.58: 더 신선한 신호만
         and -0.30 <= micro_move_3 <= 0.95      # 상한 1.20 → 0.95: 이미 올라간 뒤 진입 차단
@@ -1088,6 +1292,12 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         is_adx_trend = "adx_trend" in pos_focus
         is_bb_squeeze_break = "bb_squeeze_break" in pos_focus
         is_higher_lows = "higher_lows" in pos_focus
+        is_pin_bar = "pin_bar" in pos_focus
+        is_morning_star = "morning_star" in pos_focus
+        is_inside_bar = "inside_bar_break" in pos_focus
+        is_rsi_keep = "rsi_keep" in pos_focus
+        is_oi_momentum = "oi_momentum" in pos_focus
+        is_demand_zone = "demand_zone" in pos_focus
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
         reason = ""
 
@@ -1191,6 +1401,30 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             reason = "rapid_higher_lows_fail"
         elif is_higher_lows and pnl_pct <= -0.48:
             reason = "rapid_higher_lows_fail"
+        elif is_pin_bar and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.24:
+            reason = "rapid_pin_bar_fail"
+        elif is_pin_bar and pnl_pct <= -0.42:
+            reason = "rapid_pin_bar_fail"
+        elif is_morning_star and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.26:
+            reason = "rapid_morning_star_fail"
+        elif is_morning_star and pnl_pct <= -0.44:
+            reason = "rapid_morning_star_fail"
+        elif is_inside_bar and minutes_open >= 0.28 and peak_pnl <= 0.05 and pnl_pct <= -0.28:
+            reason = "rapid_inside_bar_fail"
+        elif is_inside_bar and pnl_pct <= -0.46:
+            reason = "rapid_inside_bar_fail"
+        elif is_rsi_keep and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+            reason = "rapid_rsi_keep_fail"
+        elif is_rsi_keep and pnl_pct <= -0.48:
+            reason = "rapid_rsi_keep_fail"
+        elif is_oi_momentum and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.26:
+            reason = "rapid_oi_momentum_fail"
+        elif is_oi_momentum and pnl_pct <= -0.44:
+            reason = "rapid_oi_momentum_fail"
+        elif is_demand_zone and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.26:
+            reason = "rapid_demand_zone_fail"
+        elif is_demand_zone and pnl_pct <= -0.44:
+            reason = "rapid_demand_zone_fail"
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
         elif (

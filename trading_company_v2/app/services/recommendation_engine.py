@@ -108,6 +108,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     adx_val = float(payload.get("adx_val", 0.0) or 0.0)
     bb_squeeze_breakout = bool(payload.get("bb_squeeze_breakout", False))
     consecutive_higher_lows = bool(payload.get("consecutive_higher_lows", False))
+    # Batch 5 신호
+    pin_bar_long = bool(payload.get("pin_bar_long", False))
+    morning_star = bool(payload.get("morning_star", False))
+    inside_bar_breakout = bool(payload.get("inside_bar_breakout", False))
+    rsi_momentum_keep = bool(payload.get("rsi_momentum_keep", False))
+    oi_momentum_long = bool(payload.get("oi_momentum_long", False))
+    demand_zone_bounce = bool(payload.get("demand_zone_bounce", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -1066,6 +1073,165 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [
                 f"higher_lows: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Pin Bar Long (DUAL: RANGING 반전 / TRENDING 지속) ─────────────────────
+    # 아래꼬리 몸통 2배 이상, 위꼬리 작음 — 매도 거부 + 매수 개입 캔들
+    pin_bar_entry_ok = (
+        pin_bar_long
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.40
+        and (
+            (trend_entry_allowed and orderbook_bid_ask >= 1.03)
+            or (range_scalp_eligible and orderbook_bid_ask >= 1.04)
+        )
+    )
+    if pin_bar_entry_ok:
+        entry_size = "0.45x" if signal_score >= 0.52 else "0.35x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"pin_bar_long: {lead_market or 'KRW-BTC'} 핀바 매수 캔들 — 매도 거부 반전",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"pin_bar: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Morning Star (RANGING 3봉 반전) ──────────────────────────────────────
+    # 큰 음봉 → 도지/소형봉 → 큰 양봉: 바닥 반전 확인
+    morning_star_ok = (
+        morning_star
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.40
+        and orderbook_bid_ask >= 1.03
+        and (micro_entry_ok or stream_ignition or range_scalp_eligible)
+    )
+    if morning_star_ok:
+        entry_size = "0.48x" if signal_score >= 0.52 else "0.38x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"morning_star: {lead_market or 'KRW-BTC'} 모닝스타 반전 — 바닥 3봉 패턴",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"morning_star: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Inside Bar Breakout (BREAKOUT) ────────────────────────────────────────
+    # 직전봉이 이전봉 내부 + 현재봉 상단 돌파 — 압축 후 방향성 확인
+    inside_bar_ok = (
+        inside_bar_breakout
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.44
+        and orderbook_bid_ask >= 1.05
+        and (micro_entry_ok or stream_ignition)
+    )
+    if inside_bar_ok:
+        entry_size = "0.50x" if signal_score >= 0.55 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"inside_bar_breakout: {lead_market or 'KRW-BTC'} 인사이드바 상단 돌파 — 압축 해소",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"inside_bar: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── RSI Momentum Keep (TRENDING 지속) ─────────────────────────────────────
+    # RSI 55~72 유지 추세 중 — 추세 지속 가능 구간 진입
+    rsi_keep_ok = (
+        rsi_momentum_keep
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.50
+        and orderbook_bid_ask >= 1.06
+        and (micro_entry_ok or stream_ignition)
+    )
+    if rsi_keep_ok:
+        entry_size = "0.52x" if signal_score >= 0.58 else "0.42x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"rsi_momentum_keep: {lead_market or 'KRW-BTC'} RSI 추세 구간 유지 — 지속 진입",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"rsi_keep: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── OI Momentum Long (거래량 지속 상승) ──────────────────────────────────
+    # 3봉 연속 거래량 + 가격 증가 — 강한 매수 압력 지속
+    oi_mom_ok = (
+        oi_momentum_long
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.44
+        and orderbook_bid_ask >= 1.04
+        and trend_alignment not in {"downtrend", "late_extension"}
+    )
+    if oi_mom_ok:
+        entry_size = "0.52x" if signal_score >= 0.56 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"oi_momentum_long: {lead_market or 'KRW-BTC'} 3봉 연속 거래량+가격 상승 — 매수 압력",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"oi_momentum: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Demand Zone Bounce (수요 구간 반등) ──────────────────────────────────
+    # 최근 20봉 지지 구간 하단 터치 후 반등 — 기관 수요 확인
+    demand_ok = (
+        demand_zone_bounce
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.40
+        and orderbook_bid_ask >= 1.04
+        and (micro_entry_ok or stream_ignition or range_scalp_eligible)
+    )
+    if demand_ok:
+        entry_size = "0.48x" if signal_score >= 0.52 else "0.38x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"demand_zone_bounce: {lead_market or 'KRW-BTC'} 수요 구간 반등 — 기관 지지 확인",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"demand_zone: score={signal_score:.2f} {trend_alignment}",
                 f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
                 ignition_note,
             ],
