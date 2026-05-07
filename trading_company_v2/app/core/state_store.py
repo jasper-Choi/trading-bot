@@ -430,8 +430,8 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     # @ ~8s/cycle: 450=1h, 225=30min, 75=10min, 25=3min
     if desk == "crypto" and "range_scalp" in focus:
         # 평균회귀(에어본) 전략: 작은 목표/타이트한 손절/빠른 만기
-        # stop -0.70% → -0.50%: 즉시실패 시 손실 축소 (avg -0.895% → -0.50% 목표)
-        return 1.20, -0.50, 75
+        # stop -0.50% → -0.30%: peak=0% 패턴 avg -0.74% → -0.30% 손실 절감 목표
+        return 1.20, -0.30, 75
     if desk == "crypto" and "range_breakout" in focus:
         return 2.20, -1.00, 90
     if desk == "crypto" and "high_tight_flag" in focus:
@@ -772,7 +772,9 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
     for row in positions:
         if row.status != "closed":
             continue
-        strategy_id = str(row.strategy_id or infer_strategy_id(row.action, row.focus) or "unknown")
+        # Only count explicitly-tagged positions. Focus-text inference caused old RANGING-era
+        # positions to poison strategy stats (e.g. obvious_trend disabled by pre-gate failures).
+        strategy_id = str(row.strategy_id or "unknown")
         bucket = buckets.setdefault(
             strategy_id,
             {
@@ -1233,8 +1235,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                     closed_symbols.append((position.symbol, "rapid_range_scalp_target"))
                     _close_position(position, "rapid_range_scalp_target")
                     paper_closed += 1
-                elif peak_pnl <= 0.0 and minutes_open >= 0.40 and position.pnl_pct <= -0.15:
-                    # 진입 후 한 번도 반등 없이 낙하: 24s 이내 -0.15%에서 즉시 청산
+                elif peak_pnl <= 0.0 and minutes_open >= 0.20 and position.pnl_pct <= -0.15:
+                    # 진입 후 한 번도 반등 없이 낙하: 12s(0.20min) 후 -0.15%에서 즉시 청산 (24s→12s)
                     # ANKR/FIL peak=0% → -0.59% 패턴 방지 (avg -0.59% → ~-0.15%)
                     closed_symbols.append((position.symbol, "rapid_range_scalp_no_lift"))
                     _close_position(position, "rapid_range_scalp_no_lift")
@@ -1262,8 +1264,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
                 _close_position(position, "rapid_obvious_trend_fail")
                 paper_closed += 1
-            elif is_obvious_trend and position.pnl_pct <= -0.45:
-                # obvious_trend 최대 손실 -0.70% → -0.45%
+            elif is_obvious_trend and position.pnl_pct <= -0.38:
+                # obvious_trend 최대 손실 -0.45% → -0.38%: avg -0.50% 절감 목표
                 closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
                 _close_position(position, "rapid_obvious_trend_fail")
                 paper_closed += 1
@@ -1308,11 +1310,11 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 paper_closed += 1
             elif (
                 # fallback: stream 없어도 peak=0 AND 빠른 역행 → 즉시 청산
-                # avg rapid_tick_failed_start -0.612% → -0.25%로 손실 절반 이상 감소 목표
+                # 0.5min/−0.25% → 0.33min/−0.22%: avg −0.616% → −0.22% 손실 대폭 절감 목표
                 not is_range_scalp_rapid
                 and peak_pnl <= 0.05
-                and minutes_open >= 0.5
-                and position.pnl_pct <= -0.25
+                and minutes_open >= 0.33
+                and position.pnl_pct <= -0.22
             ):
                 closed_symbols.append((position.symbol, "rapid_tick_failed_start"))
                 _close_position(position, "rapid_tick_failed_start")

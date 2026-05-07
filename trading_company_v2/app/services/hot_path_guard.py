@@ -453,7 +453,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             )
             return False
         return True
-    if obvious_trend_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
+    if obvious_trend_ok:
         item["entry_profile"] = "obvious_trend"
         if _strategy_is_disabled("crypto.obvious_trend"):
             item["hot_block_reason"] = "strategy_disabled"
@@ -624,8 +624,8 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             rs_protect = max(rs_profit_floor, peak_pnl - rs_trail_giveback) if rs_trail_giveback else 0.0
             if pnl_pct >= target_pct:
                 reason = "rapid_range_scalp_target"
-            elif peak_pnl <= 0.0 and minutes_open >= 0.40 and pnl_pct <= -0.15:
-                # 진입 후 한 번도 반등 없이 낙하 → 24s 후 -0.15%에서 즉시 청산
+            elif peak_pnl <= 0.0 and minutes_open >= 0.20 and pnl_pct <= -0.15:
+                # 진입 후 한 번도 반등 없이 낙하 → 12s 후 -0.15%에서 즉시 청산 (24s→12s)
                 # (state_store rapid_guard와 일관성 유지)
                 reason = "rapid_range_scalp_no_lift"
             elif pnl_pct <= stop_pct:
@@ -653,8 +653,8 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.22:
             # obvious_trend 조기 실패 -0.35% → -0.22%
             reason = "rapid_obvious_trend_fail"
-        elif is_obvious_trend and pnl_pct <= -0.45:
-            # obvious_trend 최대 손실 -0.70% → -0.45%
+        elif is_obvious_trend and pnl_pct <= -0.38:
+            # obvious_trend 최대 손실 -0.45% → -0.38%: avg -0.50% 절감
             reason = "rapid_obvious_trend_fail"
         elif is_range_impulse and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.25:
             reason = "rapid_range_impulse_fail"
@@ -672,6 +672,15 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             reason = "rapid_vwap_reclaim_fail"
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
+        elif (
+            # 진입 후 peak=0 AND 빠른 역행 → 즉시 청산 (stream 확인 불필요)
+            # rapid_tick_failed_start avg -0.616% → -0.22% 손실 목표
+            not is_range_scalp_hot
+            and peak_pnl <= 0.05
+            and minutes_open >= 0.33
+            and pnl_pct <= -0.22
+        ):
+            reason = "rapid_tick_failed_start"
         else:
             stream = summarize_stream_momentum(symbol, max_age_seconds=3.5)
             if (
