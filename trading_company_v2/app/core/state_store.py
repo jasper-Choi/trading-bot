@@ -430,8 +430,8 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     # @ ~8s/cycle: 450=1h, 225=30min, 75=10min, 25=3min
     if desk == "crypto" and "range_scalp" in focus:
         # 평균회귀(에어본) 전략: 작은 목표/타이트한 손절/빠른 만기
-        # stop -0.50% → -0.30%: peak=0% 패턴 avg -0.74% → -0.30% 손실 절감 목표
-        return 1.20, -0.30, 75
+        # stop -0.50%→-0.30%→-0.22%: 소형코인 갭점프 -0.74% 패턴 + 유동성 필터 추가로 더 타이트
+        return 1.20, -0.22, 75
     if desk == "crypto" and "range_breakout" in focus:
         return 2.20, -1.00, 90
     if desk == "crypto" and "high_tight_flag" in focus:
@@ -1235,9 +1235,9 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                     closed_symbols.append((position.symbol, "rapid_range_scalp_target"))
                     _close_position(position, "rapid_range_scalp_target")
                     paper_closed += 1
-                elif peak_pnl <= 0.0 and minutes_open >= 0.20 and position.pnl_pct <= -0.15:
-                    # 진입 후 한 번도 반등 없이 낙하: 12s(0.20min) 후 -0.15%에서 즉시 청산 (24s→12s)
-                    # ANKR/FIL peak=0% → -0.59% 패턴 방지 (avg -0.59% → ~-0.15%)
+                elif peak_pnl <= 0.0 and minutes_open >= 0.15 and position.pnl_pct <= -0.12:
+                    # 진입 후 반등 없이 낙하: 9s(0.15min) 후 -0.12%에서 즉시 청산 (12s→9s, -0.15%→-0.12%)
+                    # ANKR/FIL peak=0% → -0.59% 패턴: 더 빠른 탈출
                     closed_symbols.append((position.symbol, "rapid_range_scalp_no_lift"))
                     _close_position(position, "rapid_range_scalp_no_lift")
                     paper_closed += 1

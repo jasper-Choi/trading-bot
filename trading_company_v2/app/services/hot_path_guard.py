@@ -74,7 +74,7 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_range_scalp_no_lift",
 }
 # 실패 후 블랙리스트 쿨다운 (초): 연속 2회 실패 시 이 시간만큼 재진입 차단
-_FAILURE_BLACKLIST_SECONDS = 360.0      # 6분
+_FAILURE_BLACKLIST_SECONDS = 900.0      # 6분 → 15분: 반복 실패 코인 블랙리스트 연장
 _failure_blacklist: dict[str, float] = {}
 _STRATEGY_BLOCKLIST_TTL_SECONDS = 60.0
 _strategy_blocklist_loaded_at = 0.0
@@ -364,9 +364,15 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         # STORJ dev=+1.32% 진입 → 방향 반대(EMA 위에서 long mean-reversion = wrong)
         airborne_dev_pct = _float(item.get("airborne_deviation_pct", 0.0))
         dev_blocks_long_meanrev = airborne_dev_pct > 1.0
+        rs_vol_ratio = _float(item.get("vol_ratio", 0.0))
+        rs_vol_24h = _float(item.get("volume_24h_krw", 0.0))
+        # 유동성 필터: ANKR/STORJ/SC 등 소형 저유동성 코인 진입 차단
+        # → 2초 내 -0.99% 갭점프 패턴 방지 (rapid_range_scalp_stop avg -0.74%)
+        range_scalp_liquidity_ok = rs_vol_ratio >= 0.8 or rs_vol_24h >= 5_000_000_000
         range_scalp_hot_ok = (
             ranging_signal
             and not dev_blocks_long_meanrev
+            and range_scalp_liquidity_ok
             and orderbook_bid_ask >= 1.05
             and -1.0 <= micro_move_3 <= 1.50
             and not bool(item.get("rsi_bearish_divergence", False))
@@ -1504,12 +1510,15 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
         elif (
-            # 진입 후 peak=0 AND 빠른 역행 → 즉시 청산 (stream 확인 불필요)
-            # rapid_tick_failed_start avg -0.616% → -0.22% 손실 목표
+            # 진입 후 peak=0 AND 빠른 역행: 2단계 조기화
+            # 1단계: 12s(0.20min) 후 -0.25% 이하 → 즉시청산 (강한 실패 신호)
+            # 2단계: 20s(0.33min) 후 -0.18% 이하 → 청산 (0.22% → 0.18% 타이트)
             not is_range_scalp_hot
             and peak_pnl <= 0.05
-            and minutes_open >= 0.33
-            and pnl_pct <= -0.22
+            and (
+                (minutes_open >= 0.20 and pnl_pct <= -0.25)
+                or (minutes_open >= 0.33 and pnl_pct <= -0.18)
+            )
         ):
             reason = "rapid_tick_failed_start"
         else:
