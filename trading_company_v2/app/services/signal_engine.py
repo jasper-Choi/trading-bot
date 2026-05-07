@@ -1701,6 +1701,132 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
             and not bool(bk.get("rsi_bearish_divergence", False))
         )
 
+    # === BATCH 6: 마지막 8개 전략 신호 ===
+
+    # --- VWAP + RSI 복합 (RANGING 고확률 조합) ---
+    # VWAP 이탈 + RSI 과매도: 두 신호 동시 만족 = 더 높은 신뢰도
+    vwap_rsi_combo = (
+        bool(airborne.get("airborne_long", False))   # VWAP 이탈 (airborne = VWAP 기반)
+        and last_rsi is not None and last_rsi <= 38.0  # RSI 깊은 과매도
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -5.0
+    )
+
+    # --- Breakout + Volume Confirm (브레이크아웃 + 거래량 동반) ---
+    # 20봉 고점 돌파 + 거래량 1.5배: 신뢰도 높은 브레이크아웃
+    breakout_vol_confirm = (
+        range_breakout_long                          # 로컬 변수 range_breakout_long 활용
+        and len(volumes) >= 5 and _vol20_avg > 0
+        and volumes[-1] >= _vol20_avg * 1.5          # 거래량 동반 필수
+        and last_rsi is not None and 52.0 <= last_rsi <= 78.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    # --- Hammer + Support (망치형 + 지지선) ---
+    # 망치형 캔들이 지지선 근처에서 발생 = 반전 신뢰도 높음
+    _hs_hammer = pin_bar_long  # pin_bar_long 재활용 (사실상 hammer와 동일)
+    _hs_support_nearby = False
+    if len(closes) >= 21:
+        _hs_sup = min(lows[-21:-1])
+        _hs_sup_zone = _hs_sup * 1.015  # 지지선 1.5% 내
+        _hs_support_nearby = lows[-1] <= _hs_sup_zone
+    hammer_at_support = (
+        _hs_hammer
+        and _hs_support_nearby
+        and last_rsi is not None and last_rsi <= 50.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    # --- Trend Reversal Early (추세 전환 조기 포착) ---
+    # CHoCH 불리쉬 단독 (BOS 없이) + 조건 완화 = 더 이른 포착
+    trend_reversal_early = (
+        choch_bullish
+        and not bos_bullish                          # BOS 아직 없음 (조기 포착)
+        and bool(trend.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and last_rsi is not None and 35.0 <= last_rsi <= 62.0
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -2.0
+    )
+
+    # --- EMA Bounce (EMA 지지 반등) ---
+    # 가격이 EMA20 근처에서 반등 + RSI 적정 수준
+    ema_bounce_long = False
+    if len(closes) >= 21:
+        _eb_ema20 = sum(closes[-20:]) / 20.0
+        _eb_near = abs(lows[-1] - _eb_ema20) / max(_eb_ema20, 1e-9) <= 0.008  # EMA20 0.8% 이내
+        _eb_bounce = closes[-1] > lows[-1] + (highs[-1] - lows[-1]) * 0.55    # 하단 55% 이상 회복
+        ema_bounce_long = (
+            _eb_near
+            and _eb_bounce
+            and closes[-1] > _eb_ema20               # EMA 위로 마감
+            and last_rsi is not None and 40.0 <= last_rsi <= 62.0
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+        )
+
+    # --- RSI Bullish Divergence (RSI 불리쉬 다이버전스) ---
+    # 가격은 저점을 낮추는데 RSI는 저점을 높임 = 반전 선행 신호
+    rsi_bullish_div = False
+    if len(closes) >= 10 and len(_rsi_series) >= 10:
+        _rd_price_lower = closes[-1] < min(closes[-6:-1])   # 가격: 5봉 최저
+        _rd_rsi_higher = float(_rsi_series[-1] or 50.0) > float(_rsi_series[-5] or 50.0)  # RSI: 높아짐
+        _rd_rsi_low = float(_rsi_series[-1] or 50.0) <= 45.0  # RSI는 과매도 구간
+        rsi_bullish_div = (
+            _rd_price_lower
+            and _rd_rsi_higher
+            and _rd_rsi_low
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+            and float(recent_change) > -5.0
+        )
+
+    # --- Multi-Signal RANGING Combo (멀티 RANGING 신호 조합) ---
+    # 단일 신호 약 → 여러 RANGING 신호 동시: 더 높은 신뢰도
+    _ms_ranging_count = sum([
+        bb_squeeze_bounce,           # 로컬 변수
+        vwap_deviation_long,         # 로컬 변수
+        williams_r_oversold,
+        cci_oversold_bounce,
+        keltner_lower_touch,
+        mfi_oversold,
+        stoch_oversold_cross,        # 로컬 변수
+        volume_climax_reversal,      # 로컬 변수
+    ])
+    multi_ranging_combo = (
+        _ms_ranging_count >= 3                       # 3개 이상 동시 만족
+        and last_rsi is not None and last_rsi <= 45.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -6.0
+    )
+
+    # --- Momentum Breakout Continuation (모멘텀 브레이크아웃 지속) ---
+    # 강한 1봉 브레이크 후 2봉째 고점 갱신: 모멘텀 지속 확인
+    momentum_breakout_cont = (
+        len(closes) >= 3
+        and closes[-1] > closes[-2]                   # 고점 갱신
+        and closes[-2] > closes[-3]                   # 연속 상승
+        and (closes[-2] - closes[-3]) / max(closes[-3], 1e-9) * 100 >= 0.8   # 첫봉 0.8% 이상
+        and len(volumes) >= 3
+        and volumes[-1] >= volumes[-2] * 0.7          # 거래량 유지 (70% 이상)
+        and last_rsi is not None and 52.0 <= last_rsi <= 76.0
+        and bool(trend.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1843,6 +1969,15 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "rsi_momentum_keep": rsi_momentum_keep,
         "oi_momentum_long": oi_momentum_long,
         "demand_zone_bounce": demand_zone_bounce,
+        # 추가 신호 (Batch 6)
+        "vwap_rsi_combo": vwap_rsi_combo,
+        "breakout_vol_confirm": breakout_vol_confirm,
+        "hammer_at_support": hammer_at_support,
+        "trend_reversal_early": trend_reversal_early,
+        "ema_bounce_long": ema_bounce_long,
+        "rsi_bullish_div": rsi_bullish_div,
+        "multi_ranging_combo": multi_ranging_combo,
+        "momentum_breakout_cont": momentum_breakout_cont,
     }
 
 

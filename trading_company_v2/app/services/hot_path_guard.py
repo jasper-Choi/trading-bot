@@ -66,6 +66,7 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_rsi_keep_fail",
     "rapid_oi_momentum_fail",
     "rapid_demand_zone_fail",
+    "rapid_b6_fail",
     "rapid_failed_start",
     "rapid_stop_hit",
     "rapid_repeat_symbol_failure",
@@ -235,6 +236,16 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.58 and stream_score >= 0.68:
             return 0.048
         return 0.036
+    # Batch 6 공용 size (단일 테이블로 처리)
+    _b6_profiles = {
+        "vwap_rsi_combo", "breakout_vol_confirm", "hammer_at_support",
+        "trend_reversal_early", "ema_bounce", "rsi_bullish_div",
+        "multi_ranging", "momentum_bk_cont",
+    }
+    if entry_profile in _b6_profiles:
+        if combined >= 0.60 and stream_score >= 0.70:
+            return 0.05
+        return 0.038
     if entry_profile == "range_scalp":
         airborne_score = _float(candidate.get("airborne_score", 0.0))
         if airborne_score >= 0.70:
@@ -407,6 +418,15 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     rsi_momentum_keep_signal = bool(item.get("rsi_momentum_keep", False))
     oi_momentum_long_signal = bool(item.get("oi_momentum_long", False))
     demand_zone_bounce_signal = bool(item.get("demand_zone_bounce", False))
+    # ── Batch 6 신호 추출 ───────────────────────────────────────────────────
+    vwap_rsi_combo_signal = bool(item.get("vwap_rsi_combo", False))
+    breakout_vol_confirm_signal = bool(item.get("breakout_vol_confirm", False))
+    hammer_at_support_signal = bool(item.get("hammer_at_support", False))
+    trend_reversal_early_signal = bool(item.get("trend_reversal_early", False))
+    ema_bounce_long_signal = bool(item.get("ema_bounce_long", False))
+    rsi_bullish_div_signal = bool(item.get("rsi_bullish_div", False))
+    multi_ranging_combo_signal = bool(item.get("multi_ranging_combo", False))
+    momentum_breakout_cont_signal = bool(item.get("momentum_breakout_cont", False))
 
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성
@@ -1036,6 +1056,51 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             return False
         return True
 
+    # ── Batch 6 진입 경로 ────────────────────────────────────────────────────
+
+    def _b6_check(signal_val: bool, profile: str, min_combined: float = 0.54, min_ob: float = 1.05, need_trend: bool = False) -> bool:
+        if not signal_val:
+            return False
+        if need_trend and not bool(item.get("trend_entry_allowed", False)):
+            return False
+        if combined < min_combined or orderbook_bid_ask < min_ob:
+            return False
+        if bool(item.get("rsi_bearish_divergence", False)) or bool(item.get("micro_exhausted", False)) or hard_overheat:
+            return False
+        if trend_alignment in {"downtrend", "late_extension"}:
+            return False
+        item["entry_profile"] = profile
+        sid = f"crypto.{profile}"
+        if _strategy_is_disabled(sid):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol, strategy_id=sid, entry_profile=profile,
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", f"{profile} hot") or f"{profile} hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    if _b6_check(vwap_rsi_combo_signal, "vwap_rsi_combo", 0.52, 1.04):
+        return True
+    if _b6_check(breakout_vol_confirm_signal, "breakout_vol_confirm", 0.57, 1.06, need_trend=True):
+        return True
+    if _b6_check(hammer_at_support_signal, "hammer_at_support", 0.52, 1.04):
+        return True
+    if _b6_check(trend_reversal_early_signal, "trend_reversal_early", 0.55, 1.05, need_trend=True):
+        return True
+    if _b6_check(ema_bounce_long_signal, "ema_bounce", 0.53, 1.05):
+        return True
+    if _b6_check(rsi_bullish_div_signal, "rsi_bullish_div", 0.51, 1.04):
+        return True
+    if _b6_check(multi_ranging_combo_signal, "multi_ranging", 0.52, 1.05):
+        return True
+    if _b6_check(momentum_breakout_cont_signal, "momentum_bk_cont", 0.57, 1.06, need_trend=True):
+        return True
+
     common_guards = (
         signal_freshness >= 0.58               # 0.55 → 0.58: 더 신선한 신호만
         and -0.30 <= micro_move_3 <= 0.95      # 상한 1.20 → 0.95: 이미 올라간 뒤 진입 차단
@@ -1298,6 +1363,12 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         is_rsi_keep = "rsi_keep" in pos_focus
         is_oi_momentum = "oi_momentum" in pos_focus
         is_demand_zone = "demand_zone" in pos_focus
+        # Batch 6
+        is_b6 = any(p in pos_focus for p in (
+            "vwap_rsi_combo", "breakout_vol_confirm", "hammer_at_support",
+            "trend_reversal_early", "ema_bounce", "rsi_bullish_div",
+            "multi_ranging", "momentum_bk_cont",
+        ))
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
         reason = ""
 
@@ -1425,6 +1496,10 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             reason = "rapid_demand_zone_fail"
         elif is_demand_zone and pnl_pct <= -0.44:
             reason = "rapid_demand_zone_fail"
+        elif is_b6 and minutes_open >= 0.27 and peak_pnl <= 0.05 and pnl_pct <= -0.27:
+            reason = "rapid_b6_fail"
+        elif is_b6 and pnl_pct <= -0.45:
+            reason = "rapid_b6_fail"
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
         elif (

@@ -115,6 +115,15 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     rsi_momentum_keep = bool(payload.get("rsi_momentum_keep", False))
     oi_momentum_long = bool(payload.get("oi_momentum_long", False))
     demand_zone_bounce = bool(payload.get("demand_zone_bounce", False))
+    # Batch 6 신호
+    vwap_rsi_combo = bool(payload.get("vwap_rsi_combo", False))
+    breakout_vol_confirm = bool(payload.get("breakout_vol_confirm", False))
+    hammer_at_support = bool(payload.get("hammer_at_support", False))
+    trend_reversal_early = bool(payload.get("trend_reversal_early", False))
+    ema_bounce_long = bool(payload.get("ema_bounce_long", False))
+    rsi_bullish_div = bool(payload.get("rsi_bullish_div", False))
+    multi_ranging_combo = bool(payload.get("multi_ranging_combo", False))
+    momentum_breakout_cont = bool(payload.get("momentum_breakout_cont", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -1235,6 +1244,126 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
                 ignition_note,
             ],
+        }
+
+    # ── VWAP + RSI 복합 (RANGING 고확률) ─────────────────────────────────────
+    vwap_rsi_ok = (
+        vwap_rsi_combo and stance != "DEFENSE" and not hard_overheat
+        and not rsi_bearish_divergence and signal_score >= 0.40
+        and orderbook_bid_ask >= 1.04
+        and (micro_entry_ok or stream_ignition or range_scalp_eligible)
+    )
+    if vwap_rsi_ok:
+        return {
+            "action": "probe_longs", "size": "0.45x" if signal_score >= 0.52 else "0.35x",
+            "focus": f"vwap_rsi_combo: {lead_market or 'KRW-BTC'} VWAP이탈+RSI과매도 복합 신호",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"vwap_rsi: score={signal_score:.2f} {trend_alignment}", ignition_note],
+        }
+
+    # ── Breakout + Volume Confirm ─────────────────────────────────────────────
+    bk_vol_ok = (
+        breakout_vol_confirm and trend_entry_allowed and stance != "DEFENSE"
+        and not hard_overheat and not rsi_bearish_divergence
+        and signal_score >= 0.46 and orderbook_bid_ask >= 1.06
+        and (micro_entry_ok or stream_ignition)
+    )
+    if bk_vol_ok:
+        return {
+            "action": "probe_longs", "size": "0.52x" if signal_score >= 0.56 else "0.42x",
+            "focus": f"breakout_vol_confirm: {lead_market or 'KRW-BTC'} 20봉 고점 돌파+거래량 동반",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"bk_vol: score={signal_score:.2f} {trend_alignment}", ignition_note],
+        }
+
+    # ── Hammer at Support ─────────────────────────────────────────────────────
+    hammer_sup_ok = (
+        hammer_at_support and stance != "DEFENSE" and not hard_overheat
+        and not rsi_bearish_divergence and signal_score >= 0.40
+        and orderbook_bid_ask >= 1.04
+        and (micro_entry_ok or range_scalp_eligible or stream_ignition)
+    )
+    if hammer_sup_ok:
+        return {
+            "action": "probe_longs", "size": "0.45x" if signal_score >= 0.50 else "0.36x",
+            "focus": f"hammer_at_support: {lead_market or 'KRW-BTC'} 지지선 망치형 캔들 반전",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"hammer_sup: score={signal_score:.2f} {trend_alignment}", ignition_note],
+        }
+
+    # ── Trend Reversal Early (CHoCH 단독 조기 포착) ───────────────────────────
+    trend_rev_ok = (
+        trend_reversal_early and trend_entry_allowed and stance != "DEFENSE"
+        and not hard_overheat and not rsi_bearish_divergence
+        and signal_score >= 0.44 and orderbook_bid_ask >= 1.05
+        and (micro_entry_ok or stream_ignition)
+    )
+    if trend_rev_ok:
+        return {
+            "action": "probe_longs", "size": "0.48x" if signal_score >= 0.54 else "0.38x",
+            "focus": f"trend_reversal_early: {lead_market or 'KRW-BTC'} CHoCH 조기 반전 포착",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"trend_rev: score={signal_score:.2f} {trend_alignment}", ignition_note],
+        }
+
+    # ── EMA Bounce Long ──────────────────────────────────────────────────────
+    ema_bounce_ok = (
+        ema_bounce_long and stance != "DEFENSE" and not hard_overheat
+        and not rsi_bearish_divergence and signal_score >= 0.42
+        and orderbook_bid_ask >= 1.04
+        and (trend_entry_allowed or range_scalp_eligible)
+        and (micro_entry_ok or stream_ignition)
+    )
+    if ema_bounce_ok:
+        return {
+            "action": "probe_longs", "size": "0.48x" if signal_score >= 0.53 else "0.38x",
+            "focus": f"ema_bounce_long: {lead_market or 'KRW-BTC'} EMA20 반등 — 이동평균 지지 확인",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"ema_bounce: score={signal_score:.2f} {trend_alignment}", ignition_note],
+        }
+
+    # ── RSI Bullish Divergence ───────────────────────────────────────────────
+    rsi_div_ok = (
+        rsi_bullish_div and stance != "DEFENSE" and not hard_overheat
+        and signal_score >= 0.40 and orderbook_bid_ask >= 1.04
+        and (micro_entry_ok or range_scalp_eligible or stream_ignition)
+    )
+    if rsi_div_ok:
+        return {
+            "action": "probe_longs", "size": "0.45x" if signal_score >= 0.52 else "0.36x",
+            "focus": f"rsi_bullish_div: {lead_market or 'KRW-BTC'} RSI 불리쉬 다이버전스 반전",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"rsi_div: score={signal_score:.2f} {trend_alignment}", ignition_note],
+        }
+
+    # ── Multi-Signal RANGING Combo ───────────────────────────────────────────
+    multi_ranging_ok = (
+        multi_ranging_combo and stance != "DEFENSE" and not hard_overheat
+        and not rsi_bearish_divergence and signal_score >= 0.40
+        and orderbook_bid_ask >= 1.05
+        and (micro_entry_ok or range_scalp_eligible)
+    )
+    if multi_ranging_ok:
+        return {
+            "action": "probe_longs", "size": "0.50x" if signal_score >= 0.54 else "0.40x",
+            "focus": f"multi_ranging_combo: {lead_market or 'KRW-BTC'} 멀티 RANGING 신호 3개+ 동시",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"multi_ranging: score={signal_score:.2f} {trend_alignment}", ignition_note],
+        }
+
+    # ── Momentum Breakout Continuation ──────────────────────────────────────
+    mom_bk_cont_ok = (
+        momentum_breakout_cont and trend_entry_allowed and stance != "DEFENSE"
+        and not hard_overheat and not rsi_bearish_divergence
+        and signal_score >= 0.46 and orderbook_bid_ask >= 1.06
+        and (micro_entry_ok or stream_ignition)
+    )
+    if mom_bk_cont_ok:
+        return {
+            "action": "probe_longs", "size": "0.52x" if signal_score >= 0.56 else "0.42x",
+            "focus": f"momentum_breakout_cont: {lead_market or 'KRW-BTC'} 브레이크아웃 2봉째 모멘텀 지속",
+            "symbol": lead_market, "candidate_symbols": candidate_symbols,
+            "notes": reasons + [f"mom_bk_cont: score={signal_score:.2f} {trend_alignment}", ignition_note],
         }
 
     # Combined-score fallback: fires when ignition/direct paths didn't match but composite
