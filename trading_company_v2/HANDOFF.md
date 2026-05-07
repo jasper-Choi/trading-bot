@@ -1,7 +1,62 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-06
+Last updated: 2026-05-07
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-07 (session 7 — 수익률 개선 + Batch 3 전략 6개)
+
+### 수익률 개선 핫픽스 (커밋 55d5584 — 이전 세션)
+
+**원인 분석**
+- `obvious_trend` 전략이 `infer_strategy_id()` fallback으로 오염된 통계 때문에 permanently disabled 상태
+  → `state_store.py`에서 `strategy_id = str(row.strategy_id or "unknown")` (inference 제거)
+- `_ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES = False` 플래그가 obvious_trend/range_impulse hot_path 완전 차단
+  → `hot_path_guard.py`에서 두 플래그 게이트 제거
+- `range_scalp` stop -0.50% 설정인데 실제 -0.80~-0.99% 청산: 슬리피지 salt 차이
+  → stop -0.30%로 타이트하게 변경
+- `rapid_tick_failed_start` 평균 -0.616%: 30s/-0.25% → 20s/-0.22%로 조기화
+
+**수정 내용 (state_store.py)**
+- strategy attribution: `infer_strategy_id()` fallback 제거
+- range_scalp stop: -0.50% → -0.30%
+- obvious_trend hard stop: -0.45% → -0.38%
+- range_scalp no_lift: 24s → 12s (0.40min → 0.20min)
+- rapid_tick_failed_start: 30s/-0.25% → 20s/-0.22%
+
+**수정 내용 (hot_path_guard.py)**
+- obvious_trend + range_impulse 게이트 플래그 제거 (이제 활성화)
+- obvious_trend hard stop: -0.45% → -0.38%
+- generic early exit 추가: peak≤0.05 AND 20s AND -0.22%
+- range_scalp no_lift: 24s → 12s
+
+### Batch 3 전략 6개 추가 (커밋 ca3a8fc)
+
+**TRENDING 신호 3개 신규 (signal_engine 계산 로직 추가)**
+- `rsi_flip_long`: RSI 50 하향→상향 돌파 — 모멘텀 전환 초기 포착
+  - hot_path: trend_score≥0.60, combined≥0.56, ob≥1.06 / rapid: 18s/-0.28% 또는 -0.46%
+- `macd_bull_cross`: MACD가 시그널선 상향 돌파 (음의 영역) — 중기 모멘텀 전환
+  - hot_path: 동일 조건 / rapid: 18s/-0.28% 또는 -0.46%
+- `triple_candle_bull`: 3연속 양봉 + 연속 고점 + 거래량 확인
+  - hot_path: trend_score≥0.65, combined≥0.60, ob≥1.08 / rapid: 17s/-0.26% 또는 -0.44%
+
+**구조 기반 전략 3개 신규 (기존 계산 신호 활용)**
+- `pullback_continuation`: 급등 후 조정 재진입 Holy Grail (pullback_detected + vol_contracted)
+  - hot_path: trend_score≥0.62, combined≥0.58, vol_contracted 필수 / rapid: 18s/-0.28% 또는 -0.46%
+- `choch_momentum`: CHoCH + BOS 구조적 반전 ICT 스타일
+  - hot_path: choch_bullish AND bos_bullish, trend_score≥0.62 / rapid: 18s/-0.30% 또는 -0.48%
+- `ict_level_long`: 불리시 OB 또는 FVG 기관 매수 구간
+  - hot_path: price_at_bull_ob OR price_in_bull_fvg AND ict_bullish_count≥2 / rapid: 18s/-0.30% 또는 -0.48%
+
+**전파 경로**
+- `signal_engine.py`: rsi_flip_long, macd_bull_cross, triple_candle_bull 계산 + return dict
+- `crypto_desk_agent.py`: 3곳 (ranked_candidates, fallback, leader payload)
+- `recommendation_engine.py`: 변수 추출 + 6개 신규 entry 경로 + bos_bullish/OB/FVG 추출 추가
+- `hot_path_guard.py`: 6개 신규 진입 경로 + 각 entry_profile + RAPID_EXIT_REASONS + size table
+
+**현재 전략 수**: ~30개 distinct entry path (목표 50개 대비 60%)
+
+### 배포
+- 2026-05-07 UTC, Oracle VM git pull + restart 완료 (ca3a8fc)
 
 ## 0. Latest Claude Notes - 2026-05-06 (session 6 — 전략 확장 Batch 2)
 
