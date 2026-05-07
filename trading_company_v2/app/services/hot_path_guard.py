@@ -54,6 +54,12 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_pullback_cont_fail",
     "rapid_choch_momentum_fail",
     "rapid_ict_level_fail",
+    "rapid_supertrend_fail",
+    "rapid_engulfing_fail",
+    "rapid_vol_surge_fail",
+    "rapid_adx_trend_fail",
+    "rapid_bb_squeeze_fail",
+    "rapid_higher_lows_fail",
     "rapid_failed_start",
     "rapid_stop_hit",
     "rapid_repeat_symbol_failure",
@@ -175,6 +181,30 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.62 and stream_score >= 0.72:
             return 0.065
         return 0.05
+    if entry_profile == "supertrend":
+        if combined >= 0.62 and stream_score >= 0.70:
+            return 0.055
+        return 0.042
+    if entry_profile == "engulfing_bull":
+        if combined >= 0.60 and stream_score >= 0.68:
+            return 0.05
+        return 0.038
+    if entry_profile == "vol_surge":
+        if combined >= 0.60 and stream_score >= 0.68:
+            return 0.055
+        return 0.042
+    if entry_profile == "adx_trend":
+        if combined >= 0.62 and stream_score >= 0.70:
+            return 0.055
+        return 0.042
+    if entry_profile == "bb_squeeze_break":
+        if combined >= 0.62 and stream_score >= 0.72:
+            return 0.06
+        return 0.045
+    if entry_profile == "higher_lows":
+        if combined >= 0.63 and stream_score >= 0.72:
+            return 0.055
+        return 0.042
     if entry_profile == "range_scalp":
         airborne_score = _float(candidate.get("airborne_score", 0.0))
         if airborne_score >= 0.70:
@@ -332,6 +362,14 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     rsi_flip_long_signal = bool(item.get("rsi_flip_long", False))
     macd_bull_cross_signal = bool(item.get("macd_bull_cross", False))
     triple_candle_bull_signal = bool(item.get("triple_candle_bull", False))
+    # ── Batch 4 TRENDING/DUAL 신호 추출 ────────────────────────────────────
+    supertrend_long_signal = bool(item.get("supertrend_long", False))
+    engulfing_bull_signal = bool(item.get("engulfing_bull", False))
+    vol_surge_long_signal = bool(item.get("vol_surge_long", False))
+    adx_trend_strong_signal = bool(item.get("adx_trend_strong", False))
+    adx_val_hp = float(item.get("adx_val", 0.0) or 0.0)
+    bb_squeeze_breakout_signal = bool(item.get("bb_squeeze_breakout", False))
+    consecutive_higher_lows_signal = bool(item.get("consecutive_higher_lows", False))
 
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성
@@ -622,6 +660,178 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             return False
         return True
 
+    # Supertrend Long: Supertrend(10,3) 불리쉬 전환 — ATR 기반 추세 확인
+    supertrend_ok = (
+        supertrend_long_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.62
+        and combined >= 0.58
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+        and trend_extension_pct <= 4.5
+    )
+    if supertrend_ok:
+        item["entry_profile"] = "supertrend"
+        if _strategy_is_disabled("crypto.supertrend"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.supertrend", entry_profile="supertrend",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "supertrend hot") or "supertrend hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Bullish Engulfing: 직전 음봉 → 현재 양봉 완전 흡수 — 반전/지속 캔들
+    engulfing_ok = (
+        engulfing_bull_signal
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and combined >= 0.55
+        and orderbook_bid_ask >= 1.05
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.50
+    )
+    if engulfing_ok:
+        item["entry_profile"] = "engulfing_bull"
+        if _strategy_is_disabled("crypto.engulfing_bull"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.engulfing_bull", entry_profile="engulfing_bull",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "engulfing hot") or "engulfing hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Volume Surge Long: 거래량 2.5배 급증 + 양봉 — 기관 매집 포착
+    vol_surge_ok = (
+        vol_surge_long_signal
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and combined >= 0.54
+        and orderbook_bid_ask >= 1.04
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.48
+    )
+    if vol_surge_ok:
+        item["entry_profile"] = "vol_surge"
+        if _strategy_is_disabled("crypto.vol_surge"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.vol_surge", entry_profile="vol_surge",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "vol_surge hot") or "vol_surge hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # ADX Trend Strong: ADX ≥ 22 + DI+>DI- — 방향성 있는 강한 추세 진입
+    adx_strong_ok = (
+        adx_trend_strong_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.62
+        and combined >= 0.58
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+        and trend_extension_pct <= 4.5
+    )
+    if adx_strong_ok:
+        item["entry_profile"] = "adx_trend"
+        if _strategy_is_disabled("crypto.adx_trend"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.adx_trend", entry_profile="adx_trend",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "adx_trend hot") or "adx_trend hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # BB Squeeze Breakout: BB 스퀴즈 + 상단 돌파 — 압축 후 추세 시작
+    bb_sq_break_ok = (
+        bb_squeeze_breakout_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.62
+        and combined >= 0.58
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+    )
+    if bb_sq_break_ok:
+        item["entry_profile"] = "bb_squeeze_break"
+        if _strategy_is_disabled("crypto.bb_squeeze_break"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.bb_squeeze_break", entry_profile="bb_squeeze_break",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "bb_squeeze_break hot") or "bb_squeeze_break hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Consecutive Higher Lows: 3연속 HL 구조 — 상승 추세 구조 진입
+    higher_lows_hp_ok = (
+        consecutive_higher_lows_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.65
+        and combined >= 0.60
+        and orderbook_bid_ask >= 1.07
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.55
+    )
+    if higher_lows_hp_ok:
+        item["entry_profile"] = "higher_lows"
+        if _strategy_is_disabled("crypto.higher_lows"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.higher_lows", entry_profile="higher_lows",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "higher_lows hot") or "higher_lows hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
     common_guards = (
         signal_freshness >= 0.58               # 0.55 → 0.58: 더 신선한 신호만
         and -0.30 <= micro_move_3 <= 0.95      # 상한 1.20 → 0.95: 이미 올라간 뒤 진입 차단
@@ -872,6 +1082,12 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         is_pullback_cont = "pullback_continuation" in pos_focus
         is_choch_momentum = "choch_momentum" in pos_focus
         is_ict_level = "ict_level_long" in pos_focus
+        is_supertrend = "supertrend" in pos_focus and "bb_squeeze" not in pos_focus
+        is_engulfing = "engulfing" in pos_focus
+        is_vol_surge = "vol_surge" in pos_focus
+        is_adx_trend = "adx_trend" in pos_focus
+        is_bb_squeeze_break = "bb_squeeze_break" in pos_focus
+        is_higher_lows = "higher_lows" in pos_focus
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
         reason = ""
 
@@ -951,6 +1167,30 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             reason = "rapid_ict_level_fail"
         elif is_ict_level and pnl_pct <= -0.48:
             reason = "rapid_ict_level_fail"
+        elif is_supertrend and minutes_open >= 0.28 and peak_pnl <= 0.05 and pnl_pct <= -0.28:
+            reason = "rapid_supertrend_fail"
+        elif is_supertrend and pnl_pct <= -0.46:
+            reason = "rapid_supertrend_fail"
+        elif is_engulfing and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.26:
+            reason = "rapid_engulfing_fail"
+        elif is_engulfing and pnl_pct <= -0.44:
+            reason = "rapid_engulfing_fail"
+        elif is_vol_surge and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.28:
+            reason = "rapid_vol_surge_fail"
+        elif is_vol_surge and pnl_pct <= -0.46:
+            reason = "rapid_vol_surge_fail"
+        elif is_adx_trend and minutes_open >= 0.28 and peak_pnl <= 0.05 and pnl_pct <= -0.28:
+            reason = "rapid_adx_trend_fail"
+        elif is_adx_trend and pnl_pct <= -0.46:
+            reason = "rapid_adx_trend_fail"
+        elif is_bb_squeeze_break and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+            reason = "rapid_bb_squeeze_fail"
+        elif is_bb_squeeze_break and pnl_pct <= -0.48:
+            reason = "rapid_bb_squeeze_fail"
+        elif is_higher_lows and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+            reason = "rapid_higher_lows_fail"
+        elif is_higher_lows and pnl_pct <= -0.48:
+            reason = "rapid_higher_lows_fail"
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
         elif (

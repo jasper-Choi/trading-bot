@@ -1428,6 +1428,172 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         and not bool(bk.get("rsi_bearish_divergence", False))
     )
 
+    # --- Supertrend Long (TRENDING) ---
+    # Supertrend(10, 3.0): ATR 기반 추세 필터 — 가격이 슈퍼트렌드 선 위로 교차 시 매수
+    _st_period = 10
+    _st_mult = 3.0
+    _st_atr_vals: list[float] = []
+    for _si in range(1, len(closes)):
+        _tr = max(
+            highs[_si] - lows[_si],
+            abs(highs[_si] - closes[_si - 1]),
+            abs(lows[_si] - closes[_si - 1]),
+        )
+        _st_atr_vals.append(_tr)
+    # EMA of ATR
+    _st_atr_ema: list[float] = []
+    if _st_atr_vals:
+        _st_k = 2.0 / (_st_period + 1)
+        _st_atr_ema.append(sum(_st_atr_vals[:_st_period]) / _st_period if len(_st_atr_vals) >= _st_period else _st_atr_vals[0])
+        for _v in _st_atr_vals[len(_st_atr_ema):]:
+            _st_atr_ema.append(_v * _st_k + _st_atr_ema[-1] * (1 - _st_k))
+    # Supertrend upper/lower bands (aligned to closes index from 1)
+    _st_bullish_prev = False
+    _st_bullish_curr = False
+    if len(_st_atr_ema) >= 2 and len(closes) >= _st_period + 2:
+        _offset = max(0, len(_st_atr_ema) - len(closes) + 1)
+        for _sj in range(len(_st_atr_ema)):
+            _ci = _sj + 1  # closes index
+            if _ci >= len(closes):
+                break
+            _mid = (highs[_ci] + lows[_ci]) / 2
+            _atr_v = _st_atr_ema[_sj]
+            _up = _mid + _st_mult * _atr_v
+            _dn = _mid - _st_mult * _atr_v
+            _prev_bull = _st_bullish_curr
+            _st_bullish_curr = closes[_ci] > _up if not _prev_bull else closes[_ci] >= _dn
+            _st_bullish_prev = _prev_bull
+    supertrend_long = (
+        _st_bullish_curr and not _st_bullish_prev  # 이번 봉에서 불리쉬 전환
+        and last_rsi is not None and last_rsi <= 75.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -4.0
+    )
+
+    # --- Bullish Engulfing (DUAL: RANGING 반전 / TRENDING 지속) ---
+    # 직전봉 음봉 + 현재봉 양봉으로 완전 흡수 → 강한 매수 전환 신호
+    _opens_eng = [float(c.get("open") or c["close"]) for c in candles]
+    _vol20_avg = sum(volumes[-21:-1]) / 20.0 if len(volumes) >= 21 else (sum(volumes[:-1]) / max(len(volumes) - 1, 1))
+    engulfing_bull = (
+        len(closes) >= 3
+        and _opens_eng[-2] > closes[-2]          # 직전봉: 음봉 (open > close)
+        and closes[-1] > _opens_eng[-1]          # 현재봉: 양봉
+        and _opens_eng[-1] <= closes[-2]         # 현재봉 open이 직전봉 close 이하
+        and closes[-1] >= _opens_eng[-2]         # 현재봉 close가 직전봉 open 이상 (완전 흡수)
+        and (closes[-1] - _opens_eng[-1]) > ((_opens_eng[-2] - closes[-2]) * 0.8)  # 몸통 비교
+        and volumes[-1] >= _vol20_avg * 1.1      # 평균 이상 거래량
+        and last_rsi is not None and last_rsi <= 70.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    # --- Volume Surge Long (CATALYST: 기관 매집 신호) ---
+    # 현재봉 거래량이 20봉 평균의 2.5배 이상 + 양봉 → 수급 강한 상승 신호
+    vol_surge_long = (
+        len(volumes) >= 5
+        and _vol20_avg > 0
+        and volumes[-1] >= _vol20_avg * 2.5      # 거래량 2.5배 급증
+        and closes[-1] > _opens_eng[-1]          # 양봉 (매수 주도)
+        and closes[-1] > closes[-2]              # 전봉 대비 상승
+        and last_rsi is not None and last_rsi <= 75.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) < 8.0           # 과열 급등 중 아님
+    )
+
+    # --- ADX Trend Strong (TRENDING 강도 확인) ---
+    # ADX ≥ 22 + DI+ > DI-: 방향성 있는 강한 추세 진입
+    _adx_period = 14
+    _adx_plus_dm: list[float] = []
+    _adx_minus_dm: list[float] = []
+    _adx_tr_list: list[float] = []
+    for _ai in range(1, len(closes)):
+        _h_diff = highs[_ai] - highs[_ai - 1]
+        _l_diff = lows[_ai - 1] - lows[_ai]
+        _adx_plus_dm.append(max(_h_diff, 0.0) if _h_diff > _l_diff else 0.0)
+        _adx_minus_dm.append(max(_l_diff, 0.0) if _l_diff > _h_diff else 0.0)
+        _adx_tr_list.append(max(
+            highs[_ai] - lows[_ai],
+            abs(highs[_ai] - closes[_ai - 1]),
+            abs(lows[_ai] - closes[_ai - 1]),
+        ))
+    adx_val = 0.0
+    di_plus_val = 0.0
+    di_minus_val = 0.0
+    if len(_adx_tr_list) >= _adx_period * 2:
+        _atr14 = sum(_adx_tr_list[:_adx_period])
+        _pdm14 = sum(_adx_plus_dm[:_adx_period])
+        _mdm14 = sum(_adx_minus_dm[:_adx_period])
+        for _ai in range(_adx_period, len(_adx_tr_list)):
+            _atr14 = _atr14 - _atr14 / _adx_period + _adx_tr_list[_ai]
+            _pdm14 = _pdm14 - _pdm14 / _adx_period + _adx_plus_dm[_ai]
+            _mdm14 = _mdm14 - _mdm14 / _adx_period + _adx_minus_dm[_ai]
+        di_plus_val = (_pdm14 / _atr14 * 100) if _atr14 > 0 else 0.0
+        di_minus_val = (_mdm14 / _atr14 * 100) if _atr14 > 0 else 0.0
+        _di_sum = di_plus_val + di_minus_val
+        _dx = abs(di_plus_val - di_minus_val) / _di_sum * 100 if _di_sum > 0 else 0.0
+        adx_val = _dx  # simplified: use last DX as ADX proxy
+    adx_trend_strong = (
+        adx_val >= 22.0
+        and di_plus_val > di_minus_val           # DI+ > DI-: 상승 방향성
+        and bool(trend.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and last_rsi is not None and 42.0 <= last_rsi <= 74.0
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    # --- BB Squeeze Breakout (추세 전환 / 브레이크아웃) ---
+    # 볼린저 밴드 폭이 최근 20봉 최소 → 스퀴즈 해소 + 상단 돌파 → 추세 시작
+    _bb_sq_period = 20
+    _bb_sq_std_list: list[float] = []
+    for _bi in range(_bb_sq_period - 1, len(closes)):
+        _w = closes[_bi - _bb_sq_period + 1 : _bi + 1]
+        _m = sum(_w) / _bb_sq_period
+        _s = (sum((v - _m) ** 2 for v in _w) / _bb_sq_period) ** 0.5
+        _bb_sq_std_list.append(_s)
+    _bb_sq_width_list = [s * 2 / max(closes[_bb_sq_period - 1 + i], 1.0) for i, s in enumerate(_bb_sq_std_list)]
+    bb_sq_width_curr = _bb_sq_width_list[-1] if _bb_sq_width_list else 0.0
+    bb_sq_width_min20 = min(_bb_sq_width_list[-20:]) if len(_bb_sq_width_list) >= 20 else bb_sq_width_curr
+    _bb_sq_upper = (
+        (sum(closes[-_bb_sq_period:]) / _bb_sq_period + 2.0 * _bb_sq_std_list[-1])
+        if _bb_sq_std_list else closes[-1]
+    )
+    bb_squeeze_breakout = (
+        len(_bb_sq_std_list) >= 20
+        and bb_sq_width_curr <= bb_sq_width_min20 * 1.05   # 최근 스퀴즈 구간
+        and closes[-1] >= _bb_sq_upper * 0.998             # 상단 밴드 터치/돌파
+        and volumes[-1] >= _vol20_avg * 1.3                # 거래량 확인
+        and last_rsi is not None and 48.0 <= last_rsi <= 80.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    # --- Consecutive Higher Lows (추세 구조 확인) ---
+    # 3개의 스윙 저점이 연속으로 상승 → 상승 추세 구조 확인 (Higher Low 패턴)
+    _hl_lows = lows
+    _hl_n = len(_hl_lows)
+    consecutive_higher_lows = False
+    if _hl_n >= 15:
+        # 3개의 로컬 최저점: 5봉, 10봉, 15봉 전 구간의 최저값 비교
+        _hl_1 = min(_hl_lows[-4:-1])    # 최근 3봉 (직전~3봉 전)
+        _hl_2 = min(_hl_lows[-9:-4])    # 4~8봉 전
+        _hl_3 = min(_hl_lows[-14:-9])   # 9~13봉 전
+        consecutive_higher_lows = (
+            _hl_1 > _hl_2 > _hl_3                      # HL1 > HL2 > HL3: 연속 고점저점
+            and (_hl_1 - _hl_3) / max(_hl_3, 1e-9) * 100 >= 0.3  # 최소 0.3% 상승
+            and last_rsi is not None and 40.0 <= last_rsi <= 75.0
+            and trend_alignment not in {"downtrend", "late_extension"}
+            and not choch_bearish
+            and not bool(bk.get("rsi_bearish_divergence", False))
+            and bool(trend.get("trend_entry_allowed", False))
+        )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1552,6 +1718,17 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "rsi_flip_long": rsi_flip_long,
         "macd_bull_cross": macd_bull_cross,
         "triple_candle_bull": triple_candle_bull,
+        # 추가 TRENDING/DUAL 신호 (Batch 4)
+        "supertrend_long": supertrend_long,
+        "engulfing_bull": engulfing_bull,
+        "vol_surge_long": vol_surge_long,
+        "adx_trend_strong": adx_trend_strong,
+        "adx_val": round(adx_val, 1),
+        "di_plus": round(di_plus_val, 1),
+        "di_minus": round(di_minus_val, 1),
+        "bb_squeeze_breakout": bb_squeeze_breakout,
+        "bb_sq_width": round(bb_sq_width_curr * 100, 3),
+        "consecutive_higher_lows": consecutive_higher_lows,
     }
 
 

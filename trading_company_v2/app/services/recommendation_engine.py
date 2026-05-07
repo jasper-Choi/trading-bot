@@ -100,6 +100,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     rsi_flip_long = bool(payload.get("rsi_flip_long", False))
     macd_bull_cross = bool(payload.get("macd_bull_cross", False))
     triple_candle_bull = bool(payload.get("triple_candle_bull", False))
+    # Batch 4 TRENDING/DUAL 신호
+    supertrend_long = bool(payload.get("supertrend_long", False))
+    engulfing_bull = bool(payload.get("engulfing_bull", False))
+    vol_surge_long = bool(payload.get("vol_surge_long", False))
+    adx_trend_strong = bool(payload.get("adx_trend_strong", False))
+    adx_val = float(payload.get("adx_val", 0.0) or 0.0)
+    bb_squeeze_breakout = bool(payload.get("bb_squeeze_breakout", False))
+    consecutive_higher_lows = bool(payload.get("consecutive_higher_lows", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -900,6 +908,164 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [
                 f"ict_level: {level_type} count={ict_bullish_count} kz={kill_zone_active} {ict_structure}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Supertrend Long (TRENDING) ─────────────────────────────────────────────
+    # Supertrend(10, 3.0) 불리쉬 전환 — ATR 기반 추세 필터 신호
+    supertrend_entry_ok = (
+        supertrend_long
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.44
+        and (micro_entry_ok or orderbook_bid_ask >= 1.05 or stream_ignition)
+    )
+    if supertrend_entry_ok:
+        entry_size = "0.50x" if signal_score >= 0.55 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"supertrend_long: {lead_market or 'KRW-BTC'} 슈퍼트렌드 불리쉬 전환 — 추세 확인 진입",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"supertrend: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Bullish Engulfing (DUAL) ───────────────────────────────────────────────
+    # 직전봉 음봉 → 현재봉 양봉으로 완전 흡수 — 강한 매수 전환
+    engulfing_entry_ok = (
+        engulfing_bull
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.42
+        and (
+            (trend_entry_allowed and (micro_entry_ok or stream_ignition))
+            or (range_scalp_eligible and orderbook_bid_ask >= 1.04)
+        )
+    )
+    if engulfing_entry_ok:
+        entry_size = "0.48x" if signal_score >= 0.55 else "0.38x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"engulfing_bull: {lead_market or 'KRW-BTC'} 불리쉬 인걸핑 — 매수 전환 캔들",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"engulfing: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Volume Surge Long (CATALYST) ──────────────────────────────────────────
+    # 거래량 2.5배 급증 + 양봉 — 기관 매집 강한 매수 신호
+    vol_surge_entry_ok = (
+        vol_surge_long
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.42
+        and (trend_entry_allowed or signal_score >= 0.60)
+        and orderbook_bid_ask >= 1.03
+    )
+    if vol_surge_entry_ok:
+        entry_size = "0.52x" if signal_score >= 0.56 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"vol_surge_long: {lead_market or 'KRW-BTC'} 거래량 급증 양봉 — 기관 매집 포착",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"vol_surge: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── ADX Trend Strong (TRENDING) ───────────────────────────────────────────
+    # ADX ≥ 22 + DI+ > DI-: 방향성 있는 강한 추세 — 조기 진입
+    adx_entry_ok = (
+        adx_trend_strong
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.44
+        and (micro_entry_ok or orderbook_bid_ask >= 1.05 or stream_ignition)
+    )
+    if adx_entry_ok:
+        entry_size = "0.50x" if signal_score >= 0.55 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"adx_trend_strong: {lead_market or 'KRW-BTC'} ADX={adx_val:.0f} 강한 추세 방향 진입",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"adx: val={adx_val:.1f} score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── BB Squeeze Breakout (BREAKOUT) ────────────────────────────────────────
+    # 볼린저 밴드 스퀴즈 해소 + 상단 돌파 — 추세 시작 포착
+    bb_squeeze_break_ok = (
+        bb_squeeze_breakout
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.45
+        and (micro_entry_ok or orderbook_bid_ask >= 1.06 or stream_ignition)
+    )
+    if bb_squeeze_break_ok:
+        entry_size = "0.52x" if signal_score >= 0.58 else "0.42x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"bb_squeeze_breakout: {lead_market or 'KRW-BTC'} BB 스퀴즈 상단 돌파 — 추세 시작",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"bb_squeeze: score={signal_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Consecutive Higher Lows (TRENDING STRUCTURE) ──────────────────────────
+    # 3연속 고점저점 구조 확인 — 상승 추세 구조 진입
+    higher_lows_ok = (
+        consecutive_higher_lows
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.46
+        and (micro_entry_ok or stream_ignition or orderbook_bid_ask >= 1.06)
+    )
+    if higher_lows_ok:
+        entry_size = "0.52x" if signal_score >= 0.58 else "0.42x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"consecutive_higher_lows: {lead_market or 'KRW-BTC'} 3연속 고점저점 구조 — 상승 추세 확인",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"higher_lows: score={signal_score:.2f} {trend_alignment}",
                 f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
                 ignition_note,
             ],
