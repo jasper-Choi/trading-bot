@@ -1056,6 +1056,10 @@ class ExecutionAgent(BaseAgent):
                 range_armed_notes = []
                 for candidate in all_candidates:
                     meta = candidate_meta.get(candidate, {})
+                    # cycle-level entries are low-precision in RANGING; hot-path handles these
+                    if self.regime == "RANGING":
+                        skipped_candidates.append(f"{candidate}: cycle-entry blocked in RANGING (hot-path only)")
+                        continue
                     ok, reason = self._crypto_candidate_entry_ok(meta)
                     if ok:
                         eligible_candidates.append(candidate)
@@ -1084,6 +1088,12 @@ class ExecutionAgent(BaseAgent):
                         blocked_plan["notes"] = list(plan.get("notes", []) or []) + skipped_candidates[:6]
                     return [self._plan_to_order(desk, blocked_plan).model_dump()]
             elif plan.get("candidate_symbols"):
+                if self.regime == "RANGING":
+                    blocked_plan = dict(plan)
+                    blocked_plan["action"] = "watchlist_only"
+                    blocked_plan["size"] = "0.00x"
+                    blocked_plan["focus"] = "Cycle-level candidate entry blocked in RANGING regime."
+                    return [self._plan_to_order(desk, blocked_plan).model_dump()]
                 all_candidates = [primary] if primary else []
 
         if slots <= 1 or len(all_candidates) <= 1:
