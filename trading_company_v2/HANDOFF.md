@@ -1,7 +1,38 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-07 (session 9)
+Last updated: 2026-05-08 (session 12)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 12 — RANGING 사이클 레벨 진입 완전 차단)
+
+### 배경: candidate_rotation 8건 모두 peak=0.000% 손실
+- ExecutionAgent 사이클 루프가 RANGING 레짐에서도 cycle-level 진입 실행
+- obvious_trend는 trend_alignment 조건으로 자연 차단되나, candidate_rotation은 미차단
+- 8건 모두 진입 직후 바로 rapid_tick_failed_start로 청산 (tick-level 확인 없이 진입)
+
+### 수정 (커밋 27c27aa)
+
+**execution_agent.py `_multi_orders()`**
+- `for candidate in all_candidates` 루프 시작에 RANGING 블록 추가:
+  ```python
+  if self.regime == "RANGING":
+      skipped_candidates.append(f"{candidate}: cycle-entry blocked in RANGING (hot-path only)")
+      continue
+  ```
+- `elif plan.get("candidate_symbols")` 분기(candidate_meta 없는 경우)도 RANGING 차단 추가
+- RANGING 시 모든 candidate → `eligible_candidates=[]` → `watchlist_only` 반환
+
+### 검증 결과 (23:43 UTC 재시작 이후)
+- cycle_journal: 재시작 직후부터 100% `watchlist_only` 출력
+- 포커스: "RANGING — 추세추종 차단. 평균회귀 신호 대기"
+- candidate_rotation 신규 진입 **0건** (완전 차단 확인)
+- hot_path_guard의 10개 RANGING 전략이 유일한 진입 경로
+
+### 다음 관찰 포인트
+- RANGING 레짐에서 hot_path_guard의 RANGING 전략(higher_lows, inside_bar_break 등) 발화 확인
+- RANGING → TRENDING 전환 시 cycle-level candidate_rotation 재개 확인
+- obvious_trend 2건 수익(TOKAMAK)이 계속 유지되는지 모니터링
+- range_scalp KRW-B3 -1.15%, KRW-ANKR -0.59% → 유동성 필터 추가 효과 확인
 
 ## 0. Latest Claude Notes - 2026-05-07 (session 11 — RANGING 레짐 Batch 3-6 활성화)
 
