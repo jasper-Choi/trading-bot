@@ -1,7 +1,44 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-07 (session 8)
+Last updated: 2026-05-07 (session 9)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-07 (session 9 — 진입 게이트 대폭 강화)
+
+### 배경: 라이브 성능 진단 결과 (72h 기준)
+- 승률 9%, 총 PnL -39.25% (112 trades)
+- `obvious_trend` 13건 → **전건 peak=0.000%** (RANGING 시장에서 방향 오류)
+- cycle-level "unknown" 진입 105/112건 → combined 0.76-0.84에서 전부 손실
+- Batch 3-6 신규 전략: 0건 (아직 미발화)
+
+### 적용된 수정 (커밋 c57e687)
+
+**Fix 1 — `hot_path_guard.py` obvious_trend_ok 강화**
+- `trend_alignment`에서 "range" 제거 (RANGING 시장 차단)
+- `stream_ignition` 필수화 (기존: 없음)
+- `trend_score` 0.68 → 0.85, `chart_score` 0.76 → 0.82, `combined` 0.52 → 0.72
+- `trend_extension` 8.5 → 6.0, `micro_vwap_gap` 6.5 → 4.0
+- `trend_early` 불인정 (trend_entry_allowed 만 허용)
+
+**Fix 2 — `execution_agent._crypto_obvious_trend_entry_ok()` 동일 강화**
+- "range" alignment 제거, trend_early 불인정
+- `trend_score` 0.68 → 0.82, `combined` 0.52 → 0.72, `stream_ignition` 필수
+- `trend_extension` 8.5 → 6.0, `micro_vwap_gap` 6.5 → 4.0
+
+**Fix 3 — `execution_agent._crypto_candidate_entry_ok()` 기본 진입 문턱 상향**
+- `score` 0.76 → 0.82 (cycle-level 0.76-0.84 전건 손실)
+- `trend_score` 0.58 → 0.62
+- `ob (orderbook_bid_ask)` 1.08 → 1.12
+- `micro_entry_ok` (micro≥0.55 AND vol≥1.1) 필수화 — 이전에는 launch_confirmed 선택지 중 하나
+
+### 배포
+- 2026-05-07, Oracle VM pull+restart 완료 (c57e687)
+
+### 다음 관찰 포인트
+- obvious_trend 발화 건수 대폭 감소 예상 (stream_ignition 필수 + combined 0.72)
+- cycle-level 진입 건수 감소 → 승률 상승 기대
+- Batch 3-6 전략 발화 여부 계속 모니터링 (현재 0건)
+- rapid_tick_failed_start 여전히 39건 → 추가 타이트닝 검토 (-0.18%/15s)
 
 ## 0. Latest Claude Notes - 2026-05-07 (session 8 — Batch 4/5/6 전략 20개 추가, 목표 50개 달성)
 
