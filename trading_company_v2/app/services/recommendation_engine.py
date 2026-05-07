@@ -96,6 +96,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # Batch 2 TRENDING 신호
     ema_cross_long = bool(payload.get("ema_cross_long", False))
     vwap_cross_long = bool(payload.get("vwap_cross_long", False))
+    # Batch 3 TRENDING 신호
+    rsi_flip_long = bool(payload.get("rsi_flip_long", False))
+    macd_bull_cross = bool(payload.get("macd_bull_cross", False))
+    triple_candle_bull = bool(payload.get("triple_candle_bull", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -519,7 +523,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     ssl_sweep_confirmed = bool(payload.get("ssl_sweep_confirmed", False))
     choch_bullish = bool(payload.get("choch_bullish", False))
     choch_bearish = bool(payload.get("choch_bearish", False))
+    bos_bullish = bool(payload.get("bos_bullish", False))
     bos_bearish = bool(payload.get("bos_bearish", False))
+    price_at_bull_ob = bool(payload.get("price_at_bull_ob", False))
+    price_in_bull_fvg = bool(payload.get("price_in_bull_fvg", False))
     ict_bullish_count = int(payload.get("ict_bullish_count", 0) or 0)
     ict_structure = str(payload.get("ict_structure", "undecided") or "undecided")
 
@@ -732,6 +739,167 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "candidate_symbols": candidate_symbols,
             "notes": reasons + [
                 f"vwap_cross: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── RSI Momentum Flip Long (TRENDING) ──────────────────────────────────────
+    # RSI가 50 아래에서 위로 교차 — 모멘텀 전환 초기 포착
+    rsi_flip_entry_ok = (
+        rsi_flip_long
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.43
+        and (micro_entry_ok or orderbook_bid_ask >= 1.04 or stream_ignition)
+    )
+    if rsi_flip_entry_ok:
+        entry_size = "0.45x" if signal_score >= 0.55 else "0.38x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"rsi_flip_long: {lead_market or 'KRW-BTC'} RSI 50 상향돌파 — 모멘텀 전환 진입",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"rsi_flip: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── MACD Bullish Cross (TRENDING) ──────────────────────────────────────────
+    # MACD선이 시그널선을 상향돌파 (음의 영역에서) — 중기 모멘텀 전환
+    macd_cross_entry_ok = (
+        macd_bull_cross
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.43
+        and (micro_entry_ok or orderbook_bid_ask >= 1.04 or stream_ignition)
+    )
+    if macd_cross_entry_ok:
+        entry_size = "0.45x" if signal_score >= 0.55 else "0.38x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"macd_bull_cross: {lead_market or 'KRW-BTC'} MACD 골든크로스 — 중기 모멘텀 전환",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"macd_cross: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Triple Candle Bull (TRENDING) ──────────────────────────────────────────
+    # 3연속 양봉 + 연속 고점 — 강한 매수 압력 지속 확인
+    triple_bull_entry_ok = (
+        triple_candle_bull
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.45
+        and (micro_entry_ok or orderbook_bid_ask >= 1.05 or stream_ignition)
+    )
+    if triple_bull_entry_ok:
+        entry_size = "0.50x" if signal_score >= 0.55 else "0.40x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"triple_candle_bull: {lead_market or 'KRW-BTC'} 3연속 양봉 — 매수 모멘텀 지속",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"triple_bull: score={signal_score:.2f} trend={trend_follow_score:.2f} {trend_alignment}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── Pullback Continuation (TRENDING) ────────────────────────────────────────
+    # Ross Cameron / Holy Grail 스타일: 급등 후 pull back → 재상승 조기 진입
+    pullback_cont_ok = (
+        pullback_detected
+        and pullback_score >= 0.55
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.45
+        and vol_contracted_on_pullback
+        and (micro_entry_ok or stream_ignition)
+    )
+    if pullback_cont_ok:
+        entry_size = "0.55x" if signal_score >= 0.60 else "0.45x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"pullback_continuation: {lead_market or 'KRW-BTC'} 급등후 조정 재진입 — Holy Grail",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"pullback: score={pullback_score:.2f} spike={spike_pct_15m:.2f}% retrace={retrace_from_high_pct:.2f}%",
+                f"vol_contracted={vol_contracted_on_pullback} signal={signal_score:.2f} {trend_alignment}",
+                ignition_note,
+            ],
+        }
+
+    # ── CHoCH Momentum (TRENDING / STRUCTURE) ──────────────────────────────────
+    # ICT Change of Character + BOS 확인 — 구조적 추세 전환 진입
+    choch_momentum_ok = (
+        choch_bullish
+        and bos_bullish
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.47
+        and (micro_entry_ok or orderbook_bid_ask >= 1.06 or stream_ignition)
+    )
+    if choch_momentum_ok:
+        entry_size = "0.55x" if signal_score >= 0.60 else "0.45x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"choch_momentum: {lead_market or 'KRW-BTC'} CHoCH+BOS 구조적 반전 — ICT 진입",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"choch_bull: score={signal_score:.2f} ict_count={ict_bullish_count} {ict_structure}",
+                f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
+                ignition_note,
+            ],
+        }
+
+    # ── ICT Level Long (STRUCTURE) ──────────────────────────────────────────────
+    # 불리시 OB 또는 FVG에 가격 진입 — 기관 매수 구간 진입
+    ict_level_long_ok = (
+        (price_at_bull_ob or price_in_bull_fvg)
+        and ict_bullish_count >= 2
+        and trend_entry_allowed
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.47
+        and (kill_zone_active or micro_entry_ok or orderbook_bid_ask >= 1.06)
+    )
+    if ict_level_long_ok:
+        entry_size = "0.55x" if (price_at_bull_ob and price_in_bull_fvg) else "0.45x"
+        level_type = "OB+FVG" if (price_at_bull_ob and price_in_bull_fvg) else ("OB" if price_at_bull_ob else "FVG")
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"ict_level_long: {lead_market or 'KRW-BTC'} 불리시 {level_type} 진입 — 기관 매수 구간",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"ict_level: {level_type} count={ict_bullish_count} kz={kill_zone_active} {ict_structure}",
                 f"micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x stream={stream_score:.2f}",
                 ignition_note,
             ],

@@ -48,6 +48,12 @@ _HOT_RECENT_FAILURE_REASONS = {
     "rapid_high_tight_flag_fail",
     "rapid_ema_cross_fail",
     "rapid_vwap_reclaim_fail",
+    "rapid_rsi_flip_fail",
+    "rapid_macd_cross_fail",
+    "rapid_triple_bull_fail",
+    "rapid_pullback_cont_fail",
+    "rapid_choch_momentum_fail",
+    "rapid_ict_level_fail",
     "rapid_failed_start",
     "rapid_stop_hit",
     "rapid_repeat_symbol_failure",
@@ -145,6 +151,30 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.60 and stream_score >= 0.70:
             return 0.055
         return 0.04
+    if entry_profile == "rsi_flip":
+        if combined >= 0.60 and stream_score >= 0.68:
+            return 0.05
+        return 0.038
+    if entry_profile == "macd_cross":
+        if combined >= 0.60 and stream_score >= 0.68:
+            return 0.05
+        return 0.038
+    if entry_profile == "triple_bull":
+        if combined >= 0.62 and stream_score >= 0.72:
+            return 0.055
+        return 0.04
+    if entry_profile == "pullback_continuation":
+        if combined >= 0.62 and stream_score >= 0.72:
+            return 0.06
+        return 0.045
+    if entry_profile == "choch_momentum":
+        if combined >= 0.62 and stream_score >= 0.72:
+            return 0.06
+        return 0.045
+    if entry_profile == "ict_level_long":
+        if combined >= 0.62 and stream_score >= 0.72:
+            return 0.065
+        return 0.05
     if entry_profile == "range_scalp":
         airborne_score = _float(candidate.get("airborne_score", 0.0))
         if airborne_score >= 0.70:
@@ -298,6 +328,10 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     # ── Batch 2 TRENDING 신호 추출 ─────────────────────────────────────────
     ema_cross_long = bool(item.get("ema_cross_long", False))
     vwap_cross_long_signal = bool(item.get("vwap_cross_long", False))
+    # ── Batch 3 TRENDING 신호 추출 ─────────────────────────────────────────
+    rsi_flip_long_signal = bool(item.get("rsi_flip_long", False))
+    macd_bull_cross_signal = bool(item.get("macd_bull_cross", False))
+    triple_candle_bull_signal = bool(item.get("triple_candle_bull", False))
 
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성
@@ -362,6 +396,223 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 source="hot_candidate",
                 action="probe_longs",
                 focus=str(item.get("focus", "vwap_reclaim hot candidate") or "vwap_reclaim hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # RSI Momentum Flip Long: RSI가 50 아래 → 위로 교차 — 모멘텀 전환 초기
+    rsi_flip_ok = (
+        rsi_flip_long_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.60
+        and combined >= 0.56
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+        and trend_extension_pct <= 4.5
+    )
+    if rsi_flip_ok:
+        item["entry_profile"] = "rsi_flip"
+        if _strategy_is_disabled("crypto.rsi_flip"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.rsi_flip",
+                entry_profile="rsi_flip",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "rsi_flip hot candidate") or "rsi_flip hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # MACD Bullish Cross: MACD가 시그널선을 상향돌파 (음의 영역) — 중기 모멘텀 전환
+    macd_cross_ok = (
+        macd_bull_cross_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.60
+        and combined >= 0.56
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+        and trend_extension_pct <= 4.5
+    )
+    if macd_cross_ok:
+        item["entry_profile"] = "macd_cross"
+        if _strategy_is_disabled("crypto.macd_cross"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.macd_cross",
+                entry_profile="macd_cross",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "macd_cross hot candidate") or "macd_cross hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Triple Candle Bull: 3연속 양봉 + 연속 고점 — 강한 매수 압력 지속
+    triple_bull_ok = (
+        triple_candle_bull_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.65
+        and combined >= 0.60
+        and orderbook_bid_ask >= 1.08
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.55
+        and trend_extension_pct <= 3.5
+    )
+    if triple_bull_ok:
+        item["entry_profile"] = "triple_bull"
+        if _strategy_is_disabled("crypto.triple_bull"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.triple_bull",
+                entry_profile="triple_bull",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "triple_bull hot candidate") or "triple_bull hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Pullback Continuation: 급등 후 조정 재진입 — Holy Grail 스타일
+    pullback_cont_signal = bool(item.get("pullback_detected", False))
+    pullback_score_val = float(item.get("pullback_score", 0.0) or 0.0)
+    vol_contracted = bool(item.get("vol_contracted_on_pullback", False))
+    pullback_cont_ok = (
+        pullback_cont_signal
+        and pullback_score_val >= 0.55
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.62
+        and combined >= 0.58
+        and vol_contracted
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+    )
+    if pullback_cont_ok:
+        item["entry_profile"] = "pullback_continuation"
+        if _strategy_is_disabled("crypto.pullback_continuation"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.pullback_continuation",
+                entry_profile="pullback_continuation",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "pullback_cont hot candidate") or "pullback_cont hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # CHoCH Momentum: CHoCH + BOS 구조적 반전 진입 — ICT 스타일
+    choch_bull_signal = bool(item.get("choch_bullish", False))
+    bos_bull_signal = bool(item.get("bos_bullish", False))
+    ict_bullish_cnt = int(item.get("ict_bullish_count", 0) or 0)
+    choch_momentum_ok = (
+        choch_bull_signal
+        and bos_bull_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.62
+        and combined >= 0.58
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+    )
+    if choch_momentum_ok:
+        item["entry_profile"] = "choch_momentum"
+        if _strategy_is_disabled("crypto.choch_momentum"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.choch_momentum",
+                entry_profile="choch_momentum",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "choch_momentum hot candidate") or "choch_momentum hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # ICT Level Long: 불리시 OB 또는 FVG 진입 — 기관 매수 구간
+    price_at_ob = bool(item.get("price_at_bull_ob", False))
+    price_in_fvg = bool(item.get("price_in_bull_fvg", False))
+    ict_level_ok = (
+        (price_at_ob or price_in_fvg)
+        and ict_bullish_cnt >= 2
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.62
+        and combined >= 0.58
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+    )
+    if ict_level_ok:
+        item["entry_profile"] = "ict_level_long"
+        if _strategy_is_disabled("crypto.ict_level_long"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.ict_level_long",
+                entry_profile="ict_level_long",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "ict_level_long hot candidate") or "ict_level_long hot candidate"),
                 reason="strategy_disabled",
                 score=combined,
                 stream_score=_float(item.get("stream_score", 0.0)),
@@ -473,7 +724,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             )
             return False
         return True
-    if range_impulse_ok and _ENABLE_EXPERIMENTAL_IMPULSE_ENTRIES:
+    if range_impulse_ok:
         item["entry_profile"] = "range_impulse"
         if _strategy_is_disabled("crypto.range_impulse"):
             item["hot_block_reason"] = "strategy_disabled"
@@ -615,6 +866,12 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         is_obvious_trend = "obvious_trend" in pos_focus
         is_ema_cross = "ema_cross" in pos_focus
         is_vwap_reclaim = "vwap_reclaim" in pos_focus
+        is_rsi_flip = "rsi_flip" in pos_focus
+        is_macd_cross = "macd_cross" in pos_focus
+        is_triple_bull = "triple_bull" in pos_focus
+        is_pullback_cont = "pullback_continuation" in pos_focus
+        is_choch_momentum = "choch_momentum" in pos_focus
+        is_ict_level = "ict_level_long" in pos_focus
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
         reason = ""
 
@@ -670,6 +927,30 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             reason = "rapid_vwap_reclaim_fail"
         elif is_vwap_reclaim and pnl_pct <= -0.50:
             reason = "rapid_vwap_reclaim_fail"
+        elif is_rsi_flip and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.28:
+            reason = "rapid_rsi_flip_fail"
+        elif is_rsi_flip and pnl_pct <= -0.46:
+            reason = "rapid_rsi_flip_fail"
+        elif is_macd_cross and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.28:
+            reason = "rapid_macd_cross_fail"
+        elif is_macd_cross and pnl_pct <= -0.46:
+            reason = "rapid_macd_cross_fail"
+        elif is_triple_bull and minutes_open >= 0.28 and peak_pnl <= 0.05 and pnl_pct <= -0.26:
+            reason = "rapid_triple_bull_fail"
+        elif is_triple_bull and pnl_pct <= -0.44:
+            reason = "rapid_triple_bull_fail"
+        elif is_pullback_cont and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.28:
+            reason = "rapid_pullback_cont_fail"
+        elif is_pullback_cont and pnl_pct <= -0.46:
+            reason = "rapid_pullback_cont_fail"
+        elif is_choch_momentum and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+            reason = "rapid_choch_momentum_fail"
+        elif is_choch_momentum and pnl_pct <= -0.48:
+            reason = "rapid_choch_momentum_fail"
+        elif is_ict_level and minutes_open >= 0.30 and peak_pnl <= 0.05 and pnl_pct <= -0.30:
+            reason = "rapid_ict_level_fail"
+        elif is_ict_level and pnl_pct <= -0.48:
+            reason = "rapid_ict_level_fail"
         elif 0.40 <= peak_pnl < 0.80 and minutes_open >= 1.0 and pnl_pct <= max(-0.55, peak_pnl - 1.10):
             reason = "failed_breakout_exit"
         elif (

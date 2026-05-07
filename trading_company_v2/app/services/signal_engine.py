@@ -1377,6 +1377,57 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         and not bool(bk.get("rsi_bearish_divergence", False))
     )
 
+    # --- RSI Momentum Flip Long (TRENDING) ---
+    # RSI가 50 아래에서 위로 교차 → 약세→강세 모멘텀 전환 확인
+    _rsi_series = rsi_series(closes, 14)
+    _rsi_curr2 = _rsi_series[-1]
+    _rsi_prev2 = _rsi_series[-2] if len(_rsi_series) >= 2 else None
+    rsi_flip_long = (
+        _rsi_curr2 is not None and _rsi_prev2 is not None
+        and float(_rsi_prev2) < 50.0              # 직전: 50 아래 (약세)
+        and float(_rsi_curr2) >= 50.0             # 현재: 50 이상 (강세 전환)
+        and float(_rsi_curr2) <= 68.0             # 과열 제외
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -3.0
+    )
+
+    # --- MACD Bullish Cross (TRENDING) ---
+    # MACD 선이 시그널선을 아래서 위로 교차 → 중기 모멘텀 전환 신호 (황금교차)
+    _macd_curr = _macd_line[-1]
+    _macd_prev2 = _macd_line[-2] if len(_macd_line) >= 2 else None
+    _sig_curr = _signal_line[-1]
+    _sig_prev2 = _signal_line[-2] if len(_signal_line) >= 2 else None
+    macd_bull_cross = (
+        _macd_prev2 is not None and _sig_prev2 is not None
+        and float(_macd_curr) > float(_sig_curr)   # 현재: MACD > Signal
+        and float(_macd_prev2) <= float(_sig_prev2) # 직전: MACD ≤ Signal (교차 직후)
+        and float(_macd_curr) < 0.0 * abs(float(last_close)) * 0.01  # 아직 과열 아님
+        and last_rsi is not None and last_rsi <= 72.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+        and float(recent_change) > -3.0
+    )
+
+    # --- Triple Candle Bull (TRENDING) ---
+    # 3봉 연속 양봉 + 볼륨 증가 → 추세 가속 신호 (모멘텀 연속성 확인)
+    volumes = [float(c.get("volume") or 0.0) for c in candles]
+    _opens_b3 = [float(c.get("open") or c["close"]) for c in candles]
+    triple_candle_bull = (
+        len(closes) >= 4
+        and closes[-1] > _opens_b3[-1]   # 현재봉 양봉
+        and closes[-2] > _opens_b3[-2]   # 직전봉 양봉
+        and closes[-3] > _opens_b3[-3]   # 3봉 전 양봉
+        and closes[-1] > closes[-2] > closes[-3]  # 연속 상승
+        and (volumes[-1] > volumes[-2] or volumes[-1] > volumes[-3])  # 볼륨 증가
+        and last_rsi is not None and 42.0 <= last_rsi <= 72.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
@@ -1497,6 +1548,10 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         # 추가 TRENDING 신호 (Batch 2)
         "ema_cross_long": ema_cross_long,
         "vwap_cross_long": vwap_cross_long,
+        # 추가 TRENDING 신호 (Batch 3)
+        "rsi_flip_long": rsi_flip_long,
+        "macd_bull_cross": macd_bull_cross,
+        "triple_candle_bull": triple_candle_bull,
     }
 
 

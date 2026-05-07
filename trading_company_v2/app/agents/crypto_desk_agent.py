@@ -307,6 +307,9 @@ class CryptoDeskAgent(BaseAgent):
                     "mfi_oversold": bool(signal.get("mfi_oversold", False)),
                     "ema_cross_long": bool(signal.get("ema_cross_long", False)),
                     "vwap_cross_long": bool(signal.get("vwap_cross_long", False)),
+                    "rsi_flip_long": bool(signal.get("rsi_flip_long", False)),
+                    "macd_bull_cross": bool(signal.get("macd_bull_cross", False)),
+                    "triple_candle_bull": bool(signal.get("triple_candle_bull", False)),
                 }
             )
 
@@ -376,6 +379,9 @@ class CryptoDeskAgent(BaseAgent):
             "mfi_oversold": False,
             "ema_cross_long": False,
             "vwap_cross_long": False,
+            "rsi_flip_long": False,
+            "macd_bull_cross": False,
+            "triple_candle_bull": False,
             "stream_fresh": False,
             "stream_score": 0.0,
             "stream_reasons": [],
@@ -529,5 +535,8 @@ class CryptoDeskAgent(BaseAgent):
                 "mfi_oversold": bool(leader.get("mfi_oversold", False)),
                 "ema_cross_long": bool(leader.get("ema_cross_long", False)),
                 "vwap_cross_long": bool(leader.get("vwap_cross_long", False)),
+                "rsi_flip_long": bool(leader.get("rsi_flip_long", False)),
+                "macd_bull_cross": bool(leader.get("macd_bull_cross", False)),
+                "triple_candle_bull": bool(leader.get("triple_candle_bull", False)),
             },
         )
