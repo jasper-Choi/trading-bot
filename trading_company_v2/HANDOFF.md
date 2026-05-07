@@ -3,6 +3,38 @@
 Last updated: 2026-05-07 (session 9)
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Claude Notes - 2026-05-07 (session 10 — 급속 청산 + 블랙리스트 + range_scalp 개선)
+
+### 배경: 72h 손실 원인 딥다이브
+- `rapid_tick_failed_start` 40건 avg -0.571% → 최대 손실원
+- `rapid_repeat_symbol_failure` 22건 avg -0.300% → 블랙리스트 TTL 부족
+- `rapid_range_scalp_stop` 4건 avg -0.740% (ANKR/FIL/STORJ/SC, 2초 내 갭점프)
+- DOGE 8건 0수익, LINK 7건 0수익 등 반복 진입 패턴
+
+### 적용된 수정 (커밋 27a7dc8)
+
+**hot_path_guard.py**
+- `rapid_tick_failed_start` 2단계 조기화:
+  - 1단계: 0.20min(12s) + pnl≤-0.25% → 즉시청산
+  - 2단계: 0.33min(20s) + pnl≤-0.18% (기존 -0.22% → -0.18%)
+- `_FAILURE_BLACKLIST_SECONDS`: 360s → **900s** (15분)
+- `range_scalp` 유동성 필터 추가: vol_ratio≥0.8 OR vol_24h≥50억원 (소형코인 차단)
+
+**state_store.py**
+- range_scalp no_lift: 0.20min/-0.15% → **0.15min/-0.12%** (더 빠른 감지)
+- range_scalp stop_pct: -0.30% → **-0.22%**
+
+**session 9에서 적용된 수정도 별도 유지 (c57e687, b87042d)**
+
+### 배포
+- 2026-05-07, Oracle VM pull+restart 완료 (27a7dc8)
+
+### 다음 관찰 포인트
+- rapid_tick_failed_start 건수 40건→20건 이하 목표
+- rapid_repeat_symbol_failure 22건→5건 이하 목표
+- range_scalp: 유동성 없는 소형코인 진입 차단 확인
+- strategy_performance 테이블 없음 → _strategy_is_disabled() 작동 방식 재확인 필요
+
 ## 0. Latest Claude Notes - 2026-05-07 (session 9 — 진입 게이트 대폭 강화)
 
 ### 배경: 라이브 성능 진단 결과 (72h 기준)
