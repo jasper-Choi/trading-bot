@@ -400,6 +400,71 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 )
                 return False
             return True
+
+        # ── RANGING 호환 Batch 3-6 전략 ──────────────────────────────────────
+        # RANGING 시장에서도 발화 가능한 전략들: 평균회귀/구조개선/압축돌파
+        # (TRENDING 전용 전략은 위 RANGING 블록에서 이미 차단됨)
+        _ranging_base_ok = (
+            not hard_overheat
+            and not bool(item.get("rsi_bearish_divergence", False))
+            and not bool(item.get("micro_exhausted", False))
+            and signal_freshness >= 0.48
+            and orderbook_bid_ask >= 1.05
+            and combined >= 0.54
+        )
+
+        def _ranging_b_check(signal_val: bool, profile: str, min_combined: float = 0.54) -> bool:
+            """RANGING 블록 내 Batch 전략 간이 체크 (inline, _b6_check 미사용)."""
+            if not signal_val or not _ranging_base_ok:
+                return False
+            if combined < min_combined:
+                return False
+            item["entry_profile"] = profile
+            sid = f"crypto.{profile}"
+            if _strategy_is_disabled(sid):
+                item["hot_block_reason"] = "strategy_disabled"
+                save_shadow_signal(
+                    desk="crypto", symbol=symbol, strategy_id=sid, entry_profile=profile,
+                    source="hot_candidate", action="probe_longs",
+                    focus=str(item.get("focus", f"{profile} ranging") or f"{profile} ranging"),
+                    reason="strategy_disabled", score=combined,
+                    stream_score=_float(item.get("stream_score", 0.0)),
+                    payload={"candidate": item}, dedupe_seconds=60,
+                )
+                return False
+            return True
+
+        # 1. multi_ranging_combo — RANGING 전용 복합 신호 (최우선)
+        if _ranging_b_check(bool(item.get("multi_ranging_combo", False)), "multi_ranging", min_combined=0.52):
+            return True
+        # 2. demand_zone_bounce — 지지구간 반등 (평균회귀 핵심)
+        if _ranging_b_check(bool(item.get("demand_zone_bounce", False)), "demand_zone", min_combined=0.52):
+            return True
+        # 3. vwap_rsi_combo — VWAP+RSI 과매도 복합
+        if _ranging_b_check(bool(item.get("vwap_rsi_combo", False)), "vwap_rsi_combo", min_combined=0.53):
+            return True
+        # 4. hammer_at_support — 지지선 망치형
+        if _ranging_b_check(bool(item.get("hammer_at_support", False)), "hammer_at_support", min_combined=0.52):
+            return True
+        # 5. consecutive_higher_lows — 구조 개선 (RANGING 내 방향성)
+        if _ranging_b_check(bool(item.get("consecutive_higher_lows", False)), "higher_lows", min_combined=0.55):
+            return True
+        # 6. inside_bar_breakout — 압축 후 돌파
+        if _ranging_b_check(bool(item.get("inside_bar_breakout", False)), "inside_bar_break", min_combined=0.55):
+            return True
+        # 7. bb_squeeze_breakout — BB 스퀴즈 → 이탈
+        if _ranging_b_check(bool(item.get("bb_squeeze_breakout", False)), "bb_squeeze_break", min_combined=0.56):
+            return True
+        # 8. breakout_vol_confirm — 거래량 동반 돌파 확인
+        if _ranging_b_check(bool(item.get("breakout_vol_confirm", False)), "breakout_vol_confirm", min_combined=0.56):
+            return True
+        # 9. rsi_bullish_div — RSI 불리쉬 다이버전스
+        if _ranging_b_check(bool(item.get("rsi_bullish_div", False)), "rsi_bullish_div", min_combined=0.52):
+            return True
+        # 10. trend_reversal_early — CHoCH 단독 조기 포착
+        if _ranging_b_check(bool(item.get("trend_reversal_early", False)), "trend_reversal_early", min_combined=0.54):
+            return True
+
         return False
 
     # ── Batch 2 TRENDING 신호 추출 ─────────────────────────────────────────
