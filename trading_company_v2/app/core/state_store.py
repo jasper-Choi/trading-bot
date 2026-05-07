@@ -817,7 +817,8 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         bucket["avg_size"] = round(float(bucket.pop("_size_sum", 0.0)) / count, 4)
         bucket["health"] = (
             "disabled_candidate"
-            if count >= 20 and (bucket["win_rate"] < 30.0 or bucket["peak0_pct"] >= 60.0 or bucket["capital_pnl_pct"] < -1.0)
+            # 최근 15건 이상이고 명백히 실패: 승률<20% OR peak0>75% OR 자본손실>-2%
+            if count >= 15 and (bucket["win_rate"] < 20.0 or bucket["peak0_pct"] >= 75.0 or bucket["capital_pnl_pct"] < -2.0)
             else "watch"
             if count >= 8 and bucket["capital_pnl_pct"] < 0
             else "candidate"
@@ -1232,6 +1233,12 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                     closed_symbols.append((position.symbol, "rapid_range_scalp_target"))
                     _close_position(position, "rapid_range_scalp_target")
                     paper_closed += 1
+                elif peak_pnl <= 0.0 and minutes_open >= 0.40 and position.pnl_pct <= -0.15:
+                    # 진입 후 한 번도 반등 없이 낙하: 24s 이내 -0.15%에서 즉시 청산
+                    # ANKR/FIL peak=0% → -0.59% 패턴 방지 (avg -0.59% → ~-0.15%)
+                    closed_symbols.append((position.symbol, "rapid_range_scalp_no_lift"))
+                    _close_position(position, "rapid_range_scalp_no_lift")
+                    paper_closed += 1
                 elif position.pnl_pct <= stop_pct:
                     closed_symbols.append((position.symbol, "rapid_range_scalp_stop"))
                     _close_position(position, "rapid_range_scalp_stop")
@@ -1240,8 +1247,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                     closed_symbols.append((position.symbol, "rapid_range_scalp_trail"))
                     _close_position(position, "rapid_range_scalp_trail")
                     paper_closed += 1
-                elif peak_pnl <= 0.05 and minutes_open >= 1.5 and position.pnl_pct <= -0.22:
-                    # 반등이 없으면 빠르게 자름 (3.0min→1.5min, -0.25%→-0.22%)
+                elif peak_pnl <= 0.05 and minutes_open >= 1.0 and position.pnl_pct <= -0.18:
+                    # 소폭 반등 후 다시 낙하 → 1.0min 후 -0.18%에서 청산 (1.5min/-0.22에서 단축)
                     closed_symbols.append((position.symbol, "rapid_range_scalp_no_lift"))
                     _close_position(position, "rapid_range_scalp_no_lift")
                     paper_closed += 1
@@ -1250,11 +1257,13 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
                 paper_closed += 1
-            elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.35:
+            elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.22:
+                # obvious_trend 실패 빠른 청산: -0.35% → -0.22% (avg -0.50% 절감)
                 closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
                 _close_position(position, "rapid_obvious_trend_fail")
                 paper_closed += 1
-            elif is_obvious_trend and position.pnl_pct <= -0.70:
+            elif is_obvious_trend and position.pnl_pct <= -0.45:
+                # obvious_trend 최대 손실 -0.70% → -0.45%
                 closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
                 _close_position(position, "rapid_obvious_trend_fail")
                 paper_closed += 1
@@ -1551,7 +1560,14 @@ def load_daily_summary() -> dict:
                 "close_reason_stats": _close_reason_stats(closed_today),
                 "desk_close_reason_stats": _desk_close_reason_stats(closed_today),
                 "symbol_performance_stats": _symbol_performance_stats(positions),
-                "strategy_performance_stats": _strategy_performance_stats(positions),
+                # 최근 80건만 평가 — 오래된 RANGING 이전 데이터가 현재 전략을 비활성화하지 않도록
+                "strategy_performance_stats": _strategy_performance_stats(
+                    sorted(
+                        [r for r in positions if r.status == "closed"],
+                        key=lambda r: r.id or 0,
+                        reverse=True,
+                    )[:80]
+                ),
                 "desk_stats": desk_stats,
                 "cumulative_realized_pnl_pct": cumulative_realized_pnl,
                 "cumulative_closed_positions": cumulative_closed,

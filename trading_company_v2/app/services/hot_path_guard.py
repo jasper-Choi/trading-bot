@@ -71,7 +71,7 @@ def _disabled_strategy_ids(force: bool = False) -> set[str]:
     try:
         _strategy_blocklist = {
             str(item.get("strategy_id", "") or "")
-            for item in load_strategy_performance_stats(window=300)
+            for item in load_strategy_performance_stats(window=80)
             if item.get("health") == "disabled_candidate" and str(item.get("strategy_id", "") or "")
         }
     except Exception:
@@ -624,6 +624,10 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             rs_protect = max(rs_profit_floor, peak_pnl - rs_trail_giveback) if rs_trail_giveback else 0.0
             if pnl_pct >= target_pct:
                 reason = "rapid_range_scalp_target"
+            elif peak_pnl <= 0.0 and minutes_open >= 0.40 and pnl_pct <= -0.15:
+                # 진입 후 한 번도 반등 없이 낙하 → 24s 후 -0.15%에서 즉시 청산
+                # (state_store rapid_guard와 일관성 유지)
+                reason = "rapid_range_scalp_no_lift"
             elif pnl_pct <= stop_pct:
                 reason = "rapid_range_scalp_stop"
             elif rs_trail_giveback and pnl_pct <= rs_protect:
@@ -646,9 +650,11 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
         if pnl_pct >= target_pct:
             reason = "rapid_target_hit"
-        elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.35:
+        elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.22:
+            # obvious_trend 조기 실패 -0.35% → -0.22%
             reason = "rapid_obvious_trend_fail"
-        elif is_obvious_trend and pnl_pct <= -0.70:
+        elif is_obvious_trend and pnl_pct <= -0.45:
+            # obvious_trend 최대 손실 -0.70% → -0.45%
             reason = "rapid_obvious_trend_fail"
         elif is_range_impulse and minutes_open >= 0.25 and peak_pnl <= 0.05 and pnl_pct <= -0.25:
             reason = "rapid_range_impulse_fail"
@@ -911,13 +917,15 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
     entry_profile = str(candidate.get("entry_profile", "trend_ignition") or "trend_ignition")
     stream_ok = bool(stream.get("stream_fresh", False)) and not bool(stream.get("stream_reversal", False))
     if entry_profile == "obvious_trend":
+        # obvious_trend: 과거 82.5% peak=0 실패 원인 → 더 강한 틱 모멘텀 요구
         ignition = (
             stream_ok
-            and ticks_15 >= 1
-            and stream_score >= 0.55
-            and move_15 >= 0.18
-            and move_60 >= -0.28
-            and buy_ratio >= 0.55
+            and ticks_15 >= 2          # 1 → 2: 틱 밀도 강화
+            and stream_score >= 0.65   # 0.55 → 0.65: 스트림 강도 강화
+            and move_5 >= 0.06         # NEW: 5s 모멘텀 확인 (진입 직전 오르고 있어야)
+            and move_15 >= 0.22        # 0.18 → 0.22: 15s 방향 강화
+            and move_60 >= -0.15       # -0.28 → -0.15: 60s 역행 허용 줄임
+            and buy_ratio >= 0.58      # 0.55 → 0.58: 매수세 강화
         )
     elif entry_profile == "range_impulse":
         ignition = (
@@ -951,15 +959,15 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         )
     elif entry_profile == "range_scalp":
         # Mean reversion entry: price overextended below EMA, expect bounce.
-        # Lower momentum bar — we need a small lift, not a breakout.
+        # peak=0% 실패 패턴 차단: 더 강한 초기 반등 필요
         ignition = (
             stream_ok
             and ticks_15 >= 2
-            and stream_score >= 0.52
-            and move_5 >= 0.05
-            and move_15 >= 0.08
-            and move_60 >= -0.35
-            and buy_ratio >= 0.52
+            and stream_score >= 0.55      # 0.52 → 0.55
+            and move_5 >= 0.08            # 0.05 → 0.08: 5s 반등 강화
+            and move_15 >= 0.12           # 0.08 → 0.12: 15s 반등 강화
+            and move_60 >= -0.30          # -0.35 → -0.30: 60s 하락 허용 줄임
+            and buy_ratio >= 0.54         # 0.52 → 0.54: 매수세 강화
         )
     else:
         # trend_ignition: 추세 확인 + 틱 모멘텀 동시 충족
