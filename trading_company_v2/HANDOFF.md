@@ -1,7 +1,50 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-07
+Last updated: 2026-05-07 (session 8)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-07 (session 8 — Batch 4/5/6 전략 20개 추가, 목표 50개 달성)
+
+### 추가된 전략 (커밋 64dec7e, cbb64be, 39b4991)
+
+**Batch 4 — 6개 신규 (64dec7e)**
+- `supertrend_long`: Supertrend(10,3) 불리쉬 전환 (ATR 기반)
+- `engulfing_bull`: 불리쉬 인걸핑 캔들 (음봉→양봉 완전 흡수)
+- `vol_surge_long`: 거래량 2.5배 + 양봉 (기관 매집 포착)
+- `adx_trend_strong`: ADX≥22 + DI+>DI- (방향성 있는 추세)
+- `bb_squeeze_breakout`: BB 스퀴즈 + 상단 돌파
+- `consecutive_higher_lows`: 3연속 고점저점 구조 (HL 패턴)
+
+**Batch 5 — 6개 신규 (cbb64be)**
+- `pin_bar_long`: 아래꼬리 몸통 2배 핀바 캔들
+- `morning_star`: 음봉→도지→양봉 3봉 반전 패턴
+- `inside_bar_breakout`: 압축된 인사이드바 상단 돌파
+- `rsi_momentum_keep`: RSI 55~72 추세 구간 유지 확인
+- `oi_momentum_long`: 3봉 연속 거래량+가격 동반 상승
+- `demand_zone_bounce`: 최근 20봉 지지 하단 반등
+
+**Batch 6 — 8개 신규 (39b4991) — 목표 50개 달성**
+- `vwap_rsi_combo`: VWAP 이탈 + RSI≤38 복합 신호
+- `breakout_vol_confirm`: 20봉 고점 돌파 + 거래량 1.5배
+- `hammer_at_support`: 지지선 망치형 캔들 반전
+- `trend_reversal_early`: CHoCH 단독 조기 포착
+- `ema_bounce_long`: EMA20 근처 반등 회복
+- `rsi_bullish_div`: RSI 불리쉬 다이버전스
+- `multi_ranging_combo`: RANGING 신호 3개+ 동시 만족
+- `momentum_breakout_cont`: 브레이크아웃 2봉째 모멘텀 지속
+
+**현재 전략 수: ~50개 distinct entry path (목표 달성 ✓)**
+
+### 코드 구조 최종 상태
+- `signal_engine.py`: 총 ~50개 신호 계산 + return dict
+- `crypto_desk_agent.py`: 모든 신호 ranked_candidates/fallback/payload 3곳 전파
+- `recommendation_engine.py`: ~40개 named entry 경로 + combined_score fallback
+- `hot_path_guard.py`: 모든 entry_profile 진입 조건 + rapid 청산 + size 테이블
+  - _b6_check 헬퍼 함수로 Batch 6 코드 간결화
+  - RAPID_EXIT_REASONS: 약 35개 등록
+
+### 배포
+- 2026-05-07, Oracle VM pull+restart 완료 (39b4991)
 
 ## 0. Latest Claude Notes - 2026-05-07 (session 7 — 수익률 개선 + Batch 3 전략 6개)
 
