@@ -305,16 +305,52 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             _ot_trend = _float(item.get("trend_follow_score", 0.0))
             _ot_combined = _float(item.get("combined_score", 0.0))
             _ot_ignition = bool(item.get("stream_ignition", False))
+            _ot_stream_score = _float(item.get("stream_score", 0.0))
             _ot_ext = _float(item.get("trend_extension_pct", 0.0))
-            if (
+            _ot_ta = str(item.get("trend_alignment", "") or "")
+            # 경로 A: stream_ignition + 표준 임계값
+            _ot_path_a = (
                 _ot_trend >= 0.85
                 and _ot_combined >= 0.75
                 and _ot_ignition
                 and _ot_ext <= 5.0
                 and not hard_overheat
                 and not _strategy_is_disabled("crypto.obvious_trend")
-            ):
-                return True  # RANGING에서 강한 개별 돌파 허용
+            )
+            # 경로 B: 초고점수 + stream 강활성 (ignition 없어도 허용)
+            # hot_path_guard obvious_trend_ok Path B와 동일 기준으로 캐시 진입 허용
+            _ot_path_b = (
+                _ot_ta == "trend_long"
+                and _ot_trend >= 0.91
+                and _ot_combined >= 0.84
+                and _ot_stream_score >= 0.64
+                and not _ot_ignition
+                and _ot_ext <= 5.0
+                and not hard_overheat
+                and not _strategy_is_disabled("crypto.obvious_trend")
+            )
+            if _ot_path_a or _ot_path_b:
+                return True  # RANGING에서 강한 개별 돌파 허용 (Path A: ignition / Path B: ultra-high)
+        # Path B: entry_profile이 명시되지 않아도 ultra-high trend 코인은 캐시 진입 허용
+        # 배경: _crypto_obvious_trend_entry_ok는 stream_ignition 필수 → Path B 후보는
+        #       entry_profile="obvious_trend"으로 설정되지 않음 → 별도 체크 필요
+        _elig_ta = str(item.get("trend_alignment", "") or "")
+        _elig_trend = _float(item.get("trend_follow_score", 0.0))
+        _elig_combined = _float(item.get("combined_score", 0.0))
+        _elig_stream_score = _float(item.get("stream_score", 0.0))
+        _elig_ignition = bool(item.get("stream_ignition", False))
+        _elig_ext = _float(item.get("trend_extension_pct", 0.0))
+        if (
+            _elig_ta == "trend_long"
+            and _elig_trend >= 0.91
+            and _elig_combined >= 0.84
+            and _elig_stream_score >= 0.64
+            and not _elig_ignition
+            and _elig_ext <= 5.0
+            and not hard_overheat
+            and not _strategy_is_disabled("crypto.obvious_trend")
+        ):
+            return True  # Path B 후보: ultra-high score → 캐시 진입 허용 (tick에서 obvious_trend_ok Path B 재검증)
         bb_squeeze_bounce = bool(item.get("bb_squeeze_bounce", False))
         vwap_deviation_long = bool(item.get("vwap_deviation_long", False))
         rsi_extreme_long = bool(item.get("rsi_extreme_long", False))

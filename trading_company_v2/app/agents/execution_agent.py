@@ -888,26 +888,45 @@ class ExecutionAgent(BaseAgent):
         stream_fresh = bool(meta.get("stream_fresh", False))
         top_risk = ema_gap >= 10.0 or rsi_float >= 88.0 or bool(meta.get("rsi_bearish_divergence", False))
         stream_ignition = bool(meta.get("stream_ignition", False))
-        # obvious_trend: 진단 결과 전건 peak=0.000% → 조건 대폭 강화
-        # "range" alignment 제거, stream_ignition 필수, 임계값 상향
-        ok = (
-            trend_alignment == "trend_long"                      # pullback_long 제거
-            # 근거: pullback_long 정렬 obvious_trend = 78건 중 99% peak=0
-            and trend_allowed                                     # trend_early 불인정
-            and trend_score >= 0.88                              # 0.82 → 0.88 (hot_path 동기화)
-            and chart_score >= 0.82                              # 유지
-            and combined >= 0.78                                 # 0.72 → 0.78
-            and stream_ignition                                  # stream_ignition 필수
-            and freshness >= 0.58                                # 0.55 → 0.58
-            and trend_extension <= 5.0                           # 6.0 → 5.0
-            and micro_vwap_gap <= 3.5                            # 4.0 → 3.5
+        # obvious_trend: hot_path_guard와 동일 2-path 구조
+        # "range"/pullback_long 제거 (78건 99% peak=0 사례)
+        # 경로 A: stream_ignition + 표준 임계값
+        _path_a = (
+            trend_alignment == "trend_long"
+            and trend_allowed
+            and trend_score >= 0.88
+            and chart_score >= 0.82
+            and combined >= 0.78
+            and stream_ignition
+            and freshness >= 0.58
+            and trend_extension <= 5.0
+            and micro_vwap_gap <= 3.5
             and not top_risk
             and not (stream_fresh and stream_reversal)
         )
+        _ot_stream_score_ea = float(meta.get("stream_score", 0.0) or 0.0)
+        # 경로 B: 초고점수 + stream 강활성 (ignition 없어도 허용, hot_path_guard와 동기화)
+        _path_b = (
+            trend_alignment == "trend_long"
+            and trend_allowed
+            and trend_score >= 0.91
+            and chart_score >= 0.86
+            and combined >= 0.84
+            and _ot_stream_score_ea >= 0.64
+            and not stream_ignition
+            and freshness >= 0.58
+            and trend_extension <= 5.0
+            and micro_vwap_gap <= 3.5
+            and not top_risk
+            and not (stream_fresh and stream_reversal)
+        )
+        ok = _path_a or _path_b
+        path_label = "pathA" if _path_a else ("pathB" if _path_b else "none")
         return (
             ok,
-            f"obvious 15m trend ride chart={chart_score:.2f} combined={combined:.2f} "
-            f"trend={trend_score:.2f} move={max(recent_change, burst_change, change_rate):.2f}% "
+            f"obvious 15m trend ride [{path_label}] chart={chart_score:.2f} combined={combined:.2f} "
+            f"trend={trend_score:.2f} stream={_ot_stream_score_ea:.2f} ignition={stream_ignition} "
+            f"move={max(recent_change, burst_change, change_rate):.2f}% "
             f"ext={trend_extension:.2f}% rsi={rsi_float:.0f}",
         )
 
