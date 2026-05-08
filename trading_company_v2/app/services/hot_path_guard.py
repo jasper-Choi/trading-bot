@@ -382,9 +382,11 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         dev_blocks_long_meanrev = airborne_dev_pct > 1.0
         rs_vol_ratio = _float(item.get("vol_ratio", 0.0))
         rs_vol_24h = _float(item.get("volume_24h_krw", 0.0))
-        # 유동성 필터: ANKR/STORJ/SC 등 소형 저유동성 코인 진입 차단
+        # 유동성 필터: ANKR/STORJ/SC/B3 등 소형 저유동성 코인 진입 차단
         # → 2초 내 -0.99% 갭점프 패턴 방지 (rapid_range_scalp_stop avg -0.74%)
-        range_scalp_liquidity_ok = rs_vol_ratio >= 0.8 or rs_vol_24h >= 5_000_000_000
+        # vol_ratio 0.8 → 1.5: ANKR/STORJ가 0.8 통과하던 문제 차단
+        # 기준: 평상시 대비 50% 이상 활성화 OR 24시간 절대거래량 50억 KRW 이상
+        range_scalp_liquidity_ok = rs_vol_ratio >= 1.5 or rs_vol_24h >= 5_000_000_000
         range_scalp_hot_ok = (
             ranging_signal
             and not dev_blocks_long_meanrev
@@ -396,6 +398,11 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and signal_freshness >= 0.50
             and not hard_overheat
             and rsi_value <= 42.0          # 진짜 과매도 구간만 평균회귀 (71% peak=0 개선)
+            # 하락추세 코인 RSI과매도 = 낙하중 칼날 잡기 → 차단
+            # EMA stack bearish + price below EMA → 반등 없이 계속 하락 가능성 높음
+            and trend_alignment != "downtrend"
+            # 최소 복합점수: ranging_signal 단독으로는 품질 보장 불가
+            and combined >= 0.48
         )
         if range_scalp_hot_ok:
             item["entry_profile"] = "range_scalp"
