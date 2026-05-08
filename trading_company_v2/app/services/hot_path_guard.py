@@ -1883,6 +1883,23 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and move_60 >= -0.30          # -0.35 → -0.30: 60s 하락 허용 줄임
             and buy_ratio >= 0.54         # 0.52 → 0.54: 매수세 강화
         )
+    elif entry_profile in {
+        "multi_ranging", "demand_zone", "vwap_rsi_combo", "hammer_at_support",
+        "higher_lows", "inside_bar_break", "bb_squeeze_break",
+        "breakout_vol_confirm", "rsi_bullish_div", "trend_reversal_early",
+    }:
+        # RANGING Batch 3-6 전략: 추세 전환 초기 포착 / 평균회귀 구조 개선
+        # trend_ignition보다 완화 (RANGING에서 move_15≥0.35 불가),
+        # range_scalp보다 조금 강화 (방향성 변화 확인 필요)
+        ignition = (
+            stream_ok
+            and ticks_15 >= 2
+            and stream_score >= 0.58
+            and move_5 >= 0.06
+            and move_15 >= 0.14
+            and move_60 >= -0.25
+            and buy_ratio >= 0.54
+        )
     else:
         # trend_ignition: 추세 확인 + 틱 모멘텀 동시 충족
         # 핵심 원칙: 이미 오른 뒤가 아니라 '지금 오르는 중'에 진입
