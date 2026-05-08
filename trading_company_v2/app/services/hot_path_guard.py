@@ -295,6 +295,22 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
 
     # ── RANGING regime: block all trend-following, only range_scalp allowed ──
     if regime == "RANGING":
+        # 예외: 개별 코인이 레짐과 무관하게 강한 추세를 보이면 obvious_trend 진입 허용
+        # RANGING 전체 시장에서도 특정 코인은 돌파 추세 가능 (JTO 0.93, NEAR 0.95 등 고점수)
+        if str(item.get("entry_profile", "")) == "obvious_trend":
+            _ot_trend = _float(item.get("trend_follow_score", 0.0))
+            _ot_combined = _float(item.get("combined_score", 0.0))
+            _ot_ignition = bool(item.get("stream_ignition", False))
+            _ot_ext = _float(item.get("trend_extension_pct", 0.0))
+            if (
+                _ot_trend >= 0.85
+                and _ot_combined >= 0.75
+                and _ot_ignition
+                and _ot_ext <= 5.0
+                and not hard_overheat
+                and not _strategy_is_disabled("crypto.obvious_trend")
+            ):
+                return True  # RANGING에서 강한 개별 돌파 허용
         bb_squeeze_bounce = bool(item.get("bb_squeeze_bounce", False))
         vwap_deviation_long = bool(item.get("vwap_deviation_long", False))
         rsi_extreme_long = bool(item.get("rsi_extreme_long", False))
@@ -729,6 +745,42 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 source="hot_candidate",
                 action="probe_longs",
                 focus=str(item.get("focus", "pullback_cont hot candidate") or "pullback_cont hot candidate"),
+                reason="strategy_disabled",
+                score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item},
+                dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Pullback Long: 고품질 조정 재진입 — 강한 추세 + 깊은 pullback + ob 확인
+    pullback_long_ok = (
+        pullback_cont_signal
+        and pullback_score_val >= 0.75
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment in {"pullback_long", "trend_long"}
+        and trend_score >= 0.68
+        and combined >= 0.65
+        and orderbook_bid_ask >= 1.08
+        and vol_contracted
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.58
+    )
+    if pullback_long_ok:
+        item["entry_profile"] = "pullback_long"
+        if _strategy_is_disabled("crypto.pullback_long"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto",
+                symbol=symbol,
+                strategy_id="crypto.pullback_long",
+                entry_profile="pullback_long",
+                source="hot_candidate",
+                action="probe_longs",
+                focus=str(item.get("focus", "pullback_long hot candidate") or "pullback_long hot candidate"),
                 reason="strategy_disabled",
                 score=combined,
                 stream_score=_float(item.get("stream_score", 0.0)),
@@ -1925,6 +1977,17 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and move_15 >= 0.12           # 0.08 → 0.12: 15s 반등 강화
             and move_60 >= -0.30          # -0.35 → -0.30: 60s 하락 허용 줄임
             and buy_ratio >= 0.54         # 0.52 → 0.54: 매수세 강화
+        )
+    elif entry_profile == "pullback_long":
+        # 고품질 조정 재진입: 강한 추세 + 깊은 pullback + ob 확인
+        # trend_ignition보다 약간 완화 (조정 후 반등 초기 포착)
+        ignition = (
+            stream_ok
+            and ticks_15 >= 2
+            and stream_score >= 0.60
+            and move_15 >= 0.15
+            and move_60 >= -0.20
+            and buy_ratio >= 0.55
         )
     elif entry_profile in {
         "multi_ranging", "demand_zone", "vwap_rsi_combo", "hammer_at_support",

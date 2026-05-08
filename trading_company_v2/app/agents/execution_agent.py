@@ -1057,34 +1057,15 @@ class ExecutionAgent(BaseAgent):
                 range_armed_notes = []
                 for candidate in all_candidates:
                     meta = candidate_meta.get(candidate, {})
-                    # cycle-level entries are low-precision in RANGING; hot-path handles these
-                    if self.regime == "RANGING":
-                        skipped_candidates.append(f"{candidate}: cycle-entry blocked in RANGING (hot-path only)")
-                        continue
-                    ok, reason = self._crypto_candidate_entry_ok(meta)
-                    if ok:
-                        # 사이클 계산 이후 모멘텀 소진/반전 실시간 재확인
-                        # recommendation_engine 계산 시점과 진입 시점 사이에 틱 방향이 바뀔 수 있음
-                        _live = summarize_stream_momentum(candidate)
-                        if _live.get("stream_fresh") and (
-                            _live.get("stream_reversal", False)
-                            or float(_live.get("stream_score", 0.5)) < 0.35
-                            or float(_live.get("stream_move_15s_pct", 0.0)) < -0.08
-                        ):
-                            _sc = float(_live.get("stream_score", 0))
-                            _m15 = float(_live.get("stream_move_15s_pct", 0))
-                            skipped_candidates.append(
-                                f"{candidate}: live-stream gate "
-                                f"(score={_sc:.2f} move15={_m15:.3f}% reversal={_live.get('stream_reversal')})"
-                            )
-                        else:
-                            eligible_candidates.append(candidate)
-                    else:
-                        skipped_candidates.append(f"{candidate}: {reason}")
-                        armed_ok, armed_reason = self._crypto_range_impulse_armed(meta)
-                        if armed_ok:
-                            range_armed_candidates.append(candidate)
-                            range_armed_notes.append(f"{candidate}: {armed_reason}")
+                    # cycle-level entries are low-precision in ALL regimes; hot-path only
+                    # 사이클 계산→실행 지연 사이 모멘텀 소진 → 전 regime hot-path 전용
+                    skipped_candidates.append(
+                        f"{candidate}: cycle-entry blocked (hot-path only, regime={self.regime})"
+                    )
+                    armed_ok, armed_reason = self._crypto_range_impulse_armed(meta)
+                    if armed_ok:
+                        range_armed_candidates.append(candidate)
+                        range_armed_notes.append(f"{candidate}: {armed_reason}")
                 all_candidates = eligible_candidates
                 if not all_candidates:
                     blocked_plan = dict(plan)
