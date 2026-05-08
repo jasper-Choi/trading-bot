@@ -3,6 +3,33 @@
 Last updated: 2026-05-08 (session 12)
 Maintained for: Claude / Codex continuation
 
+## 0. Latest Claude Notes - 2026-05-08 (session 12 — RANGING 진입 파이프라인 완전 정비)
+
+### 3차 발견: RANGING Batch 3-6 전략 ignition 조건 미설정 (커밋 c016c9c)
+- `entry_profile` = "trend_reversal_early", "higher_lows" 등이 모두 `else` 브랜치
+- `else` = trend_ignition: stream_score≥0.74, ticks_15≥4, move_15≥0.35 → RANGING에서 절대 불가
+- AVAX(combined=0.75, trend_reversal_early=True, base_ok=True)가 진입 못 한 이유
+- **수정**: 10개 RANGING 프로파일 전용 ignition 추가 (stream_score≥0.58, ticks_15≥2, move_15≥0.14)
+
+### 4차 발견: range_scalp B3/ANKR 갭점프 차단 불충분 (커밋 2f57b88)
+- B3: ob=1.085, vol_24h=168.7B → 유동성 필터 통과했으나 진입 직후 -1.15% 갭점프
+- `orderbook_bid_ask >= 1.05` → `>= 1.10` 상향 → B3(ob=1.085) 차단
+- ANKR도 얇은 오더북 코인 → 동일 필터로 차단
+
+### 2차 발견: RANGING 사이클 레벨 진입 차단 (커밋 27c27aa)
+- ExecutionAgent._multi_orders에 `self.regime == "RANGING"` 블록
+- 재시작 이후 cycle_journal 100% watchlist_only 확인
+
+### 배포 현황 (2026-05-08 00:09 UTC)
+- c016c9c: RANGING Batch 3-6 ignition 조건 추가
+- 2f57b88: range_scalp ob 임계값 1.10 상향
+
+### 다음 관찰 포인트
+- RANGING 전략(trend_reversal_early, higher_lows 등) entry_profile이 paper_positions에 나타나는지
+- range_scalp B3/ANKR 재진입 차단 여부
+- obvious_trend TOKAMAK 수익 패턴 지속 여부
+- AVAX(combined=0.75, trend_reversal_early) 첫 진입 확인
+
 ## 0. Latest Claude Notes - 2026-05-08 (session 12 — RANGING 사이클 레벨 진입 완전 차단)
 
 ### 배경: candidate_rotation 8건 모두 peak=0.000% 손실
