@@ -1,7 +1,74 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 15)
+Last updated: 2026-05-08 (session 16)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 16 — 전략 포트폴리오 확장 57개 + obvious_trend 버그 3개 수정)
+
+### 퀀트 성과 진단 결과 (342건 기준)
+- 총 342건, 승률 9.6%, 누적 손실 -129.13%, peak=0 74%
+- **치명적 버그 발견**: obvious_trend pullback_long alignment = 78건 99% peak=0
+
+### 커밋 88686e2 — 버그 수정 3개 + 신규 전략 12개
+
+**[Bug Fix 1] obvious_trend pullback_long alignment 완전 제거**
+- `hot_path_guard.py` + `execution_agent.py` 동시 수정
+- `trend_alignment in {"trend_long", "pullback_long"}` → `trend_alignment == "trend_long"`
+- combined 0.72→0.78, trend_score 0.85→0.88, ext 6.0→5.0
+- 영향: obvious_trend 발화 빈도 감소, 승률 급상승 예상
+
+**[Bug Fix 2] rapid_obvious_trend_fail 최소 보유시간**
+- `state_store.py`: `minutes_open >= 0.25` → `minutes_open >= 1.5`
+- 배경: 시장가 매수 슬리피지(~0.1%) 를 15초 만에 실패로 오판하던 문제
+- 최대손실 -0.38% → -0.42% (슬리피지 흡수 여유)
+
+**[신규 전략] RANGING Batch 7 — 복합 과매도 7개**
+```
+rsi_extreme_bounce   : RSI<30 + BB하단 (max_rsi=35)
+volume_climax_bounce : 거래량 클라이맥스 단독 (max_rsi=45)
+mfi_stoch_oversold   : MFI + Stoch 이중 (max_rsi=40)
+keltner_rsi_bounce   : Keltner하단 + RSI (max_rsi=40)
+cci_bb_bounce        : CCI + BB하단 (max_rsi=42)
+williams_vol_bounce  : Williams%R + 클라이맥스 (max_rsi=42)
+panic_reversal       : 3중 과매도 = 가장 강한 반전 신호 (max_rsi=38)
+```
+
+**[신규 전략] ALL-regime Batch 7 — 5개**
+```
+support_reclaim  : 지지선 재탈환 (B3-6 ignition)
+macd_hist_rev    : MACD 히스토그램 반전 (B3-6 ignition)
+kill_zone_ict    : ICT 킬존 + 불리시 OB (trend ignition)
+adx_di_cross     : ADX>=25 + DI+>DI- (trend ignition)
+momentum_high_vol: vol_surge + breakout 이중 확인 (trend ignition)
+```
+
+**전략 포트폴리오 현황 (총 57개)**
+```
+RANGING전용: range_scalp, range_breakout, high_tight_flag
+             + B3-7 (multi_ranging, demand_zone, vwap_rsi_combo, hammer_at_support,
+               rsi_bullish_div, higher_lows, trend_reversal_early, inside_bar_break,
+               bb_squeeze_break, breakout_vol_confirm, ema_bounce,
+               rsi_extreme_bounce, volume_climax_bounce, mfi_stoch_oversold,
+               keltner_rsi_bounce, cci_bb_bounce, williams_vol_bounce, panic_reversal)
+TRENDING전용: obvious_trend, trend_ignition, ema_cross, vwap_reclaim, rsi_flip,
+              macd_cross, triple_candle_bull, supertrend, engulfing_bull, vol_surge,
+              adx_trend, bb_sq_break, higher_lows, pin_bar, morning_star,
+              inside_bar_break, rsi_keep, oi_momentum, demand_zone
+ALL-regime:  pullback_continuation, pullback_long, choch_momentum, ict_level_long,
+             vwap_rsi_combo(B6), breakout_vol_confirm(B6), hammer_at_support(B6),
+             trend_reversal_early(B6), ema_bounce(B6), rsi_bullish_div(B6),
+             multi_ranging(B6), momentum_bk_cont(B6),
+             support_reclaim, macd_hist_rev, kill_zone_ict, adx_di_cross, momentum_high_vol
+```
+
+### 배포 현황 (2026-05-08 04:25 UTC)
+- Oracle VM: git pull + trading-loop restart → active (PID 1894668)
+
+### 다음 관찰 포인트
+- obvious_trend: pullback_long 제거 후 승률 변화 (기존 67% → 목표 75%+)
+- panic_reversal: 가장 강한 과매도 신호, 첫 발화 시 성과 확인
+- volume_climax_bounce: 패닉 매도 소진 포착 여부
+- kill_zone_ict: ICT 킬존(04:00-06:00 UTC, 12:00-13:30 UTC) 발화 시간대 확인
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 15 — pullback_long 신규 + cycle-level 전 regime 차단)
 
