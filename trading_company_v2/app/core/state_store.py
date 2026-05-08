@@ -824,6 +824,9 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         bucket["avg_size"] = round(float(bucket.pop("_size_sum", 0.0)) / count, 4)
         bucket["health"] = (
             "disabled_candidate"
+            # 최극단 케이스: 7건+ 이고 peak0 100% (단 한 번도 긍정적 모멘텀 없음) → 즉시 차단
+            if count >= 7 and bucket["peak0_pct"] >= 100.0
+            else "disabled_candidate"
             # 극단 케이스: 10건 이상이고 peak0 90%+ (전혀 긍정적 모멘텀 없음) → 조기 차단
             if count >= 10 and bucket["peak0_pct"] >= 90.0
             else "disabled_candidate"
