@@ -1,7 +1,45 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 17)
+Last updated: 2026-05-08 (session 18)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 18 — auto-disable 3단계 + 돌파형 ignition 분리)
+
+### 커밋 3개 (3dced3c, 3969af0, ab5ba7a) — Oracle VM 배포 완료
+
+**[개선 1] auto-disable 3단계 임계값 체계 구성 (state_store.py)**
+
+```
+1. cnt>=7  AND peak0=100%  → 즉시 disabled_candidate (신규)
+2. cnt>=10 AND peak0>=90%  → 조기 disabled_candidate (신규)
+3. cnt>=15 AND (win<20% OR peak0>=75% OR capital<-2%) → 표준 disabled
+```
+
+- 배경: `candidate_rotation` 8건/0%win/100%peak0이 15건 임계값 미달로 계속 진입
+- 효과: threshold#1 적용 → candidate_rotation 즉시 disabled_candidate
+- 동작: execution_agent `_strategy_disabled` + hot_path_guard `_disabled_strategy_ids` 모두 적용
+
+**[개선 2] 돌파형 전략 ignition 분리 (hot_path_guard.py)**
+
+- `breakout_vol_confirm`, `range_breakout`, `support_reclaim`, `macd_hist_rev` → 전용 ignition 블록
+- 기존 B3-7 반전형 ignition(move_60 >= -0.25) 에서 분리
+- 새 조건: `move_60 >= 0.02` (60초 실제 상승 중), `stream_score >= 0.62`, `buy_ratio >= 0.58`
+- 근거: KRW-G breakout_vol_confirm 00:12 실패 → move_60 음수 허용이 원인
+
+**[진단] 2026-05-08 현재 상황**
+- regime=RANGING, stance=BALANCED, risk_budget=0.32
+- obvious_trend NOT disabled (3건/67%win/33%peak0) → 정상 작동
+- obvious_trend RANGING 모드: stream_ignition=True 개별 코인 급등 시 발화
+- candidate_rotation 완전 차단 (기존 cycle-path 블록 + 신규 health disable)
+- 오늘(05-08) KRW-G breakout_vol_confirm 00:12 1건 실패 후 거래 없음 (시장 관망)
+
+**[전략 건강도 현황 (80건 기준)]**
+- unknown: 60건/7%win/68%peak0 → DISABLED
+- candidate_rotation: 8건/0%win/100%peak0 → DISABLED (신규 threshold#1)
+- range_scalp: 7건/29%win/71%peak0 → watch (개선 중)
+- obvious_trend: 3건/67%win/33%peak0 → OK ✅
+- range_breakout: 1건 → insufficient data
+- breakout_vol_confirm: 1건 → insufficient data
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 17 — Gemini 4개 개선 + ranging_b36 치명적 버그 수정)
 
