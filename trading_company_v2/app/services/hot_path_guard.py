@@ -373,7 +373,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             ranging_signal
             and not dev_blocks_long_meanrev
             and range_scalp_liquidity_ok
-            and orderbook_bid_ask >= 1.05
+            and orderbook_bid_ask >= 1.10  # 1.05 → 1.10: 갭점프 방지 (B3 ob=1.085 차단)
             and -1.0 <= micro_move_3 <= 1.50
             and not bool(item.get("rsi_bearish_divergence", False))
             and not bool(item.get("micro_exhausted", False))
