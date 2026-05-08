@@ -20,15 +20,31 @@ Maintained for: Claude / Codex continuation
 - ExecutionAgent._multi_orders에 `self.regime == "RANGING"` 블록
 - 재시작 이후 cycle_journal 100% watchlist_only 확인
 
-### 배포 현황 (2026-05-08 00:09 UTC)
-- c016c9c: RANGING Batch 3-6 ignition 조건 추가
+### 5차 발견: RANGING Batch 3-6 _ranging_base_ok 유동성 필터 누락 (커밋 88c45be)
+- KRW-G (vol_24h=1.6B, vol_ratio=285x 펌프) → breakout_vol_confirm 진입 → -0.630%, peak=0
+- `_ranging_base_ok`에 유동성 체크 없어 소형/펌프 코인 통과
+- **수정**: `(vol_24h>=20억 OR vol_ratio>=0.8) AND vol_ratio<=80` 추가
+
+### 검증: RANGING ignition 작동 확인
+- KRW-G breakout_vol_confirm 진입 (00:12 UTC May 8) → ignition 수정 작동 확인
+- 다만 G는 소형 펌프 코인 → 유동성 필터로 이제 차단됨
+
+### 전략 상태 (window=80 기준)
+- `crypto.obvious_trend`: cnt=3, win=67%, avg=+0.10% → 정상 (ENABLED)
+- `unknown`: cnt=60, win=7%, peak0=68% → DISABLED (구버전 cycle-level 잔재)
+- obvious_trend가 어제 strategy_disabled로 shadow_signal 기록된 것은 이전 서비스 실행분
+
+### 배포 현황 (2026-05-08 UTC)
+- 27c27aa: RANGING 사이클 레벨 진입 완전 차단
+- c016c9c: RANGING Batch 3-6 ignition 조건 추가 (stream_score≥0.58, ticks_15≥2, move_15≥0.14)
 - 2f57b88: range_scalp ob 임계값 1.10 상향
+- 88c45be: RANGING base_ok 유동성 필터 (vol_24h≥20억, vol_ratio≤80)
 
 ### 다음 관찰 포인트
-- RANGING 전략(trend_reversal_early, higher_lows 등) entry_profile이 paper_positions에 나타나는지
-- range_scalp B3/ANKR 재진입 차단 여부
-- obvious_trend TOKAMAK 수익 패턴 지속 여부
-- AVAX(combined=0.75, trend_reversal_early) 첫 진입 확인
+- RANGING 전략 진입 시 entry_profile 분포 (higher_lows, inside_bar_break 등)
+- range_scalp B3/ANKR 재진입 차단 여부 (ob 1.10 기준)
+- obvious_trend: NEAR(score=0.95), TIA, JTO 등 고점수 후보 진입 시도 모니터링
+- crypto.candidate_rotation: 8건 0% 수익 → TRENDING 전환 시 사이클 레벨 재개 후 개선 여부
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 12 — RANGING 사이클 레벨 진입 완전 차단)
 
