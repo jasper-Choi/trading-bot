@@ -1,7 +1,51 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 14)
+Last updated: 2026-05-08 (session 15)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 15 — pullback_long 신규 + cycle-level 전 regime 차단)
+
+### 커밋 46a0387 — pullback_long 전략 추가 + cycle-entry 전면 차단
+
+**hot_path_guard.py — `_candidate_is_hot_entry_eligible`:**
+- `pullback_long` 신규 전략 추가 (pullback_continuation 블록 다음에 위치)
+  - `pullback_score >= 0.75` (pullback_continuation의 0.55보다 강한 조건)
+  - `trend_alignment in {"pullback_long", "trend_long"}`
+  - `trend_score >= 0.68`, `combined >= 0.65`, `orderbook_bid_ask >= 1.08`
+  - `vol_contracted=True`, `signal_freshness >= 0.58`
+  - strategy_id = `crypto.pullback_long`
+
+**hot_path_guard.py — `_on_tick` ignition block:**
+- `pullback_long` elif 추가 (range_scalp 블록 다음, RANGING Batch 3-6 블록 이전)
+  ```python
+  elif entry_profile == "pullback_long":
+      ignition = (stream_ok and ticks_15 >= 2 and stream_score >= 0.60
+                  and move_15 >= 0.15 and move_60 >= -0.20 and buy_ratio >= 0.55)
+  ```
+
+**hot_path_guard.py — `_candidate_is_hot_entry_eligible` RANGING exception (session 14 편집 포함):**
+- RANGING에서 obvious_trend 강한 개별 돌파 허용 예외 추가
+  - `trend_follow_score >= 0.85`, `combined_score >= 0.75`, `stream_ignition=True`, `trend_ext <= 5.0`
+
+**execution_agent.py:**
+- cycle-level multi-order 진입을 **RANGING에서 모든 regime으로** 전면 차단
+  - 기존: `if self.regime == "RANGING": skip`
+  - 변경: 모든 regime에서 `"cycle-entry blocked (hot-path only)"` → skipped
+  - 이유: 사이클 계산→실행 지연(수초) 동안 모멘텀 소진 → tick ignition이 더 정확
+  - range_impulse_armed 후보는 여전히 tracking (RANGING impulse 대기열 유지)
+
+### 배포 현황 (2026-05-08 02:05 UTC)
+- Oracle VM: git pull + trading-loop restart → active (PID 1879654)
+- 서비스 정상 기동 확인
+
+### 포지션 임계값 (pullback_long)
+- `_position_thresholds`에 별도 블록 없음 → crypto 기본값 사용 (10.0%, -2.0%, 180cycles)
+- trail: `_crypto_trail_rules` (trend 전략 표준)
+
+### 다음 관찰 포인트
+- pullback_long 신호 발생 여부 (candidate에 `pullback_detected=True`, `pullback_score>=0.75`, `trend_alignment="pullback_long"` 조건)
+- cycle-level 차단 효과: cycle_journal에서 "cycle-entry blocked" 로그 확인
+- RANGING 시장 조정 후 RANGING Batch 3-6 신호 발생 여부 (RSI 50 이하 필요)
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 14 — cycle-level stream gate + range_scalp 낙도 방어)
 
