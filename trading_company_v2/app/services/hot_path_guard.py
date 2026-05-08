@@ -379,6 +379,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and not bool(item.get("micro_exhausted", False))
             and signal_freshness >= 0.50
             and not hard_overheat
+            and rsi_value <= 42.0          # 진짜 과매도 구간만 평균회귀 (71% peak=0 개선)
         )
         if range_scalp_hot_ok:
             item["entry_profile"] = "range_scalp"
@@ -416,11 +417,23 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and rs_vol_ratio <= 80.0  # 극단적 거래량 스파이크(펌프) 차단
         )
 
-        def _ranging_b_check(signal_val: bool, profile: str, min_combined: float = 0.54) -> bool:
-            """RANGING 블록 내 Batch 전략 간이 체크 (inline, _b6_check 미사용)."""
+        def _ranging_b_check(
+            signal_val: bool,
+            profile: str,
+            min_combined: float = 0.54,
+            max_rsi: float = 65.0,
+        ) -> bool:
+            """RANGING 블록 내 Batch 전략 간이 체크.
+            max_rsi: 전략 유형별 RSI 상한
+              평균회귀(demand_zone/vwap_rsi/hammer/rsi_div/multi): ≤ 50
+              구조개선(higher_lows/trend_reversal): ≤ 58
+              압축돌파(bb_squeeze/breakout_vol/inside_bar/ema_bounce): ≤ 65
+            """
             if not signal_val or not _ranging_base_ok:
                 return False
             if combined < min_combined:
+                return False
+            if rsi_value > max_rsi:          # RSI 방향 필터: 과매수 구간 진입 차단
                 return False
             item["entry_profile"] = profile
             sid = f"crypto.{profile}"
@@ -437,35 +450,43 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 return False
             return True
 
+        # ── RANGING 평균회귀 전략 (RSI ≤ 50: 진짜 과매도 구간에서만) ──────────
         # 1. multi_ranging_combo — RANGING 전용 복합 신호 (최우선)
-        if _ranging_b_check(bool(item.get("multi_ranging_combo", False)), "multi_ranging", min_combined=0.52):
+        if _ranging_b_check(bool(item.get("multi_ranging_combo", False)), "multi_ranging", min_combined=0.52, max_rsi=50.0):
             return True
         # 2. demand_zone_bounce — 지지구간 반등 (평균회귀 핵심)
-        if _ranging_b_check(bool(item.get("demand_zone_bounce", False)), "demand_zone", min_combined=0.52):
+        if _ranging_b_check(bool(item.get("demand_zone_bounce", False)), "demand_zone", min_combined=0.52, max_rsi=50.0):
             return True
         # 3. vwap_rsi_combo — VWAP+RSI 과매도 복합
-        if _ranging_b_check(bool(item.get("vwap_rsi_combo", False)), "vwap_rsi_combo", min_combined=0.53):
+        if _ranging_b_check(bool(item.get("vwap_rsi_combo", False)), "vwap_rsi_combo", min_combined=0.53, max_rsi=50.0):
             return True
-        # 4. hammer_at_support — 지지선 망치형
-        if _ranging_b_check(bool(item.get("hammer_at_support", False)), "hammer_at_support", min_combined=0.52):
+        # 4. hammer_at_support — 지지선 망치형 (RSI ≤ 52: 망치형은 조금 더 허용)
+        if _ranging_b_check(bool(item.get("hammer_at_support", False)), "hammer_at_support", min_combined=0.52, max_rsi=52.0):
             return True
-        # 5. consecutive_higher_lows — 구조 개선 (RANGING 내 방향성)
-        if _ranging_b_check(bool(item.get("consecutive_higher_lows", False)), "higher_lows", min_combined=0.55):
+        # 9. rsi_bullish_div — RSI 불리쉬 다이버전스 (다이버전스 = 과매도에서 발생)
+        if _ranging_b_check(bool(item.get("rsi_bullish_div", False)), "rsi_bullish_div", min_combined=0.52, max_rsi=48.0):
             return True
-        # 6. inside_bar_breakout — 압축 후 돌파
-        if _ranging_b_check(bool(item.get("inside_bar_breakout", False)), "inside_bar_break", min_combined=0.55):
-            return True
-        # 7. bb_squeeze_breakout — BB 스퀴즈 → 이탈
-        if _ranging_b_check(bool(item.get("bb_squeeze_breakout", False)), "bb_squeeze_break", min_combined=0.56):
-            return True
-        # 8. breakout_vol_confirm — 거래량 동반 돌파 확인
-        if _ranging_b_check(bool(item.get("breakout_vol_confirm", False)), "breakout_vol_confirm", min_combined=0.56):
-            return True
-        # 9. rsi_bullish_div — RSI 불리쉬 다이버전스
-        if _ranging_b_check(bool(item.get("rsi_bullish_div", False)), "rsi_bullish_div", min_combined=0.52):
+
+        # ── RANGING 구조개선 전략 (RSI ≤ 58: 방향성 전환 초기 포착) ──────────
+        # 5. consecutive_higher_lows — 저점 높아지는 구조 개선
+        if _ranging_b_check(bool(item.get("consecutive_higher_lows", False)), "higher_lows", min_combined=0.55, max_rsi=58.0):
             return True
         # 10. trend_reversal_early — CHoCH 단독 조기 포착
-        if _ranging_b_check(bool(item.get("trend_reversal_early", False)), "trend_reversal_early", min_combined=0.54):
+        if _ranging_b_check(bool(item.get("trend_reversal_early", False)), "trend_reversal_early", min_combined=0.54, max_rsi=58.0):
+            return True
+
+        # ── RANGING 압축돌파 전략 (RSI ≤ 65: 과열 전 단계까지 허용) ──────────
+        # 6. inside_bar_breakout — 압축 후 돌파
+        if _ranging_b_check(bool(item.get("inside_bar_breakout", False)), "inside_bar_break", min_combined=0.55, max_rsi=65.0):
+            return True
+        # 7. bb_squeeze_breakout — BB 스퀴즈 → 이탈
+        if _ranging_b_check(bool(item.get("bb_squeeze_breakout", False)), "bb_squeeze_break", min_combined=0.56, max_rsi=65.0):
+            return True
+        # 8. breakout_vol_confirm — 거래량 동반 돌파 확인
+        if _ranging_b_check(bool(item.get("breakout_vol_confirm", False)), "breakout_vol_confirm", min_combined=0.56, max_rsi=63.0):
+            return True
+        # 11. ema_bounce_long — EMA 지지 반등 (추가: 구조 개선 + EMA 지지선)
+        if _ranging_b_check(bool(item.get("ema_bounce_long", False)), "ema_bounce", min_combined=0.55, max_rsi=55.0):
             return True
 
         return False
@@ -1709,6 +1730,16 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             f"high_tight_flag: {symbol} hot tick entry - impulse {impulse_val:.2f}% "
             f"flag {flag_val:.2f}%, stream {stream_score:.2f}, move15 {move15_val:.2f}%."
         )
+    elif entry_path in {
+        "multi_ranging", "demand_zone", "vwap_rsi_combo", "hammer_at_support",
+        "higher_lows", "inside_bar_break", "bb_squeeze_break",
+        "breakout_vol_confirm", "rsi_bullish_div", "trend_reversal_early", "ema_bounce",
+    }:
+        # ranging_b36 마커 → state_store에서 range_scalp 스타일 trail/stop 적용
+        order_focus = (
+            f"ranging_b36: {symbol} {entry_path} tick entry - combined {combined:.2f}, "
+            f"stream {stream_score:.2f}, move15 {move15_val:.2f}%."
+        )
     else:
         order_focus = (
             f"{symbol} {entry_path} tick entry - combined {combined:.2f}, "
@@ -1834,15 +1865,16 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
     entry_profile = str(candidate.get("entry_profile", "trend_ignition") or "trend_ignition")
     stream_ok = bool(stream.get("stream_fresh", False)) and not bool(stream.get("stream_reversal", False))
     if entry_profile == "obvious_trend":
-        # obvious_trend: 과거 82.5% peak=0 실패 원인 → 더 강한 틱 모멘텀 요구
+        # obvious_trend: SONIC -0.52% 실패(move_60=-0.05% 허용됐으나 즉시 반전)
+        # → move_60 ≥ 0.0: 1분 추세가 최소한 양수여야 진입 (하락 중 spike 차단)
         ignition = (
             stream_ok
-            and ticks_15 >= 2          # 1 → 2: 틱 밀도 강화
-            and stream_score >= 0.65   # 0.55 → 0.65: 스트림 강도 강화
-            and move_5 >= 0.06         # NEW: 5s 모멘텀 확인 (진입 직전 오르고 있어야)
-            and move_15 >= 0.22        # 0.18 → 0.22: 15s 방향 강화
-            and move_60 >= -0.15       # -0.28 → -0.15: 60s 역행 허용 줄임
-            and buy_ratio >= 0.58      # 0.55 → 0.58: 매수세 강화
+            and ticks_15 >= 2          # 틱 밀도
+            and stream_score >= 0.65   # 스트림 강도
+            and move_5 >= 0.06         # 5s 모멘텀
+            and move_15 >= 0.22        # 15s 방향
+            and move_60 >= 0.00        # -0.15 → 0.00: 60s 하락 중 진입 차단
+            and buy_ratio >= 0.58      # 매수세
         )
     elif entry_profile == "range_impulse":
         ignition = (
@@ -1890,8 +1922,9 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         "multi_ranging", "demand_zone", "vwap_rsi_combo", "hammer_at_support",
         "higher_lows", "inside_bar_break", "bb_squeeze_break",
         "breakout_vol_confirm", "rsi_bullish_div", "trend_reversal_early",
+        "ema_bounce",  # 신규 추가
     }:
-        # RANGING Batch 3-6 전략: 추세 전환 초기 포착 / 평균회귀 구조 개선
+        # RANGING Batch 3-6 + ema_bounce 전략
         # trend_ignition보다 완화 (RANGING에서 move_15≥0.35 불가),
         # range_scalp보다 조금 강화 (방향성 변화 확인 필요)
         ignition = (

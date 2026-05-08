@@ -432,6 +432,11 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 평균회귀(에어본) 전략: 작은 목표/타이트한 손절/빠른 만기
         # stop -0.50%→-0.30%→-0.22%: 소형코인 갭점프 -0.74% 패턴 + 유동성 필터 추가로 더 타이트
         return 1.20, -0.22, 75
+    if desk == "crypto" and "ranging_b36" in focus:
+        # RANGING Batch 3-6 전략: 평균회귀/구조개선/압축돌파
+        # target=1.80% (RANGING에서 10% 목표는 불가능), stop=-0.40% (rapid_tick_failed_start가 더 빠름)
+        # range_scalp_trail_rules 적용 → trail/floor도 빠르게 관리
+        return 1.80, -0.40, 90
     if desk == "crypto" and "range_breakout" in focus:
         return 2.20, -1.00, 90
     if desk == "crypto" and "high_tight_flag" in focus:
@@ -1049,7 +1054,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             position.cycles_open += 1
             pos_focus = str(position.focus or "")
             target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action, pos_focus)
-            is_range_scalp = "range_scalp" in pos_focus
+            is_range_scalp = "range_scalp" in pos_focus or "ranging_b36" in pos_focus
             # early_failure: exit if still deeply losing after fast_fail_cycle cycles
             # stale_floor:   exit near max_cycles if barely profitable
             early_failure_pct = round(stop_pct * 0.7, 2)
@@ -1211,7 +1216,7 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             pos_focus_rapid = str(position.focus or "")
             target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action, pos_focus_rapid)
             peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
-            is_range_scalp_rapid = "range_scalp" in pos_focus_rapid
+            is_range_scalp_rapid = "range_scalp" in pos_focus_rapid or "ranging_b36" in pos_focus_rapid
             if is_range_scalp_rapid:
                 trail_giveback, profit_floor = _range_scalp_trail_rules(peak_pnl)
             else:
