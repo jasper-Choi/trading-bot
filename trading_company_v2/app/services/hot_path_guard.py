@@ -1710,6 +1710,14 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
     }
     entry_path = meta["entry_path"]
     move15_val = _float(stream.get("stream_move_15s_pct", 0.0))
+    # range_scalp 전용: 실시간 하락 모멘텀 차단
+    # RSI<=42 과매도이더라도 15s 동안 계속 하락 중이면 저점 캐칭이 아닌 낙도(falling knife)
+    if entry_path == "range_scalp" and bool(stream.get("stream_fresh", False)):
+        if move15_val < -0.12 or bool(stream.get("stream_reversal", False)):
+            return {
+                "entry_opened": 0,
+                "reason": f"range_scalp_stream_falling (move15={move15_val:.3f}% reversal={stream.get('stream_reversal')})",
+            }
     if entry_path == "range_scalp":
         airborne_score_val = _float(candidate.get("airborne_score", 0.0))
         deviation_pct_val = _float(candidate.get("airborne_deviation_pct", 0.0))
