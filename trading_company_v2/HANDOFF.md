@@ -1,7 +1,42 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 16)
+Last updated: 2026-05-08 (session 17)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 17 — Gemini 4개 개선 + ranging_b36 치명적 버그 수정)
+
+### 커밋 cc4e076 — 4개 개선 + 1개 치명적 버그 수정
+
+**[치명적 버그 수정] RANGING Batch 7 전략 position thresholds 오적용**
+- 버그: `rsi_extreme_bounce`, `volume_climax_bounce`, `mfi_stoch_oversold`, `keltner_rsi_bounce`,
+  `cci_bb_bounce`, `williams_vol_bounce`, `panic_reversal` 7개 전략이 `_open_hot_entry`에서
+  "ranging_b36:" prefix 없이 focus 저장 → trend thresholds(target=10%, stop=-2%) 잘못 적용
+- 수정: `_open_hot_entry` focus 분기에 Batch 7 + `liquidity_sweep` 추가
+- 효과: 올바른 target=1.80%, stop=-0.40%, range_scalp trail rules 적용
+
+**[Gemini 개선 1] Liquidity_Sweep_Reversal 전략 추가 (개미털기/스탑헌트)**
+- 위치: Batch 7 ALL-regime 섹션 (momentum_high_vol 다음)
+- 조건: `pin_bar_long + support_reclaim_long + RSI<=38 + combined>=0.52 + ob>=1.05`
+- 원리: 세력이 스윙 저점 밑으로 밀어 스탑로스 터치 후 즉시 매집 → V자 반전
+- 적용: ignition set(B3-7 공통), is_b6 rapid guard, ranging_b36 focus prefix
+- strategy_id: `crypto.liquidity_sweep`
+
+**[Gemini 개선 2] panic_reversal ask-wall thinning 강화**
+- 경로 1: `_panic_base AND bid/ask>=1.12` → 낮은 combined(0.49) 허용
+- 경로 2: `_panic_base` 단독 → 높은 combined(0.54) 요구
+- 의미: 공황 매도세 소진(ask 측 얇아짐) 동시 확인 시 진입 완화
+
+**[Gemini 개선 3] 3분 타임컷 (time_cut_3min)**
+- 조건: `minutes_open >= 3.0 AND peak_pnl <= 0.05 AND pnl_pct <= -0.10 AND not range_scalp`
+- 위치: `state_store.py rapid_guard_crypto_positions` + `hot_guard_crypto_tick`
+- 배경: 74% peak=0 문제 대응 — 3분 후 모멘텀 없는 포지션 즉시 청산
+- 메움: rapid_tick_failed_start(0.33min/-0.22%) ↔ rapid_no_lift(10min/-0.30%) 사이 공백
+
+**전략 포트폴리오 현황 (총 58개)**
+- liquidity_sweep 1개 추가 (57 → 58개)
+
+### 배포 필요
+- Oracle VM pull: `ssh ubuntu@134.185.118.144 "cd ~/trading-bot && git pull && sudo systemctl restart trading-loop"`
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 16 — 전략 포트폴리오 확장 57개 + obvious_trend 버그 3개 수정)
 
