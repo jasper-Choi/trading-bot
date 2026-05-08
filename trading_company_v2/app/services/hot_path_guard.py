@@ -2172,20 +2172,34 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and buy_ratio >= 0.55
         )
     elif entry_profile in {
-        # RANGING Batch 3-6
+        # 돌파형 전략: 상승 모멘텀 확인 필수 (평균회귀 ignition 불가)
+        # move_60 >= 0.02 → 60초간 실제로 오르는 중이어야 진입
+        "breakout_vol_confirm", "range_breakout", "support_reclaim", "macd_hist_rev",
+    }:
+        # 돌파/모멘텀 회복형 ignition: 전 시간축 양방향 확인
+        # KRW-G 실패(rapid_tick_failed_start): move_60 음수 허용이 원인
+        # breakout은 60초간 오르는 코인에서만 진입해야 함
+        ignition = (
+            stream_ok
+            and ticks_15 >= 2
+            and stream_score >= 0.62          # 0.58 → 0.62: 돌파형은 더 강한 stream
+            and move_5 >= 0.08                # 0.06 → 0.08: 순간 모멘텀 강화
+            and move_15 >= 0.16               # 0.14 → 0.16: 15s 모멘텀 강화
+            and move_60 >= 0.02               # -0.25 → 0.02: 60s 반드시 상승 중
+            and buy_ratio >= 0.58             # 0.54 → 0.58: 매수세 강화
+        )
+    elif entry_profile in {
+        # RANGING Batch 3-6 (반전/평균회귀)
         "multi_ranging", "demand_zone", "vwap_rsi_combo", "hammer_at_support",
         "higher_lows", "inside_bar_break", "bb_squeeze_break",
-        "breakout_vol_confirm", "rsi_bullish_div", "trend_reversal_early",
-        "ema_bounce",
+        "rsi_bullish_div", "trend_reversal_early", "ema_bounce",
         # Batch 7: RANGING 복합 과매도 전략
         "rsi_extreme_bounce", "volume_climax_bounce", "mfi_stoch_oversold",
         "keltner_rsi_bounce", "cci_bb_bounce", "williams_vol_bounce", "panic_reversal",
-        # Batch 7: ALL-regime 구조/모멘텀 반전
-        "support_reclaim", "macd_hist_rev",
         # 개미털기: 스탑헌트 V반전 (TRENDING/RANGING 모두 발화)
         "liquidity_sweep",
     }:
-        # B3-7 공통 ignition: 방향 전환 확인 (RANGING에서 move_15≥0.35 불가)
+        # B3-7 반전형 ignition: 방향 전환 확인 (60s 하락 허용 — 반등 초기 포착)
         # panic_reversal: 반등 초기 모멘텀 미약할 수 있어 조건 동일 유지
         ignition = (
             stream_ok
