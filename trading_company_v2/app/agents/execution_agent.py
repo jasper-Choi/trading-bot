@@ -884,15 +884,16 @@ class ExecutionAgent(BaseAgent):
         # obvious_trend: 진단 결과 전건 peak=0.000% → 조건 대폭 강화
         # "range" alignment 제거, stream_ignition 필수, 임계값 상향
         ok = (
-            trend_alignment in {"trend_long", "pullback_long"}   # "range" 제거
+            trend_alignment == "trend_long"                      # pullback_long 제거
+            # 근거: pullback_long 정렬 obvious_trend = 78건 중 99% peak=0
             and trend_allowed                                     # trend_early 불인정
-            and trend_score >= 0.82                              # 0.68 → 0.82
-            and chart_score >= 0.82                              # 0.76 → 0.82
-            and combined >= 0.72                                 # 0.52 → 0.72
+            and trend_score >= 0.88                              # 0.82 → 0.88 (hot_path 동기화)
+            and chart_score >= 0.82                              # 유지
+            and combined >= 0.78                                 # 0.72 → 0.78
             and stream_ignition                                  # stream_ignition 필수
-            and freshness >= 0.55                                # 0.50 → 0.55
-            and trend_extension <= 6.0                           # 8.5 → 6.0
-            and micro_vwap_gap <= 4.0                            # 6.5 → 4.0
+            and freshness >= 0.58                                # 0.55 → 0.58
+            and trend_extension <= 5.0                           # 6.0 → 5.0
+            and micro_vwap_gap <= 3.5                            # 4.0 → 3.5
             and not top_risk
             and not (stream_fresh and stream_reversal)
         )

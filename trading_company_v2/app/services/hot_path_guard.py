@@ -505,6 +505,37 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         if _ranging_b_check(bool(item.get("ema_bounce_long", False)), "ema_bounce", min_combined=0.55, max_rsi=55.0):
             return True
 
+        # ── RANGING Batch 7: 복합 과매도 전략 (다중 지표 이중 확인) ──────────────
+        # 12. rsi_extreme_bounce — RSI 극단 과매도(<30) + BB 하단 이중 확인
+        _rsi_bb = rsi_extreme_long and bool(item.get("at_bb_lower", False))
+        if _ranging_b_check(_rsi_bb, "rsi_extreme_bounce", min_combined=0.51, max_rsi=35.0):
+            return True
+        # 13. volume_climax_bounce — 패닉 매도 소진 (클라이맥스 거래량 → 반전)
+        # 공포 극점: 모든 매도세 소진 후 수요자 진입 → 강한 반전 기대
+        if _ranging_b_check(volume_climax_reversal, "volume_climax_bounce", min_combined=0.50, max_rsi=45.0):
+            return True
+        # 14. mfi_stoch_oversold — MFI + Stoch 이중 과매도 (자금흐름 + 모멘텀)
+        _mfi_stoch = mfi_oversold and stoch_oversold_cross
+        if _ranging_b_check(_mfi_stoch, "mfi_stoch_oversold", min_combined=0.51, max_rsi=40.0):
+            return True
+        # 15. keltner_rsi_bounce — Keltner 채널 하단 + RSI 과매도 (변동성 평균회귀)
+        _kc_rsi = keltner_lower_touch and rsi_extreme_long
+        if _ranging_b_check(_kc_rsi, "keltner_rsi_bounce", min_combined=0.51, max_rsi=40.0):
+            return True
+        # 16. cci_bb_bounce — CCI 과매도 + BB 하단 (기술적 복합 과매도)
+        _cci_bb = cci_oversold_bounce and bool(item.get("at_bb_lower", False))
+        if _ranging_b_check(_cci_bb, "cci_bb_bounce", min_combined=0.51, max_rsi=42.0):
+            return True
+        # 17. williams_vol_bounce — Williams %R 과매도 + 거래량 클라이맥스 (공포 바닥)
+        _wr_vol = williams_r_oversold and volume_climax_reversal
+        if _ranging_b_check(_wr_vol, "williams_vol_bounce", min_combined=0.50, max_rsi=42.0):
+            return True
+        # 18. panic_reversal — 3중 과매도 확인 (가장 강한 평균회귀 신호)
+        # RSI 극단 + BB 하단 + 거래량 클라이맥스 = 공포의 절정, 최고 확률 반전
+        _panic = volume_climax_reversal and rsi_extreme_long and bool(item.get("at_bb_lower", False))
+        if _ranging_b_check(_panic, "panic_reversal", min_combined=0.49, max_rsi=38.0):
+            return True
+
         return False
 
     # ── Batch 2 TRENDING 신호 추출 ─────────────────────────────────────────
@@ -1248,6 +1279,101 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     if _b6_check(momentum_breakout_cont_signal, "momentum_bk_cont", 0.57, 1.06, need_trend=True):
         return True
 
+    # ── Batch 7: ALL-regime 복합 전략 ──────────────────────────────────────────
+    # Support Reclaim Long: 지지선 재탈환 (하락 후 핵심 가격대 복귀 → 구조 회복)
+    support_reclaim_b7 = bool(item.get("support_reclaim_long", False))
+    if _b6_check(support_reclaim_b7, "support_reclaim", 0.54, 1.05):
+        return True
+
+    # MACD Histogram Reversal: 히스토그램 음→양 전환 (모멘텀 저점 확인)
+    macd_hist_rev_b7 = bool(item.get("macd_histogram_reversal", False))
+    if _b6_check(macd_hist_rev_b7, "macd_hist_rev", 0.53, 1.04):
+        return True
+
+    # Kill Zone ICT: 킬존 + 불리시 OB (기관 진입 시간대 + ICT 구조 최적화)
+    _kill_zone_active = bool(item.get("kill_zone_active", False))
+    _ict_cnt = int(item.get("ict_bullish_count", 0) or 0)
+    kill_zone_ok = (
+        _kill_zone_active
+        and bool(item.get("price_at_bull_ob", False))
+        and _ict_cnt >= 2
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and combined >= 0.58
+        and orderbook_bid_ask >= 1.07
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.55
+    )
+    if kill_zone_ok:
+        item["entry_profile"] = "kill_zone_ict"
+        if _b6_check(True, "kill_zone_ict", 0.58, 1.07):
+            return True
+
+    # ADX DI Cross: DI+ > DI- + ADX >= 25 (강한 방향성 확인 추세)
+    _adx_b7 = float(item.get("adx_val", 0.0) or 0.0)
+    _di_plus_b7 = float(item.get("di_plus", 0.0) or 0.0)
+    _di_minus_b7 = float(item.get("di_minus", 0.0) or 0.0)
+    adx_di_cross_ok = (
+        _adx_b7 >= 25.0
+        and _di_plus_b7 > _di_minus_b7
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment in {"trend_long", "pullback_long"}
+        and trend_score >= 0.68
+        and combined >= 0.62
+        and orderbook_bid_ask >= 1.07
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.55
+        and trend_extension_pct <= 3.5
+    )
+    if adx_di_cross_ok:
+        item["entry_profile"] = "adx_di_cross"
+        if _strategy_is_disabled("crypto.adx_di_cross"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.adx_di_cross", entry_profile="adx_di_cross",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "adx_di_cross hot") or "adx_di_cross hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
+    # Momentum High Volume: 거래량 폭발 + 돌파 이중 확인 (매수세 폭발 브레이크아웃)
+    momentum_high_vol_ok = (
+        vol_surge_long_signal
+        and breakout_vol_confirm_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and trend_score >= 0.65
+        and combined >= 0.60
+        and orderbook_bid_ask >= 1.08
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.53
+    )
+    if momentum_high_vol_ok:
+        item["entry_profile"] = "momentum_high_vol"
+        if _strategy_is_disabled("crypto.momentum_high_vol"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.momentum_high_vol", entry_profile="momentum_high_vol",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "momentum_high_vol hot") or "momentum_high_vol hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
     common_guards = (
         signal_freshness >= 0.58               # 0.55 → 0.58: 더 신선한 신호만
         and -0.30 <= micro_move_3 <= 0.95      # 상한 1.20 → 0.95: 이미 올라간 뒤 진입 차단
@@ -1298,16 +1424,17 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     # 강화 조건: "range" 제거, stream_ignition 필수, 임계값 대폭 상향
     stream_ignition_val = bool(item.get("stream_ignition", False))
     obvious_trend_ok = (
-        trend_alignment in {"trend_long", "pullback_long"}   # "range" 제거
-        and trend_alignment != "range"                        # 명시적 이중 차단
+        trend_alignment == "trend_long"                       # pullback_long 완전 제거
+        # 데이터 근거: obvious_trend 78건 중 pullback_long 정렬 = 99% peak=0
+        # trend_long만 허용: 진짜 상승추세에서만 진입 (pullback은 pullback_long 전략이 담당)
         and bool(item.get("trend_entry_allowed", False))      # trend_early 불인정
-        and trend_score >= 0.85                               # 0.68 → 0.85
-        and chart_score >= 0.82                               # 0.76 → 0.82
-        and combined >= 0.72                                  # 0.52 → 0.72
+        and trend_score >= 0.88                               # 0.85 → 0.88: 더 강한 추세만
+        and chart_score >= 0.82                               # 유지
+        and combined >= 0.78                                  # 0.72 → 0.78: 복합점수 강화
         and stream_ignition_val                               # stream_ignition 필수
-        and signal_freshness >= 0.55                          # 0.50 → 0.55
-        and trend_extension_pct <= 6.0                        # 8.5 → 6.0
-        and micro_vwap_gap <= 4.0                             # 6.5 → 4.0
+        and signal_freshness >= 0.58                          # 0.55 → 0.58
+        and trend_extension_pct <= 5.0                        # 6.0 → 5.0: 과확장 차단 강화
+        and micro_vwap_gap <= 3.5                             # 4.0 → 3.5
         and not obvious_top_risk
     )
     if common_guards and (standard_ok or early_ok):
@@ -1990,14 +2117,19 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and buy_ratio >= 0.55
         )
     elif entry_profile in {
+        # RANGING Batch 3-6
         "multi_ranging", "demand_zone", "vwap_rsi_combo", "hammer_at_support",
         "higher_lows", "inside_bar_break", "bb_squeeze_break",
         "breakout_vol_confirm", "rsi_bullish_div", "trend_reversal_early",
-        "ema_bounce",  # 신규 추가
+        "ema_bounce",
+        # Batch 7: RANGING 복합 과매도 전략
+        "rsi_extreme_bounce", "volume_climax_bounce", "mfi_stoch_oversold",
+        "keltner_rsi_bounce", "cci_bb_bounce", "williams_vol_bounce", "panic_reversal",
+        # Batch 7: ALL-regime 구조/모멘텀 반전
+        "support_reclaim", "macd_hist_rev",
     }:
-        # RANGING Batch 3-6 + ema_bounce 전략
-        # trend_ignition보다 완화 (RANGING에서 move_15≥0.35 불가),
-        # range_scalp보다 조금 강화 (방향성 변화 확인 필요)
+        # B3-7 공통 ignition: 방향 전환 확인 (RANGING에서 move_15≥0.35 불가)
+        # panic_reversal: 반등 초기 모멘텀 미약할 수 있어 조건 동일 유지
         ignition = (
             stream_ok
             and ticks_15 >= 2

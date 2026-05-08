@@ -1264,13 +1264,15 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
                 _close_position(position, "rapid_target_hit")
                 paper_closed += 1
-            elif is_obvious_trend and minutes_open >= 0.25 and peak_pnl <= 0.05 and position.pnl_pct <= -0.22:
-                # obvious_trend 실패 빠른 청산: -0.35% → -0.22% (avg -0.50% 절감)
+            elif is_obvious_trend and minutes_open >= 1.5 and peak_pnl <= 0.05 and position.pnl_pct <= -0.22:
+                # obvious_trend 실패 빠른 청산: 0.25min → 1.5min (슬리피지 흡수 시간 확보)
+                # 근거: 진입 15초 내 -0.22% 조건 발동 = 슬리피지 + 정상 조정을 실패로 오판
+                # 1.5분(~11사이클)은 진짜 방향 확인에 충분한 시간
                 closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
                 _close_position(position, "rapid_obvious_trend_fail")
                 paper_closed += 1
-            elif is_obvious_trend and position.pnl_pct <= -0.38:
-                # obvious_trend 최대 손실 -0.45% → -0.38%: avg -0.50% 절감 목표
+            elif is_obvious_trend and position.pnl_pct <= -0.42:
+                # obvious_trend 최대 손실 -0.38% → -0.42%: 슬리피지 감안 (진입비용 ~0.1%)
                 closed_symbols.append((position.symbol, "rapid_obvious_trend_fail"))
                 _close_position(position, "rapid_obvious_trend_fail")
                 paper_closed += 1
