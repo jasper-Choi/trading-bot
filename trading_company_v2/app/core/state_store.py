@@ -1344,6 +1344,18 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 closed_symbols.append((position.symbol, "rapid_stop_hit"))
                 _close_position(position, "rapid_stop_hit")
                 paper_closed += 1
+            elif (
+                # 3분 타임컷: 진입 후 3분 경과 + peak 수익 없음 + 소폭 손실 → 기회비용 즉시 절감
+                # Gemini 제안: peak < +0.2% at 3min → 모멘텀 없음, 74% peak=0 패턴 대응
+                # rapid_tick_failed_start(0.33min/-0.22%)와 rapid_no_lift(10min/-0.30%) 사이 공백 메움
+                not is_range_scalp_rapid       # range_scalp은 별도 타임아웃 규칙 적용
+                and minutes_open >= 3.0        # 3분 경과 (정상 조정 확인 충분한 시간)
+                and peak_pnl <= 0.05           # 한 번도 의미있는 수익 없음 (peak=0% 패턴)
+                and position.pnl_pct <= -0.10  # 현재 소폭 손실 (flat/소폭+ 포지션은 유지)
+            ):
+                closed_symbols.append((position.symbol, "time_cut_3min"))
+                _close_position(position, "time_cut_3min")
+                paper_closed += 1
             elif minutes_open >= 4.0 and peak_pnl <= 0.05 and position.pnl_pct <= -0.75:
                 closed_symbols.append((position.symbol, "rapid_failed_start"))
                 _close_position(position, "rapid_failed_start")

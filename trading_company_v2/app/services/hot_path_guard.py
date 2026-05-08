@@ -532,8 +532,16 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             return True
         # 18. panic_reversal — 3중 과매도 확인 (가장 강한 평균회귀 신호)
         # RSI 극단 + BB 하단 + 거래량 클라이맥스 = 공포의 절정, 최고 확률 반전
-        _panic = volume_climax_reversal and rsi_extreme_long and bool(item.get("at_bb_lower", False))
-        if _ranging_b_check(_panic, "panic_reversal", min_combined=0.49, max_rsi=38.0):
+        # Gemini 개선: ask-wall thinning 확인 → 공황 매도세 소진 + 매수세 회복 동시 확인
+        _panic_base = volume_climax_reversal and rsi_extreme_long and bool(item.get("at_bb_lower", False))
+        # ask 측 얇아짐 (bid/ask ≥ 1.12): 공황 매도세가 소진되고 bid가 ask를 압도 → 강한 반전 신호
+        _panic_ask_thin = orderbook_bid_ask >= 1.12
+        # 경로 1: ask-thinning 확인 → 낮은 combined 허용 (더 강한 진입 신호)
+        _panic_confirmed = _panic_base and _panic_ask_thin
+        if _ranging_b_check(_panic_confirmed, "panic_reversal", min_combined=0.49, max_rsi=38.0):
+            return True
+        # 경로 2: ask-thinning 없는 경우 → 더 높은 combined 요구 (신호 약화 보완)
+        if _ranging_b_check(_panic_base, "panic_reversal", min_combined=0.54, max_rsi=38.0):
             return True
 
         return False
@@ -1374,6 +1382,38 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             return False
         return True
 
+    # Liquidity Sweep Reversal (개미털기/스탑헌트 반전): Gemini 추천 전략
+    # 패턴: 세력이 스윙 저점 아래로 가격을 밀어 개인 스탑로스를 터치 후 즉시 반전 매집
+    # 핀바(긴 아래꼬리) + 지지선 재탈환 + RSI 극단 과매도 = V자 반전 고확률 포착
+    # TRENDING/RANGING 모두 발생 가능한 패턴 (세력 의도 = 체제 무관)
+    lsr_ok = (
+        pin_bar_long_signal                          # 긴 아래꼬리 → sweep 후 즉시 반전
+        and bool(item.get("support_reclaim_long", False))  # 지지선 재탈환 확인
+        and rsi_value <= 38.0                        # RSI 극단 과매도 (sweep 발생 구간)
+        and combined >= 0.52
+        and orderbook_bid_ask >= 1.05
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.50
+        and trend_alignment not in {"late_extension"}  # 과확장 구간 제외 (반전 불가)
+    )
+    if lsr_ok:
+        item["entry_profile"] = "liquidity_sweep"
+        if _strategy_is_disabled("crypto.liquidity_sweep"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.liquidity_sweep", entry_profile="liquidity_sweep",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "liquidity_sweep hot") or "liquidity_sweep hot"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=60,
+            )
+            return False
+        return True
+
     common_guards = (
         signal_freshness >= 0.58               # 0.55 → 0.58: 더 신선한 신호만
         and -0.30 <= micro_move_3 <= 0.95      # 상한 1.20 → 0.95: 이미 올라간 뒤 진입 차단
@@ -1638,11 +1678,16 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         is_rsi_keep = "rsi_keep" in pos_focus
         is_oi_momentum = "oi_momentum" in pos_focus
         is_demand_zone = "demand_zone" in pos_focus
-        # Batch 6
+        # Batch 6 + 7 ALL-regime + 개미털기 (ranging_b36 스타일 rapid guard 공유)
         is_b6 = any(p in pos_focus for p in (
             "vwap_rsi_combo", "breakout_vol_confirm", "hammer_at_support",
             "trend_reversal_early", "ema_bounce", "rsi_bullish_div",
             "multi_ranging", "momentum_bk_cont",
+            # Batch 7 ALL-regime
+            "support_reclaim", "macd_hist_rev", "kill_zone_ict", "adx_di_cross",
+            "momentum_high_vol",
+            # 개미털기: liquidity_sweep
+            "liquidity_sweep",
         ))
         minutes_open = _minutes_open(str(item.get("opened_at") or ""))
         reason = ""
@@ -1803,6 +1848,9 @@ def hot_guard_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
                 reason = "rapid_tick_failed_start" if peak_pnl <= 0.15 else "rapid_tick_reversal"
         if not reason and pnl_pct <= stop_pct:
             reason = "rapid_stop_hit"
+        # 3분 타임컷: peak=0 + 소폭 손실 → 기회비용 절감 (state_store rapid_guard와 동일 조건)
+        if not reason and not is_range_scalp_hot and minutes_open >= 3.0 and peak_pnl <= 0.05 and pnl_pct <= -0.10:
+            reason = "time_cut_3min"
         if not reason and minutes_open >= 4.0 and peak_pnl <= 0.05 and pnl_pct <= -0.75:
             reason = "rapid_failed_start"
         if not reason and (no_lift_reason := _crypto_no_lift_exit_reason(minutes_open, peak_pnl, pnl_pct, rapid=True)):
@@ -1918,9 +1966,16 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             f"flag {flag_val:.2f}%, stream {stream_score:.2f}, move15 {move15_val:.2f}%."
         )
     elif entry_path in {
+        # RANGING Batch 3-6: 평균회귀/구조개선/압축돌파
         "multi_ranging", "demand_zone", "vwap_rsi_combo", "hammer_at_support",
         "higher_lows", "inside_bar_break", "bb_squeeze_break",
         "breakout_vol_confirm", "rsi_bullish_div", "trend_reversal_early", "ema_bounce",
+        # RANGING Batch 7: 복합 과매도 전략 (BUG FIX: 이전에 ranging_b36 prefix 누락)
+        # 이 전략들은 target=1.80%, stop=-0.40%, range_scalp trail 규칙 적용 필요
+        "rsi_extreme_bounce", "volume_climax_bounce", "mfi_stoch_oversold",
+        "keltner_rsi_bounce", "cci_bb_bounce", "williams_vol_bounce", "panic_reversal",
+        # 개미털기: 스탑헌트 반전 (평균회귀 스타일 관리)
+        "liquidity_sweep",
     }:
         # ranging_b36 마커 → state_store에서 range_scalp 스타일 trail/stop 적용
         order_focus = (
@@ -2127,6 +2182,8 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
         "keltner_rsi_bounce", "cci_bb_bounce", "williams_vol_bounce", "panic_reversal",
         # Batch 7: ALL-regime 구조/모멘텀 반전
         "support_reclaim", "macd_hist_rev",
+        # 개미털기: 스탑헌트 V반전 (TRENDING/RANGING 모두 발화)
+        "liquidity_sweep",
     }:
         # B3-7 공통 ignition: 방향 전환 확인 (RANGING에서 move_15≥0.35 불가)
         # panic_reversal: 반등 초기 모멘텀 미약할 수 있어 조건 동일 유지
