@@ -80,13 +80,17 @@ _STRATEGY_BLOCKLIST_TTL_SECONDS = 60.0
 _strategy_blocklist_loaded_at = 0.0
 _strategy_blocklist: set[str] = set()
 
+# 영구 차단 전략: health window 밖으로 벗어나도 재활성화 불가
+# candidate_rotation: cycle-path 구조적 실패, hot-path 전용 아키텍처와 충돌
+_PERMANENTLY_DISABLED_STRATEGIES: frozenset[str] = frozenset({"crypto.candidate_rotation"})
+
 
 def _disabled_strategy_ids(force: bool = False) -> set[str]:
     """Cache disabled strategies so websocket ticks do not hit SQLite per tick."""
     global _strategy_blocklist_loaded_at, _strategy_blocklist
     now = time.monotonic()
     if not force and now - _strategy_blocklist_loaded_at < _STRATEGY_BLOCKLIST_TTL_SECONDS:
-        return set(_strategy_blocklist)
+        return set(_strategy_blocklist) | _PERMANENTLY_DISABLED_STRATEGIES
     try:
         _strategy_blocklist = {
             str(item.get("strategy_id", "") or "")
@@ -97,7 +101,7 @@ def _disabled_strategy_ids(force: bool = False) -> set[str]:
         # Hot path must never stall because diagnostics failed.
         pass
     _strategy_blocklist_loaded_at = now
-    return set(_strategy_blocklist)
+    return set(_strategy_blocklist) | _PERMANENTLY_DISABLED_STRATEGIES
 
 
 def _strategy_is_disabled(strategy_id: str) -> bool:

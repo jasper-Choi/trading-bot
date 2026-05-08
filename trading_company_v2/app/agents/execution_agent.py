@@ -92,7 +92,14 @@ class ExecutionAgent(BaseAgent):
             return "crypto.offense_probe"
         return f"crypto.{entry_profile or action or 'unknown'}"
 
+    # 영구 차단 전략: health window 밖으로 벗어나도 재활성화 불가
+    # candidate_rotation: cycle-path 구조적 실패 (0%win, 100%peak0, hot-path 전용 아키텍처와 충돌)
+    _PERMANENTLY_DISABLED: frozenset[str] = frozenset({"crypto.candidate_rotation"})
+
     def _strategy_disabled(self, strategy_id: str) -> dict | None:
+        if strategy_id in self._PERMANENTLY_DISABLED:
+            return {"strategy_id": strategy_id, "win_rate": 0.0, "capital_pnl_pct": -99.0,
+                    "peak0_pct": 100.0, "health": "disabled_candidate", "permanent": True}
         for item in self.daily_summary.get("strategy_performance_stats", []) or []:
             if str(item.get("strategy_id", "") or "") == strategy_id and item.get("health") == "disabled_candidate":
                 return item
@@ -1086,13 +1093,14 @@ class ExecutionAgent(BaseAgent):
                         blocked_plan["notes"] = list(plan.get("notes", []) or []) + skipped_candidates[:6]
                     return [self._plan_to_order(desk, blocked_plan).model_dump()]
             elif plan.get("candidate_symbols"):
-                if self.regime == "RANGING":
-                    blocked_plan = dict(plan)
-                    blocked_plan["action"] = "watchlist_only"
-                    blocked_plan["size"] = "0.00x"
-                    blocked_plan["focus"] = "Cycle-level candidate entry blocked in RANGING regime."
-                    return [self._plan_to_order(desk, blocked_plan).model_dump()]
-                all_candidates = [primary] if primary else []
+                # cycle-level candidate entry: hot-path 전용 아키텍처에서 전 regime 차단
+                # RANGING: 기존 차단, TRENDING: 추가 차단 (2026-05-07 candidate_rotation 8건 발화 원인)
+                # 사이클 계산→실행 지연(수초~수십초) 사이 모멘텀 소진 → 무조건 hot-path 진입만 허용
+                blocked_plan = dict(plan)
+                blocked_plan["action"] = "watchlist_only"
+                blocked_plan["size"] = "0.00x"
+                blocked_plan["focus"] = f"Cycle-level candidate entry blocked (hot-path only, regime={self.regime})."
+                return [self._plan_to_order(desk, blocked_plan).model_dump()]
 
         if slots <= 1 or len(all_candidates) <= 1:
             return [self._single_crypto_candidate_order(desk, plan, all_candidates, candidate_meta, skipped_candidates)]
