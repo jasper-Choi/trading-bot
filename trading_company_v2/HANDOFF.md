@@ -1,7 +1,65 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 19)
+Last updated: 2026-05-08 (session 21)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 21 — "unknown" 버킷 window crowding 해결)
+
+### 커밋 1개 — Oracle VM 배포 예정
+
+**[개선] health window에서 "unknown" strategy_id 제외 (state_store.py)**
+
+**문제:** `_strategy_performance_stats`가 최근 80건 closed positions를 평가하는데,
+과거 태깅 이전(레거시) 포지션 60건이 `strategy_id="unknown"`으로 저장돼 있어
+실제 전략 포지션이 20건만 평가 가능한 상태였음.
+→ 새 전략들이 15건 임계값 도달에 오래 걸리고, health 판단이 편향됨.
+
+**수정:** 두 곳 모두 수정:
+1. `load_daily_summary` 내 `strategy_performance_stats` 계산 (~line 1591):
+   ```python
+   # 기존: 최근 80건 모두 포함 (unknown 60건 포함)
+   [r for r in positions if r.status == "closed"][:80]
+   # 수정: strategy_id 명시된 것만 포함 (unknown/빈값 제외)
+   [r for r in positions if r.status == "closed"
+    and (r.strategy_id or "").strip() not in ("", "unknown")][:80]
+   ```
+2. `load_strategy_performance_stats` 진단 함수 (~line 2065):
+   - DB 쿼리에서 `strategy_id NOT IN (NULL, "", "unknown")` 필터 추가
+
+**효과:**
+- 이전: 80건 슬롯 중 60건이 "unknown" → 전략 20건만 평가
+- 이후: 태깅된 전략만 최대 80건 → 모든 슬롯이 실제 전략 데이터
+- candidate_rotation(8건), range_scalp(7건), obvious_trend(3건) 등 현재 태깅 데이터 전체 활용
+- 새 전략들이 데이터 쌓이면서 health 임계값(15건/10건/7건)에 더 빨리 도달
+
+**주의:** "unknown" 자체는 건강도 평가에서 제외되지만 DB에는 남아있음.
+`load_strategy_performance_stats(window=300)` 진단 함수도 동일하게 "unknown" 제외.
+
+---
+
+## 0. Latest Claude Notes - 2026-05-08 (session 20 — candidate_rotation 완전 영구 차단 + ALL-regime cycle 블록)
+
+### 커밋 2개 (7968633) — Oracle VM 배포 완료
+
+**[개선 1] candidate_rotation 영구 차단 (hot_path_guard.py + execution_agent.py)**
+- `_PERMANENTLY_DISABLED_STRATEGIES = frozenset({"crypto.candidate_rotation"})` — hot_path_guard.py (~line 79)
+- `_PERMANENTLY_DISABLED = frozenset({"crypto.candidate_rotation"})` — execution_agent.py (클래스 속성)
+- health window가 aging으로 초기화되더라도 영구 차단 유지
+- `_disabled_strategy_ids()` = health_disabled ∪ PERMANENTLY_DISABLED
+
+**[개선 2] cycle-level entry ALL-regime 차단 (execution_agent.py ~line 1088)**
+- 기존: RANGING regime에서만 candidate_symbols cycle-path 차단
+- 수정: 모든 regime에서 candidate_symbols cycle-path 차단
+- 배경: 2026-05-07 TRENDING 순간에 candidate_rotation 8건 발화
+  → session-15 RANGING-only 차단의 허점
+- 효과: regime=TRENDING/RANGING/BREAKOUT 모두 동일하게 watchlist_only
+
+**[확인] Oracle VM 배포 후 상태**
+- candidate_rotation: cnt=8/win=0%/peak0=100% → health=disabled_candidate ✅
+- shadow_signals: 오늘 없음 ✅
+- 최근 거래: 00:12 KRW-G breakout_vol_confirm (-0.63%) 1건 후 없음
+
+---
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 19 — range_scalp 품질 강화 + obvious_trend 대안 경로)
 

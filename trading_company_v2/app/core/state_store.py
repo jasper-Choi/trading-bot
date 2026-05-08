@@ -1587,10 +1587,17 @@ def load_daily_summary() -> dict:
                 "close_reason_stats": _close_reason_stats(closed_today),
                 "desk_close_reason_stats": _desk_close_reason_stats(closed_today),
                 "symbol_performance_stats": _symbol_performance_stats(positions),
-                # 최근 80건만 평가 — 오래된 RANGING 이전 데이터가 현재 전략을 비활성화하지 않도록
+                # 최근 80건 — strategy_id가 명시된 포지션만 평가.
+                # "unknown" (태깅 이전 레거시) 제외 → 실제 전략 데이터로만 health 판단.
+                # 이전: 80건 중 60건이 unknown → 전략 20건만 평가 가능.
+                # 이후: 태깅된 포지션만, 최대 80건 → 전략 건강도가 실제 성과를 반영.
                 "strategy_performance_stats": _strategy_performance_stats(
                     sorted(
-                        [r for r in positions if r.status == "closed"],
+                        [
+                            r for r in positions
+                            if r.status == "closed"
+                            and (r.strategy_id or "").strip() not in ("", "unknown")
+                        ],
                         key=lambda r: r.id or 0,
                         reverse=True,
                     )[:80]
@@ -2056,13 +2063,20 @@ def load_paper_closed_positions(limit: int = 50) -> list[dict]:
 
 
 def load_strategy_performance_stats(window: int = 300) -> list[dict]:
-    """Recent paper strategy attribution for gating and dashboard diagnostics."""
+    """Recent paper strategy attribution for gating and dashboard diagnostics.
+    Note: "unknown" strategy_id rows (pre-tagging legacy) are excluded from evaluation.
+    """
     init_db()
     try:
         with SessionLocal() as db:
             rows = db.execute(
                 select(PaperPositionRecord)
-                .where(PaperPositionRecord.status == "closed")
+                .where(
+                    PaperPositionRecord.status == "closed",
+                    PaperPositionRecord.strategy_id.isnot(None),
+                    PaperPositionRecord.strategy_id != "",
+                    PaperPositionRecord.strategy_id != "unknown",
+                )
                 .order_by(PaperPositionRecord.id.desc())
                 .limit(window)
             ).scalars().all()
