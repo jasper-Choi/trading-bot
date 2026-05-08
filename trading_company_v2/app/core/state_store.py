@@ -824,6 +824,9 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         bucket["avg_size"] = round(float(bucket.pop("_size_sum", 0.0)) / count, 4)
         bucket["health"] = (
             "disabled_candidate"
+            # 극단 케이스: 10건 이상이고 peak0 90%+ (전혀 긍정적 모멘텀 없음) → 조기 차단
+            if count >= 10 and bucket["peak0_pct"] >= 90.0
+            else "disabled_candidate"
             # 최근 15건 이상이고 명백히 실패: 승률<20% OR peak0>75% OR 자본손실>-2%
             if count >= 15 and (bucket["win_rate"] < 20.0 or bucket["peak0_pct"] >= 75.0 or bucket["capital_pnl_pct"] < -2.0)
             else "watch"
