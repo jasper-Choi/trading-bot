@@ -1,7 +1,56 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 21)
+Last updated: 2026-05-08 (session 22)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 22 — obvious_trend Path B 캐시 진입 버그 수정)
+
+### 커밋 4310884 — Oracle VM 배포 완료
+
+**[버그 수정] obvious_trend Path B가 RANGING에서 hot-path 캐시에 진입 불가 문제 해결**
+
+**근본 원인:**
+- session 19에서 hot_path_guard `obvious_trend_ok`에 **Path B** 추가 (ignition 없이 초고점수 허용)
+- 그러나 `_candidate_is_hot_entry_eligible`(RANGING)는 여전히 **stream_ignition 필수** 체크
+- → Path B 조건 부합 코인이 hot-path 캐시에 **절대 진입 불가** → Path B 단 한 번도 발화하지 않음
+- 동일 원인으로 `execution_agent._crypto_obvious_trend_entry_ok`도 Path A만 있어
+  entry_profile="obvious_trend" 미설정 → cycle plan에서도 Path B 인식 불가
+
+**수정 내용 (hot_path_guard.py + execution_agent.py):**
+
+1. `_candidate_is_hot_entry_eligible` RANGING 블록:
+   - `entry_profile=="obvious_trend"` 브랜치: Path A + **Path B** 동시 체크
+   - 추가 블록: entry_profile 미설정 코인도 Path B 기준 부합 시 캐시 진입 허용
+     (execution_agent가 아닌 경로로 온 경우 대비 safety net)
+
+2. `_crypto_obvious_trend_entry_ok` (execution_agent):
+   - Path A: stream_ignition + 표준 임계값 (기존 유지)
+   - **Path B (신규)**: ts>=0.91 + chart>=0.86 + combined>=0.84 + stream_score>=0.64 + NOT ignition
+   - `ok = _path_a or _path_b`
+   - return message에 path_label, stream_score, ignition 포함
+
+**Path B 기준 (양쪽 동일):**
+```
+trend_alignment == "trend_long"
+AND trend_score >= 0.91 / 0.85(eligibility)
+AND combined >= 0.84 / 0.75(eligibility)
+AND stream_score >= 0.64
+AND NOT stream_ignition
+AND ext <= 5.0
+```
+
+**현재 시장 진단 (07:43 UTC 재시작 후):**
+- 18개 candidates 중 Path B 근접: BLEND(comb=0.84, ts=0.94, ss=0.64, si=F, ext=4.4%)
+- SAHARA(comb=0.78, ts=0.94, ss=0.64, si=T) → Path A 기준 near-miss (combined 0.78 = 정확히 임계)
+- SOL: multi_ranging_combo=True but combined=0.35 (< 0.52) → B3-7 올바르게 차단
+- CFG: RSI=29.9 but downtrend → 올바르게 차단
+
+**다음 우선순위:**
+- obvious_trend Path B 실제 발화 여부 모니터링 (특히 완만한 상승장에서)
+- range_scalp 새 필터(session 19) 효과 누적 확인 (현재 cnt=7, 신규 거래 필요)
+- B3-7 전략 발화 대기 (극단 과매도 시장 조건 필요)
+
+---
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 21 — "unknown" 버킷 window crowding 해결)
 
