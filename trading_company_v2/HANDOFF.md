@@ -1,7 +1,46 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 13)
+Last updated: 2026-05-08 (session 14)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 14 — cycle-level stream gate + range_scalp 낙도 방어)
+
+### 현재 시장 상황 (01:46 UTC 기준)
+- regime=RANGING, stance=BALANCED, RSI=72.5 → 시장 과매수
+- ranging signals(0/14): 14개 RANGING 신호 모두 False → 진입 없음 (정상)
+- 재시작(00:51 UTC) 이후 거래 1건뿐: breakout_vol_confirm -0.63%
+- 시장이 과매도 구간으로 조정 받으면 RANGING Batch 3-6 신호 발생 예상
+
+### 커밋 7c09360 — candidate_rotation live stream gate
+**execution_agent.py:**
+- `_crypto_candidate_entry_ok` 통과 후 `summarize_stream_momentum(candidate)` 실시간 재확인
+- stream_fresh=True AND (reversal OR score<0.35 OR move15<-0.08%) → 진입 차단
+- 사이클 계산 시점과 실제 진입 시점 사이 모멘텀 소진/반전 방지
+- candidate_rotation 8건 0% 승률 개선 목적
+
+### 커밋 6336abb — range_scalp 낙도(falling knife) 방어
+**hot_path_guard.py:**
+- `_open_hot_entry`에서 range_scalp 전용 stream 체크 추가
+- stream_fresh=True AND (move15 < -0.12% OR reversal) → 진입 차단
+- RSI<=42 과매도이더라도 15s 하락 중이면 낙도 패턴 → entry_opened=0
+- rapid_range_scalp_stop avg=-0.822% 감소 목적
+
+### 진단 결과
+- obvious_trend: strategy_disabled=False (cnt=3, win=67%) → 건강
+- shadow_signals 최근 30건 모두 2026-05-07 (구버전 데이터): strategy_disabled 이유
+- 현재 서비스에서 shadow_signal 없음 = 신호 자체가 미발생 (시장 과매수 때문)
+- "crypto desk loss pressure active, recovery mode keeps only throttled entries" → 진입 차단 아님, size throttle만
+
+### 배포 현황 (2026-05-08 01:46 UTC)
+- 779a457: RSI 필터, ema_bounce, ranging_b36 trail
+- 7c09360: candidate_rotation live stream gate
+- 6336abb: range_scalp falling knife 방어
+
+### 다음 관찰 포인트
+- 시장 RSI가 50 이하로 조정 시 RANGING Batch 3-6 신호 발생 여부
+- range_scalp peak=0 비율: RSI<=42 + falling knife 방어 효과
+- candidate_rotation: live stream gate 후 승률 개선 여부
+- obvious_trend: move_60>=0.00 조건 이후 성과
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 13 — 전략 RSI 필터 + ema_bounce + ranging_b36 관리)
 
