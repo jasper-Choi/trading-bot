@@ -411,6 +411,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and signal_freshness >= 0.48
             and orderbook_bid_ask >= 1.05
             and combined >= 0.54
+            # 유동성/안정성: 소형코인·펌프코인 차단 (G vol=1.6B, vol_ratio=285x 진입 방지)
+            and (rs_vol_24h >= 2_000_000_000 or rs_vol_ratio >= 0.8)
+            and rs_vol_ratio <= 80.0  # 극단적 거래량 스파이크(펌프) 차단
         )
 
         def _ranging_b_check(signal_val: bool, profile: str, min_combined: float = 0.54) -> bool:
