@@ -4,6 +4,7 @@ from app.agents.base import BaseAgent
 from app.config import settings
 from app.core.models import AgentResult, PaperOrder
 from app.core.state_store import save_shadow_signal
+from app.services.upbit_stream_cache import summarize_stream_momentum
 
 
 STOP_LIKE_EXIT_REASONS = {
@@ -1062,7 +1063,22 @@ class ExecutionAgent(BaseAgent):
                         continue
                     ok, reason = self._crypto_candidate_entry_ok(meta)
                     if ok:
-                        eligible_candidates.append(candidate)
+                        # 사이클 계산 이후 모멘텀 소진/반전 실시간 재확인
+                        # recommendation_engine 계산 시점과 진입 시점 사이에 틱 방향이 바뀔 수 있음
+                        _live = summarize_stream_momentum(candidate)
+                        if _live.get("stream_fresh") and (
+                            _live.get("stream_reversal", False)
+                            or float(_live.get("stream_score", 0.5)) < 0.35
+                            or float(_live.get("stream_move_15s_pct", 0.0)) < -0.08
+                        ):
+                            _sc = float(_live.get("stream_score", 0))
+                            _m15 = float(_live.get("stream_move_15s_pct", 0))
+                            skipped_candidates.append(
+                                f"{candidate}: live-stream gate "
+                                f"(score={_sc:.2f} move15={_m15:.3f}% reversal={_live.get('stream_reversal')})"
+                            )
+                        else:
+                            eligible_candidates.append(candidate)
                     else:
                         skipped_candidates.append(f"{candidate}: {reason}")
                         armed_ok, armed_reason = self._crypto_range_impulse_armed(meta)
