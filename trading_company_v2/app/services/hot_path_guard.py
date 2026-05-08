@@ -1469,16 +1469,26 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     obvious_top_risk = ema_gap >= 10.0 or rsi_value >= 88.0 or bool(item.get("rsi_bearish_divergence", False))
     # obvious_trend: 진단 결과 13건 ALL peak=0.000% (RANGING 시장에서 방향 오류)
     # 강화 조건: "range" 제거, stream_ignition 필수, 임계값 대폭 상향
+    # [session-19] 대안 경로 추가: 초고점수 + stream_score>=0.64 (ignition 없이도 허용)
+    # 근거: 2026-05-06 섀도우 combined=0.75-0.97 코인들이 strategy_disabled로 전부 차단
+    #       현재 obvious_trend는 enabled → 초고점수 코인에 대한 기회 회복
     stream_ignition_val = bool(item.get("stream_ignition", False))
+    _ot_stream_score = _float(item.get("stream_score", 0.0))
     obvious_trend_ok = (
         trend_alignment == "trend_long"                       # pullback_long 완전 제거
         # 데이터 근거: obvious_trend 78건 중 pullback_long 정렬 = 99% peak=0
         # trend_long만 허용: 진짜 상승추세에서만 진입 (pullback은 pullback_long 전략이 담당)
         and bool(item.get("trend_entry_allowed", False))      # trend_early 불인정
-        and trend_score >= 0.88                               # 0.85 → 0.88: 더 강한 추세만
-        and chart_score >= 0.82                               # 유지
-        and combined >= 0.78                                  # 0.72 → 0.78: 복합점수 강화
-        and stream_ignition_val                               # stream_ignition 필수
+        and (
+            # 경로 A: stream_ignition + 표준 임계값 (기존)
+            (stream_ignition_val and trend_score >= 0.88 and chart_score >= 0.82 and combined >= 0.78)
+            or
+            # 경로 B: 초고점수 + stream 강활성 (ignition 없어도 허용)
+            # trend>=0.91, chart>=0.86, combined>=0.84, stream_score>=0.64
+            # 이 수준이면 stream이 빠른 발화 없이도 강한 추세 진행 중
+            (trend_score >= 0.91 and chart_score >= 0.86 and combined >= 0.84
+             and _ot_stream_score >= 0.64 and not stream_ignition_val)
+        )
         and signal_freshness >= 0.58                          # 0.55 → 0.58
         and trend_extension_pct <= 5.0                        # 6.0 → 5.0: 과확장 차단 강화
         and micro_vwap_gap <= 3.5                             # 4.0 → 3.5
