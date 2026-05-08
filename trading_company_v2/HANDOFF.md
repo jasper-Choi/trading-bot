@@ -1,7 +1,37 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 18)
+Last updated: 2026-05-08 (session 19)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 19 — range_scalp 품질 강화 + obvious_trend 대안 경로)
+
+### 커밋 2개 (489adee, 86610ba) — Oracle VM 배포 완료
+
+**[개선 1] range_scalp 품질 강화 (hot_path_guard.py)**
+1. `trend_alignment != "downtrend"` 추가
+   - EMA stack bearish 코인의 RSI과매도 = 낙하 중 반등이 아님
+   - SC(-0.99%), STORJ(-0.80%), ANKR(-0.59%) 하락추세 진입 차단
+2. `combined >= 0.48` 최소 복합점수 요구
+   - ranging_signal 단독 불충분; combined로 하락추세 코인 자동 필터
+3. `vol_ratio 0.8 → 1.5` 유동성 기준 강화
+   - ANKR/STORJ/B3가 vol_ratio 0.8로 통과하던 구멍 차단
+   - 이제: 150% 이상 활성화 OR 24h거래량 50억 KRW+ 이어야 통과
+
+**[개선 2] obvious_trend 대안 경로 B 추가 (hot_path_guard.py)**
+- 경로 A (기존): stream_ignition + trend>=0.88 + combined>=0.78
+- 경로 B (신규): trend>=0.91 + chart>=0.86 + combined>=0.84 + stream_score>=0.64 + NOT ignition
+- 배경: 완만한 추세 상승장에서 combined=0.75-0.97 고점수 코인 놓치는 문제 해결
+- 보수적 설계: 경로 B는 ignition=False일 때만 → 과발화 방지
+
+**[진단] range_scalp 실패 원인 규명**
+- 5실패: B3(-1.15%), STORJ(-0.80%), SC(-0.99%), ANKR(-0.59%), FIL(-0.58%)
+- 2성공: FIL(+0.22%), FIL(+0.03%)
+- 패턴: 소형/저유동성 코인 + 하락추세 코인 → 개선 필터 적용
+
+**[진단] candidate_rotation 발화 원인**
+- 8건 ALL 2026-05-07: session-15 이후 TRENDING regime 순간에 발화
+- cycle-level block은 RANGING에만 적용 → TRENDING 시 일부 통과
+- 현재: health threshold (cnt>=7, peak0=100%) → disabled_candidate → 차단
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 18 — auto-disable 3단계 + 돌파형 ignition 분리)
 
