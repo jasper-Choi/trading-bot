@@ -1,7 +1,39 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 12)
+Last updated: 2026-05-08 (session 13)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-08 (session 13 — 전략 RSI 필터 + ema_bounce + ranging_b36 관리)
+
+### 커밋 779a457 — 전략 품질 개선 패키지
+
+**hot_path_guard.py:**
+- **range_scalp**: `rsi_value <= 42.0` 추가 → 진짜 과매도 구간만 진입 (71% peak=0 → 개선 기대)
+- **_ranging_b_check max_rsi 파라미터화**: 전략 유형별 RSI 상한 차별화
+  - 평균회귀 (multi_ranging/demand_zone/vwap_rsi): max_rsi=50
+  - 망치형 (hammer_at_support): max_rsi=52
+  - RSI다이버전스 (rsi_bullish_div): max_rsi=48 (다이버전스 = 더 과매도여야)
+  - 구조개선 (higher_lows/trend_reversal): max_rsi=58
+  - 압축돌파 (inside_bar/bb_squeeze): max_rsi=65
+  - 거래량돌파 (breakout_vol_confirm): max_rsi=63
+  - EMA반등 (ema_bounce): max_rsi=55
+- **ema_bounce_long 전략 추가** (11번째 RANGING Batch 3-6): `ema_bounce_long` 신호 → "ema_bounce" 프로파일
+- **obvious_trend ignition**: `move_60 >= -0.15` → `move_60 >= 0.00` (60s 하락 중 진입 차단)
+- **ranging_b36 focus 마커**: entry_profile이 RANGING 11개 중 하나면 focus에 "ranging_b36:" 태그
+
+**state_store.py:**
+- **_position_thresholds**: ranging_b36 블록 추가 → target=1.80%, stop=-0.40%, max_cycles=90
+- **is_range_scalp/is_range_scalp_rapid**: `"ranging_b36" in focus` 포함
+  → RANGING Batch 3-6도 `_range_scalp_trail_rules` 적용 (공격적 trail/stop 관리)
+
+### 설계 의도
+- RANGING에서 평균회귀 전략(RSI≤50)과 구조개선/돌파 전략(RSI≤58-65) 명확 구분
+- ranging_b36 포지션: range_scalp처럼 빠른 trail → 목표=1.80% (RANGING에서 현실적), 손절=-0.40%
+- rapid_tick_failed_start도 ranging_b36에 적용 (range_scalp_rapid 분기)
+
+### 배포 (2026-05-08 00:51 UTC)
+- Oracle VM git pull + trading-loop.service restart 완료
+- 서비스 정상 기동 확인 (PID 1870961)
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 12 — RANGING 진입 파이프라인 완전 정비)
 
