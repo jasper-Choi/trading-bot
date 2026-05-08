@@ -369,7 +369,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         mfi_oversold = bool(item.get("mfi_oversold", False))
         local_continuation_ok = (
             (range_breakout_long or high_tight_flag_long)
-            and orderbook_bid_ask >= 0.98
+            and orderbook_bid_ask >= 1.05    # 0.98 → 1.05: 매수 우위 필수 (INJ ob=0.89로 통과 차단)
+            and combined >= 0.56             # 신규: combined 최소 기준 (중립신호 차단)
+            and rsi_value <= 65.0            # 신규: RSI 체크 (과열 구간 돌파 차단)
             and -0.35 <= micro_move_3 <= 1.55
             and micro_vwap_gap <= 4.8
             and signal_freshness >= 0.50
@@ -538,18 +540,20 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         if _ranging_b_check(bool(item.get("trend_reversal_early", False)), "trend_reversal_early", min_combined=0.54, max_rsi=58.0):
             return True
 
-        # ── RANGING 압축돌파 전략 (RSI ≤ 65: 과열 전 단계까지 허용) ──────────
-        # 6. inside_bar_breakout — 압축 후 돌파
-        if _ranging_b_check(bool(item.get("inside_bar_breakout", False)), "inside_bar_break", min_combined=0.55, max_rsi=65.0):
+        # ── RANGING 압축돌파 전략 ──────────────────────────────────────────────
+        # RSI 임계값 하향: RANGING 맥락에서 과열 구간 진입 방지
+        # 6. inside_bar_breakout — 압축 후 돌파 (65→55: RANGING에서 RSI55+ 돌파는 추세추종과 혼동)
+        if _ranging_b_check(bool(item.get("inside_bar_breakout", False)), "inside_bar_break", min_combined=0.56, max_rsi=55.0):
             return True
-        # 7. bb_squeeze_breakout — BB 스퀴즈 → 이탈
-        if _ranging_b_check(bool(item.get("bb_squeeze_breakout", False)), "bb_squeeze_break", min_combined=0.56, max_rsi=65.0):
+        # 7. bb_squeeze_breakout — BB 스퀴즈 → 이탈 (65→55: 동일)
+        if _ranging_b_check(bool(item.get("bb_squeeze_breakout", False)), "bb_squeeze_break", min_combined=0.57, max_rsi=55.0):
             return True
-        # 8. breakout_vol_confirm — 거래량 동반 돌파 확인
-        if _ranging_b_check(bool(item.get("breakout_vol_confirm", False)), "breakout_vol_confirm", min_combined=0.56, max_rsi=63.0):
+        # 8. breakout_vol_confirm — 거래량 동반 돌파 확인 (63→58)
+        if _ranging_b_check(bool(item.get("breakout_vol_confirm", False)), "breakout_vol_confirm", min_combined=0.57, max_rsi=58.0):
             return True
-        # 11. ema_bounce_long — EMA 지지 반등 (추가: 구조 개선 + EMA 지지선)
-        if _ranging_b_check(bool(item.get("ema_bounce_long", False)), "ema_bounce", min_combined=0.55, max_rsi=55.0):
+        # 11. ema_bounce_long — EMA 지지 반등 (55→45: RSI50 중립에서 발화 차단, ADA RSI=50 사례)
+        # 배경: ADA RSI=50(중립) + ema_bounce → peak=0.000% / -0.52% → max_rsi 45로 강화
+        if _ranging_b_check(bool(item.get("ema_bounce_long", False)), "ema_bounce", min_combined=0.56, max_rsi=45.0):
             return True
 
         # ── RANGING Batch 7: 복합 과매도 전략 (다중 지표 이중 확인) ──────────────
