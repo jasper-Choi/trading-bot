@@ -1,9 +1,50 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-11 (session 23 — part 2)
+Last updated: 2026-05-11 (session 24 — Korea desk 활성화 + 급락 대응 확인)
 Maintained for: Claude / Codex continuation
 
-## 0. Latest Claude Notes - 2026-05-11 (session 23 part2 — Option A+B: RANGING 전면 차단 + 백테스트 전략 이식)
+## 0. Latest Claude Notes - 2026-05-11 (session 24 — 한국주식 투트랙 + 코인 급락 대응)
+
+### 커밋 172c003, 15913a9 (hot_path_guard), 222c8ad, ada4434 (state_store) — Oracle VM 배포 완료
+
+**[긴급수정] `_ranging_base_ok` UnboundLocalError — 모든 사이클 크래시 원인**
+- 원인: 이전 세션에서 변수가 `return False` 아래 데드코드로 이동됨
+- 수정: `_ranging_stream_score`, `rs_vol_ratio`, `rs_vol_24h`, `_ranging_base_ok` 정의를
+  ema_bounce 블록 앞으로 이동
+- 커밋 172c003
+
+**[진입 조건 완화] RSI 임계값 조정**
+- ema_bounce: RSI 40 → 50
+- multi_ranging: RSI 45 → 55
+- 커밋 15913a9
+
+**[한국 주식 desk 활성화]**
+- Oracle VM `.env`: `ACTIVE_DESKS=crypto,korea`
+- Korea position thresholds: target=25% (사실상 미도달 — 트레일링 전담), stop=-2.5%, max_cycles=2700
+- `_korea_trail_rules` 추가:
+  - peak ≥ 15%: giveback 3.5%, floor 10%
+  - peak ≥ 8%: giveback 3.0%, floor 5%
+  - peak ≥ 4%: giveback 3.5%, floor 2%
+- Korea 전용 청산 블록 (`korea_trail` 이유) state_store에 추가
+- 전략 근거: stock_backtest_v3.py (20일 고점 돌파 + vol 2.5x + RSI 55-78 + EMA20)
+  - 셀트리온 승률 85.7%/Sharpe 26.6, 클래시스 80%/15.3, 현대차 80%/22.2
+- 커밋 222c8ad, ada4434
+
+**[코인 WebSocket 실시간 급락 대응 — 이미 구현완료 확인]**
+- `hot_guard_crypto_tick` (hot_path_guard.py line 1864) 존재
+- runtime.py line 178: `register_trade_callback` 등록 완료
+- 0.45초 스로틀 per symbol (20초 폴링이 아님)
+- 스탑/타겟/트레일 + 조기 실패 + 반전 신호 모두 실시간 체크
+- 한국 주식은 KIS REST 폴링 구조 → WebSocket 불가, 현 20초 폴링 유지
+
+**다음 우선순위**:
+1. Korea stock desk 성과 모니터링 (내일 장 마감 후 diag_vm_trades.py 실행)
+2. 코인 진입 재개 여부 확인 (stream_score 구조적 저하 여부)
+3. Binance 선물 연결 — 미래 계획 (숏 포지션, 서버사이드 스탑 오더)
+
+---
+
+## 0. Latest Claude Notes - 2026-05-11 (session 23 — part 2 — Option A+B: RANGING 전면 차단 + 백테스트 전략 이식)
 
 ### 커밋 2c66a44, afe0fc8 — Oracle VM 배포 완료
 
