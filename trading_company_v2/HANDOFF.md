@@ -1,7 +1,54 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-11 (session 23)
+Last updated: 2026-05-11 (session 23 — part 2)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-11 (session 23 part2 — Option A+B: RANGING 전면 차단 + 백테스트 전략 이식)
+
+### 커밋 2c66a44, afe0fc8 — Oracle VM 배포 완료
+
+**[Option A] RANGING 전략 전면 차단**
+- obvious_trend Path A/B 이외 RANGING 전략 모두 비활성 (`return False` 조기 종료)
+- 차단된 전략: range_scalp, B3-7 전략 전체 (higher_lows, trend_reversal_early, inside_bar_break 등)
+- 재활성화 조건: 실전 누적 데이터에서 특정 전략 승률 30%+ 확인 후 주석 해제
+- 코드는 보존됨 (삭제 아님)
+
+**[Option B-1] daily_persistence.py — PersistenceCNN 룰 기반 일봉 필터**
+- 신규 모듈: `app/services/daily_persistence.py`
+- Upbit 일봉 20개로 t-통계량 기반 추세 지속성 점수 계산
+  - score > 0.55: 상승 추세 지속 → TRENDING long 허용
+  - score < 0.50: 하락 추세 → 차단
+- 4시간 캐시, 백그라운드 사전 워밍
+- hot_path_guard TRENDING 전략들에 통합:
+  - obvious_trend Path B: >= 0.52
+  - ema_cross, vwap_reclaim, macd_cross: >= 0.50
+  - rsi_flip, triple_bull: >= 0.55 (더 엄격)
+  - vol_breakout: >= 0.52
+
+**[Option B-2] coin_backtest_v5 전략 실전 이식 — vol_breakout**
+- 백테스트 검증: 60분봉 거래량급등+신고점돌파+RSI(55-78)+EMA
+  - 승률~48%, 손익비~2.0, Sharpe~1.2, MDD<-20%
+- hot_path_guard: `vol_breakout` 신규 진입 경로 추가 (TRENDING 섹션 최우선)
+  - 조건: vol_surge_long + breakout_vol_confirm + RSI(55-78) + trend_entry_allowed
+          + combined>=0.58 + ob>=1.06 + stream>=0.52 + daily_persistence>=0.52
+- state_store: `_position_thresholds("vol_breakout")` → target=+4.0%, stop=-2.0%, cycles=1620
+  - 기존 스캘핑과 달리 추세 지속 구조에서 수시간 보유 허용
+
+**전체 변경 요약 (session 23)**:
+```
+RANGING:  obvious_trend(PathA/B)만 허용 — 나머지 전부 차단
+TRENDING: ema_cross, vwap_reclaim, rsi_flip, macd_cross, triple_bull (persist 필터)
+          + vol_breakout (coin_backtest_v5 전략, 최우선)
+일봉:     daily_persistence.py로 일봉 하락 추세 코인 진입 차단
+```
+
+**다음 우선순위**:
+1. vol_breakout 실제 발화 여부 확인 (vol_surge + breakout 동시 조건이 까다로움)
+2. obvious_trend Path A 발화 모니터링
+3. RANGING→TRENDING 전환 시 ema_cross/vwap_reclaim 발화 확인
+4. 승률 목표: 30%+ (현재 6.2%)
+
+---
 
 ## 0. Latest Claude Notes - 2026-05-11 (session 23 — 수익률 개선: 진입 품질 대폭 강화)
 
