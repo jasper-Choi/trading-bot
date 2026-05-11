@@ -5,3 +5,7 @@ sqlalchemy
 requests
 pytz
 websockets
+# Best3 전략 의존성
+numpy               # ML 피처 계산
+lightgbm            # MLStrategy 모델
+torch               # PersistenceCNN 모델 (CPU 전용, GPU 없어도 됨)

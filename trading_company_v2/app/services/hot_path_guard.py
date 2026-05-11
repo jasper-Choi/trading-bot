@@ -31,6 +31,11 @@ from app.services.daily_persistence import (
     get_daily_persistence_score_cached_only as _daily_persist,
     background_warm_cache as _warm_persist_cache,
 )
+from app.services.ensemble_signal import (
+    get_ensemble_signal_cached_only as _ensemble_signal,
+    background_warm_cache as _warm_ensemble_cache,
+    BUY_THRESHOLD as _ENSEMBLE_BUY_THRESHOLD,
+)
 
 
 _lock = threading.Lock()
@@ -736,6 +741,16 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     _persist_ok = _daily_persist_score >= 0.50   # 최소: 일봉 하락 추세 차단
     _persist_strong = _daily_persist_score >= 0.55  # 강화: 명확한 상승 추세
 
+    # ── Best3 앙상블 신호 (ML + Narrative + PersistenceCNN) ───────────────────
+    # best3_strategies_for_crypto.md: ml(0.20) + narrative(0.18) + persistence(0.14) 가중 평균
+    # BUY >= 0.58 / SELL <= 0.40
+    # 모델 미학습 시: ML≈0.5(룰폴백), Narrative≈0.5(F&G중립), Persistence=t-stat폴백
+    #   → 캐시 미스 또는 중립 상태에서는 차단 없이 통과 (false negative 방지)
+    # 모델 학습 완료 후: BUY ≥ 0.58 → 진입 우호, SELL ≤ 0.40 → 진입 차단
+    _best3_ensemble = _ensemble_signal(symbol)
+    _ensemble_sell = _best3_ensemble <= 0.40   # 명확한 약세 → 추가 차단
+    _ensemble_buy  = _best3_ensemble >= _ENSEMBLE_BUY_THRESHOLD  # 강한 BUY → 임계값 완화
+
     # ── Batch 2 TRENDING 신호 추출 ─────────────────────────────────────────
     ema_cross_long = bool(item.get("ema_cross_long", False))
     vwap_cross_long_signal = bool(item.get("vwap_cross_long", False))
@@ -770,12 +785,13 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
 
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성
+    # Best3 앙상블: SELL 신호(<=0.40) 시 추가 차단 / BUY 신호(>=0.58) 시 combined 요건 0.02 완화
     ema_cross_ok = (
         ema_cross_long
         and bool(item.get("trend_entry_allowed", False))
         and trend_alignment not in {"downtrend", "late_extension"}
         and trend_score >= 0.65
-        and combined >= 0.60
+        and combined >= (0.58 if _ensemble_buy else 0.60)  # BUY 앙상블 시 임계값 완화
         and orderbook_bid_ask >= 1.08
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
@@ -783,6 +799,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and signal_freshness >= 0.55
         and trend_extension_pct <= 4.0
         and _persist_ok   # 일봉 하락 추세 차단
+        and not _ensemble_sell  # Best3 앙상블 명확 약세 차단
     )
     if ema_cross_ok:
         item["entry_profile"] = "ema_cross"
@@ -812,7 +829,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and bool(item.get("trend_entry_allowed", False))
         and trend_alignment not in {"downtrend", "late_extension"}
         and trend_score >= 0.62
-        and combined >= 0.58
+        and combined >= (0.56 if _ensemble_buy else 0.58)
         and orderbook_bid_ask >= 1.06
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
@@ -820,6 +837,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and signal_freshness >= 0.55
         and trend_extension_pct <= 4.5
         and _persist_ok   # 일봉 하락 추세 차단
+        and not _ensemble_sell  # Best3 앙상블 명확 약세 차단
     )
     if vwap_reclaim_ok:
         item["entry_profile"] = "vwap_reclaim"
@@ -848,7 +866,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and bool(item.get("trend_entry_allowed", False))
         and trend_alignment not in {"downtrend", "late_extension"}
         and trend_score >= 0.60
-        and combined >= 0.56
+        and combined >= (0.54 if _ensemble_buy else 0.56)
         and orderbook_bid_ask >= 1.06
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
@@ -856,6 +874,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and signal_freshness >= 0.53
         and trend_extension_pct <= 4.5
         and _persist_strong  # RSI flip: 일봉 상승 추세가 명확할 때만 (모멘텀 전환 조기 진입)
+        and not _ensemble_sell  # Best3 앙상블 명확 약세 차단
     )
     if rsi_flip_ok:
         item["entry_profile"] = "rsi_flip"
@@ -884,7 +903,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and bool(item.get("trend_entry_allowed", False))
         and trend_alignment not in {"downtrend", "late_extension"}
         and trend_score >= 0.60
-        and combined >= 0.56
+        and combined >= (0.54 if _ensemble_buy else 0.56)
         and orderbook_bid_ask >= 1.06
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
@@ -892,6 +911,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and signal_freshness >= 0.53
         and trend_extension_pct <= 4.5
         and _persist_ok  # 일봉 하락 추세 차단
+        and not _ensemble_sell  # Best3 앙상블 명확 약세 차단
     )
     if macd_cross_ok:
         item["entry_profile"] = "macd_cross"
@@ -920,7 +940,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and bool(item.get("trend_entry_allowed", False))
         and trend_alignment not in {"downtrend", "late_extension"}
         and trend_score >= 0.65
-        and combined >= 0.60
+        and combined >= (0.58 if _ensemble_buy else 0.60)
         and orderbook_bid_ask >= 1.08
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
@@ -928,6 +948,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and signal_freshness >= 0.55
         and trend_extension_pct <= 3.5
         and _persist_strong  # 3연속 양봉: 일봉 추세 지속 확인 (단기 노이즈 필터)
+        and not _ensemble_sell  # Best3 앙상블 명확 약세 차단
     )
     if triple_bull_ok:
         item["entry_profile"] = "triple_bull"
@@ -1795,9 +1816,16 @@ def refresh_hot_entry_candidates(state: dict[str, Any] | None = None, force: boo
     # 새 캔디데이트 목록이 확정된 후 API 호출 → 다음 tick evaluation 시 캐시 히트
     if prepared:
         import threading as _threading
+        _syms = list(prepared.keys())
         _threading.Thread(
             target=_warm_persist_cache,
-            args=[list(prepared.keys())],
+            args=[_syms],
+            daemon=True,
+        ).start()
+        # Best3 앙상블 캐시 워밍 (ML + Narrative + PersistenceCNN)
+        _threading.Thread(
+            target=_warm_ensemble_cache,
+            args=[_syms],
             daemon=True,
         ).start()
 
