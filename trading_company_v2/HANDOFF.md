@@ -1,7 +1,56 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-08 (session 22)
+Last updated: 2026-05-11 (session 23)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-11 (session 23 — 수익률 개선: 진입 품질 대폭 강화)
+
+### 커밋 7bb89ce — Oracle VM 배포 완료
+
+**배경: 32건 거래 분석 → 6.2% 승률, -11.73% 누적**
+
+| 전략 | 건수 | 승률 | 원인 |
+|------|------|------|------|
+| trend_reversal_early | 7 | 0% | 하락 중 CHoCH 진입(칼날 잡기) |
+| higher_lows | 7 | 0% | 구조신호 발화 시 가격 여전히 하락 중 |
+| range_scalp | 4 | 0% | 과매도지만 실시간 매수세 없음 |
+| inside_bar_break | 3 | 0% | 거짓 돌파 |
+| tick_ignition | 6 | 17% | DKA +1.5% (유일한 큰 승리) |
+| ema_bounce | 3 | 33% | WLD +0.68% |
+
+**근본 원인:** 구조적 신호(차트 패턴) ≠ 실시간 모멘텀
+→ PersistenceCNN 인사이트: 가격이 이미 반전 방향으로 움직이고 있을 때만 진입
+
+**변경사항 (hot_path_guard.py):**
+1. `_ranging_base_ok`: `stream_score >= 0.48` 추가 (전체 RANGING 전략에 적용)
+2. `_ranging_b_check()`: `min_stream`, `min_micro3` 파라미터 신규 추가
+3. `higher_lows`(RANGING): combined 0.55→0.57, RSI 58→52, stream≥0.52, micro3≥0
+4. `trend_reversal_early`(RANGING): combined 0.54→0.57, RSI 58→52, stream≥0.54, micro3≥0
+5. `inside_bar_break`(RANGING): combined 0.56→0.58, RSI 55→50, stream≥0.52
+6. `range_scalp_hot_ok`: micro_move_3 범위 -1.0→0.0 (하락 중 진입 차단), stream≥0.52
+7. `higher_lows`(TRENDING): stream≥0.52, micro3≥0 추가
+8. `_b6_check()`: min_stream=0.48 파라미터 추가 (모든 B6 전략 틱 모멘텀 최소 기준)
+9. `trend_reversal_early`(_b6): combined 0.55→0.57, ob 1.05→1.06, stream≥0.52
+10. `ema_bounce`(RANGING): min_stream=0.52 추가
+
+**AI-Trader / best3_strategies.md 분석:**
+- AI-Trader(HKUDS): 소셜 트레이딩 플랫폼 — 직접 적용 불가, 개념만 참조
+- PersistenceCNN: stream_score + micro_move_3로 "추세 지속 확률" 근사 적용 완료
+- MLStrategy: combined_score가 이미 다중 피처 앙상블 역할 → 별도 LightGBM 불필요
+- NarrativeMomentum: 단기 스캘핑에 부적합 (뉴스 기반 → 장기 포지션용)
+
+**기대 효과:**
+- trend_reversal_early/higher_lows: 7건 0승 → stream+micro3 필터로 거짓 신호 대폭 차단
+- range_scalp: micro_move_3 ≥ 0 요구로 하락 중 진입 차단
+- 전체 RANGING: stream_score < 0.48 코인 자동 차단
+
+**다음 우선순위:**
+1. 새 필터 적용 후 승률 모니터링 (목표: 승률 30%+, peak0 < 50%)
+2. obvious_trend Path B 실제 발화 확인
+3. tick_ignition 추가 개선 (현재 유일하게 양수 수익 가능 전략)
+4. 충분한 데이터 축적 후 HANDOFF 재업데이트
+
+---
 
 ## 0. Latest Claude Notes - 2026-05-08 (session 22 — obvious_trend Path B 캐시 진입 버그 수정)
 
