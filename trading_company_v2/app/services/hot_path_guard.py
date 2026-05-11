@@ -434,7 +434,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and not dev_blocks_long_meanrev
             and range_scalp_liquidity_ok
             and orderbook_bid_ask >= 1.10  # 1.05 → 1.10: 갭점프 방지 (B3 ob=1.085 차단)
-            and -1.0 <= micro_move_3 <= 1.50
+            and 0.0 <= micro_move_3 <= 1.50  # -1.0→0.0: 최근 3틱이 하락 중이면 range_scalp 진입 차단
             and not bool(item.get("rsi_bearish_divergence", False))
             and not bool(item.get("micro_exhausted", False))
             and signal_freshness >= 0.50
@@ -445,6 +445,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and trend_alignment != "downtrend"
             # 최소 복합점수: ranging_signal 단독으로는 품질 보장 불가
             and combined >= 0.48
+            # PersistenceCNN 인사이트: 틱 레벨 매수 모멘텀 확인 (4건 0승 방지)
+            # stream_score < 0.52 = 매수세 미약 → 과매도 구간이어도 반등 없을 가능성 높음
+            and _ranging_stream_score >= 0.52
         )
         if range_scalp_hot_ok:
             item["entry_profile"] = "range_scalp"
@@ -470,6 +473,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         # ── RANGING 호환 Batch 3-6 전략 ──────────────────────────────────────
         # RANGING 시장에서도 발화 가능한 전략들: 평균회귀/구조개선/압축돌파
         # (TRENDING 전용 전략은 위 RANGING 블록에서 이미 차단됨)
+        _ranging_stream_score = _float(item.get("stream_score", 0.0))
         _ranging_base_ok = (
             not hard_overheat
             and not bool(item.get("rsi_bearish_divergence", False))
@@ -480,6 +484,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             # 유동성/안정성: 소형코인·펌프코인 차단 (G vol=1.6B, vol_ratio=285x 진입 방지)
             and (rs_vol_24h >= 2_000_000_000 or rs_vol_ratio >= 0.8)
             and rs_vol_ratio <= 80.0  # 극단적 거래량 스파이크(펌프) 차단
+            # PersistenceCNN 인사이트: 구조적 신호만으로는 부족 — 실시간 틱 매수 모멘텀 필수
+            # stream_score < 0.48 = 매수/매도 균형 또는 매도 우위 → 진입하면 즉각 역방향 가능성 높음
+            and _ranging_stream_score >= 0.48
         )
 
         def _ranging_b_check(
@@ -487,18 +494,26 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             profile: str,
             min_combined: float = 0.54,
             max_rsi: float = 65.0,
+            min_stream: float = 0.0,
+            min_micro3: float = -9.0,
         ) -> bool:
             """RANGING 블록 내 Batch 전략 간이 체크.
             max_rsi: 전략 유형별 RSI 상한
               평균회귀(demand_zone/vwap_rsi/hammer/rsi_div/multi): ≤ 50
               구조개선(higher_lows/trend_reversal): ≤ 58
               압축돌파(bb_squeeze/breakout_vol/inside_bar/ema_bounce): ≤ 65
+            min_stream: 전략별 stream_score 최소값 (PersistenceCNN 인사이트: 틱 모멘텀 확인)
+            min_micro3: 최근 3틱 방향 최소값 (> 0이면 가격이 이미 반등 중이어야 진입)
             """
             if not signal_val or not _ranging_base_ok:
                 return False
             if combined < min_combined:
                 return False
             if rsi_value > max_rsi:          # RSI 방향 필터: 과매수 구간 진입 차단
+                return False
+            if _ranging_stream_score < min_stream:   # 틱 모멘텀 추가 확인
+                return False
+            if micro_move_3 < min_micro3:            # 최근 가격 방향 확인
                 return False
             item["entry_profile"] = profile
             sid = f"crypto.{profile}"
@@ -532,18 +547,32 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         if _ranging_b_check(bool(item.get("rsi_bullish_div", False)), "rsi_bullish_div", min_combined=0.52, max_rsi=48.0):
             return True
 
-        # ── RANGING 구조개선 전략 (RSI ≤ 58: 방향성 전환 초기 포착) ──────────
+        # ── RANGING 구조개선 전략 (RSI ≤ 52: 방향성 전환 초기 포착) ──────────
         # 5. consecutive_higher_lows — 저점 높아지는 구조 개선
-        if _ranging_b_check(bool(item.get("consecutive_higher_lows", False)), "higher_lows", min_combined=0.55, max_rsi=58.0):
+        # 강화 근거: 7건 0승, peak0=100% → 구조신호 발화 시 가격이 여전히 하락 중
+        # PersistenceCNN 인사이트: 구조 신호 + 실시간 틱 반등 동시 확인 필수
+        #   - max_rsi 58→52: 중립 RSI(58 근처) 제거, 명확한 반등 구간만
+        #   - min_stream=0.52: 틱 레벨에서 매수세 우위가 확인되어야
+        #   - min_micro3=0.0: 최근 3틱이 이미 올라가는 중이어야 진입 유효
+        if _ranging_b_check(bool(item.get("consecutive_higher_lows", False)), "higher_lows", min_combined=0.57, max_rsi=52.0, min_stream=0.52, min_micro3=0.0):
             return True
         # 10. trend_reversal_early — CHoCH 단독 조기 포착
-        if _ranging_b_check(bool(item.get("trend_reversal_early", False)), "trend_reversal_early", min_combined=0.54, max_rsi=58.0):
+        # 강화 근거: 7건 0승, peak0=100% → CHoCH 발생했지만 실제 반전 아직 안 시작
+        # 반전이 시작되지 않은 CHoCH는 이른 진입(칼날 잡기) → stream+micro 확인 필수
+        #   - max_rsi 58→52: 동일 이유
+        #   - min_stream=0.54: higher_lows보다 더 엄격 (CHoCH는 더 조기 신호라 위험)
+        #   - min_micro3=0.0: 가격이 이미 반등 중이어야
+        if _ranging_b_check(bool(item.get("trend_reversal_early", False)), "trend_reversal_early", min_combined=0.57, max_rsi=52.0, min_stream=0.54, min_micro3=0.0):
             return True
 
         # ── RANGING 압축돌파 전략 ──────────────────────────────────────────────
         # RSI 임계값 하향: RANGING 맥락에서 과열 구간 진입 방지
-        # 6. inside_bar_breakout — 압축 후 돌파 (65→55: RANGING에서 RSI55+ 돌파는 추세추종과 혼동)
-        if _ranging_b_check(bool(item.get("inside_bar_breakout", False)), "inside_bar_break", min_combined=0.56, max_rsi=55.0):
+        # 6. inside_bar_breakout — 압축 후 돌파
+        # 강화 근거: 3건 0승, peak0=100% → 돌파 직후 즉각 실패 → 거짓 돌파 차단 필요
+        #   - max_rsi 55→50: RANGING에서 RSI50+ 돌파는 평균회귀 방향 아님
+        #   - min_combined=0.58: 신호 품질 최소 기준 상향
+        #   - min_stream=0.52: 돌파 방향으로 틱 모멘텀 확인 필수
+        if _ranging_b_check(bool(item.get("inside_bar_breakout", False)), "inside_bar_break", min_combined=0.58, max_rsi=50.0, min_stream=0.52):
             return True
         # 7. bb_squeeze_breakout — BB 스퀴즈 → 이탈 (65→55: 동일)
         if _ranging_b_check(bool(item.get("bb_squeeze_breakout", False)), "bb_squeeze_break", min_combined=0.57, max_rsi=55.0):
@@ -553,7 +582,8 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             return True
         # 11. ema_bounce_long — EMA 지지 반등 (55→45: RSI50 중립에서 발화 차단, ADA RSI=50 사례)
         # 배경: ADA RSI=50(중립) + ema_bounce → peak=0.000% / -0.52% → max_rsi 45로 강화
-        if _ranging_b_check(bool(item.get("ema_bounce_long", False)), "ema_bounce", min_combined=0.56, max_rsi=45.0):
+        # LAYER -0.86% 사례 방지: stream_score ≥ 0.52 추가 (틱 레벨 매수세 확인)
+        if _ranging_b_check(bool(item.get("ema_bounce_long", False)), "ema_bounce", min_combined=0.56, max_rsi=45.0, min_stream=0.52):
             return True
 
         # ── RANGING Batch 7: 복합 과매도 전략 (다중 지표 이중 확인) ──────────────
@@ -1098,6 +1128,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         return True
 
     # Consecutive Higher Lows: 3연속 HL 구조 — 상승 추세 구조 진입
+    # stream_score ≥ 0.52: 구조 신호만으로는 부족 — 틱 레벨 매수 모멘텀 동시 확인
     higher_lows_hp_ok = (
         consecutive_higher_lows_signal
         and bool(item.get("trend_entry_allowed", False))
@@ -1109,6 +1140,8 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not bool(item.get("micro_exhausted", False))
         and not hard_overheat
         and signal_freshness >= 0.55
+        and _float(item.get("stream_score", 0.0)) >= 0.52  # 틱 모멘텀 확인
+        and micro_move_3 >= 0.0  # 가격이 이미 상승 중이어야
     )
     if higher_lows_hp_ok:
         item["entry_profile"] = "higher_lows"
@@ -1295,7 +1328,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
 
     # ── Batch 6 진입 경로 ────────────────────────────────────────────────────
 
-    def _b6_check(signal_val: bool, profile: str, min_combined: float = 0.54, min_ob: float = 1.05, need_trend: bool = False) -> bool:
+    def _b6_check(signal_val: bool, profile: str, min_combined: float = 0.54, min_ob: float = 1.05, need_trend: bool = False, min_stream: float = 0.48) -> bool:
         if not signal_val:
             return False
         if need_trend and not bool(item.get("trend_entry_allowed", False)):
@@ -1305,6 +1338,8 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         if bool(item.get("rsi_bearish_divergence", False)) or bool(item.get("micro_exhausted", False)) or hard_overheat:
             return False
         if trend_alignment in {"downtrend", "late_extension"}:
+            return False
+        if _float(item.get("stream_score", 0.0)) < min_stream:  # 틱 모멘텀 최소 기준
             return False
         item["entry_profile"] = profile
         sid = f"crypto.{profile}"
@@ -1327,7 +1362,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         return True
     if _b6_check(hammer_at_support_signal, "hammer_at_support", 0.52, 1.04):
         return True
-    if _b6_check(trend_reversal_early_signal, "trend_reversal_early", 0.55, 1.05, need_trend=True):
+    if _b6_check(trend_reversal_early_signal, "trend_reversal_early", 0.57, 1.06, need_trend=True, min_stream=0.52):
         return True
     if _b6_check(ema_bounce_long_signal, "ema_bounce", 0.53, 1.05):
         return True
