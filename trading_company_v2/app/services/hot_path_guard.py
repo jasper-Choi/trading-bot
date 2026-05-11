@@ -359,6 +359,22 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         ):
             return True  # Path B 후보: ultra-high score → 캐시 진입 허용 (tick에서 obvious_trend_ok Path B 재검증)
 
+        # ── RANGING 공통 기본 조건 (ema_bounce/multi_ranging 모두 사용) ────────────
+        _ranging_stream_score = _float(item.get("stream_score", 0.0))
+        rs_vol_ratio = _float(item.get("vol_ratio", 0.0))
+        rs_vol_24h = _float(item.get("volume_24h_krw", 0.0))
+        _ranging_base_ok = (
+            not hard_overheat
+            and not bool(item.get("rsi_bearish_divergence", False))
+            and not bool(item.get("micro_exhausted", False))
+            and signal_freshness >= 0.48
+            and orderbook_bid_ask >= 1.05
+            and combined >= 0.54
+            and (rs_vol_24h >= 2_000_000_000 or rs_vol_ratio >= 0.8)
+            and rs_vol_ratio <= 80.0
+            and _ranging_stream_score >= 0.48
+        )
+
         # ── RANGING: ema_bounce + multi_ranging 선택적 복원 ─────────────────────
         # WLD ema_bounce +0.68%(peak 1.11%) 실전 수익 확인 → 매우 엄격한 조건으로 복원
         # multi_ranging_combo: 다중 신호 동시 발화 → 단일 신호보다 신뢰성 높음
