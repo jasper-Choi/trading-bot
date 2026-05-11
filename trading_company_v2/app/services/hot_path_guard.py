@@ -359,17 +359,43 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         ):
             return True  # Path B 후보: ultra-high score → 캐시 진입 허용 (tick에서 obvious_trend_ok Path B 재검증)
 
-        # ── [Option A] RANGING: obvious_trend Path A/B 이외 모든 전략 차단 ──────
-        # 근거: 실전 데이터 32건 분석 결과
-        #   range_scalp(4건 0승), higher_lows(7건 0승), trend_reversal_early(7건 0승)
-        #   inside_bar_break(3건 0승) → 구조적 신호 기반 RANGING 진입은 edge 없음
-        # 남기는 것: obvious_trend(stream_ignition 이벤트 기반) 만이 실증된 edge
-        # TRENDING 전환 시 아래 섹션(ema_cross/vwap_reclaim 등)으로 자연스럽게 이관됨
+        # ── RANGING: ema_bounce + multi_ranging 선택적 복원 ─────────────────────
+        # WLD ema_bounce +0.68%(peak 1.11%) 실전 수익 확인 → 매우 엄격한 조건으로 복원
+        # multi_ranging_combo: 다중 신호 동시 발화 → 단일 신호보다 신뢰성 높음
+        # 나머지(higher_lows, trend_reversal_early, range_scalp, inside_bar_break 등)는 계속 차단
+        _ema_bounce_long = bool(item.get("ema_bounce_long", False))
+        if (
+            _ema_bounce_long
+            and _ranging_base_ok
+            and combined >= 0.57            # 기존 0.56 → 0.57
+            and rsi_value <= 40.0           # 기존 45 → 40: 진짜 과매도만
+            and _ranging_stream_score >= 0.54  # 기존 0.52 → 0.54: 틱 매수세 강해야
+            and micro_move_3 >= 0.0         # 가격이 이미 반등 중
+            and not _strategy_is_disabled("crypto.ema_bounce")
+        ):
+            item["entry_profile"] = "ema_bounce"
+            return True
+
+        _multi_ranging_combo = bool(item.get("multi_ranging_combo", False))
+        if (
+            _multi_ranging_combo
+            and _ranging_base_ok
+            and combined >= 0.54
+            and rsi_value <= 45.0           # 복합신호라 조금 더 허용
+            and _ranging_stream_score >= 0.52
+            and micro_move_3 >= 0.0         # 가격이 이미 반등 중
+            and not _strategy_is_disabled("crypto.multi_ranging")
+        ):
+            item["entry_profile"] = "multi_ranging"
+            return True
+
+        # 나머지 모든 RANGING 전략 차단
+        # (higher_lows 0승, trend_reversal_early 0승, range_scalp 0승, inside_bar_break 0승)
         return False
 
         # ────────────────────────────────────────────────────────────────────────
-        # [BELOW: RANGING B3-7 전략 - Option A로 비활성화, 코드 보존]
-        # 재활성화 조건: 실전 누적 데이터에서 특정 전략 승률 30%+ 확인 후
+        # [BELOW: 나머지 RANGING B3-7 전략 — 계속 비활성화, 코드 보존]
+        # 재활성화 조건: 실전 누적 데이터에서 승률 30%+ 확인 후 위 return False 위로 이동
         # ────────────────────────────────────────────────────────────────────────
         bb_squeeze_bounce = bool(item.get("bb_squeeze_bounce", False))
         vwap_deviation_long = bool(item.get("vwap_deviation_long", False))
