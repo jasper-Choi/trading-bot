@@ -314,7 +314,14 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             _ot_trend = _float(item.get("trend_follow_score", 0.0))
             _ot_combined = _float(item.get("combined_score", 0.0))
             _ot_ignition = bool(item.get("stream_ignition", False))
-            _ot_stream_score = _float(item.get("stream_score", 0.0))
+            _ot_cached_stream = _float(item.get("stream_score", 0.0))
+            if _ot_cached_stream < 0.01:
+                _ot_live = summarize_stream_momentum(symbol, max_age_seconds=60.0)
+                _ot_stream_score = float(_ot_live.get("stream_score", 0.0))
+                if not _ot_ignition:
+                    _ot_ignition = bool(_ot_live.get("stream_ignition", False))
+            else:
+                _ot_stream_score = _ot_cached_stream
             _ot_ext = _float(item.get("trend_extension_pct", 0.0))
             _ot_ta = str(item.get("trend_alignment", "") or "")
             # 경로 A: stream_ignition + 표준 임계값
@@ -348,8 +355,15 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         _elig_ta = str(item.get("trend_alignment", "") or "")
         _elig_trend = _float(item.get("trend_follow_score", 0.0))
         _elig_combined = _float(item.get("combined_score", 0.0))
-        _elig_stream_score = _float(item.get("stream_score", 0.0))
+        _elig_cached_stream = _float(item.get("stream_score", 0.0))
         _elig_ignition = bool(item.get("stream_ignition", False))
+        if _elig_cached_stream < 0.01:
+            _elig_live = summarize_stream_momentum(symbol, max_age_seconds=60.0)
+            _elig_stream_score = float(_elig_live.get("stream_score", 0.0))
+            if not _elig_ignition:
+                _elig_ignition = bool(_elig_live.get("stream_ignition", False))
+        else:
+            _elig_stream_score = _elig_cached_stream
         _elig_ext = _float(item.get("trend_extension_pct", 0.0))
         if (
             _elig_ta == "trend_long"
@@ -365,7 +379,14 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             return True  # Path B 후보: ultra-high score → 캐시 진입 허용 (tick에서 obvious_trend_ok Path B 재검증)
 
         # ── RANGING 공통 기본 조건 (ema_bounce/multi_ranging 모두 사용) ────────────
-        _ranging_stream_score = _float(item.get("stream_score", 0.0))
+        # stream_score: 캔디데이트 dict에는 0.0으로 저장됨 (CryptoDeskAgent가 lead market만 계산)
+        # → 라이브 WebSocket 캐시에서 직접 조회 (max_age 60s로 여유 있게)
+        _cached_stream = _float(item.get("stream_score", 0.0))
+        if _cached_stream < 0.01:
+            _live_stream = summarize_stream_momentum(symbol, max_age_seconds=60.0)
+            _ranging_stream_score = float(_live_stream.get("stream_score", 0.0))
+        else:
+            _ranging_stream_score = _cached_stream
         rs_vol_ratio = _float(item.get("vol_ratio", 0.0))
         rs_vol_24h = _float(item.get("volume_24h_krw", 0.0))
         _ranging_base_ok = (
@@ -699,6 +720,14 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     # 진입 조건: vol_surge_long(거래량급등) + breakout_vol_confirm(신고점+거래량)
     #           + RSI 55-78(모멘텀확인) + trend_entry_allowed(EMA위) + stream_score(틱확인)
     # 목표: +4.0% / 손절: -2.0% (_position_thresholds "vol_breakout")
+    # vol_breakout: stream_score 라이브 조회 (캐시된 값이 0이면 live 조회)
+    _vb_cached_stream = _float(item.get("stream_score", 0.0))
+    if _vb_cached_stream < 0.01:
+        _vb_live = summarize_stream_momentum(symbol, max_age_seconds=60.0)
+        _vb_stream_score = float(_vb_live.get("stream_score", 0.0))
+    else:
+        _vb_stream_score = _vb_cached_stream
+
     _vol_breakout_ok = (
         vol_surge_long_signal
         and breakout_vol_confirm_signal
@@ -711,7 +740,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not bool(item.get("micro_exhausted", False))
         and not hard_overheat
         and signal_freshness >= 0.50
-        and _float(item.get("stream_score", 0.0)) >= 0.52   # 틱 레벨 매수 모멘텀 확인
+        and _vb_stream_score >= 0.52   # 틱 레벨 매수 모멘텀 확인 (live 조회)
         and _daily_persist(symbol) >= 0.52                  # 일봉 상승 추세 지속 확인
         and not _strategy_is_disabled("crypto.vol_breakout")
     )
