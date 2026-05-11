@@ -1,7 +1,44 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-11 (session 24 — Korea desk 활성화 + 급락 대응 확인)
+Last updated: 2026-05-12 (session 25 — best3 전략 이식 완료 + stream_score 버그 수정)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-12 (session 25 — best3 전략 이식 + stream_score=0 버그 수정)
+
+### 커밋 3222811, f32bf74, 50d3890 — Oracle VM 배포 완료
+
+**[best3_strategies_for_crypto.md 전면 이식]**
+- `app/services/ml_strategy.py` (신규): LightGBM 이진 분류, 10개 피처, 15분 캐시
+- `app/services/narrative_momentum.py` (신규): Fear&Greed EMA 모멘텀(60%) + CoinGecko sentiment(40%), 4시간 캐시
+- `app/services/persistence_cnn_model.py` (신규): PyTorch Conv1d(5→16→32) + AdaptiveAvgPool1d, WIN=20 HORIZON=3, 4시간 캐시
+- `app/services/ensemble_signal.py` (신규): softmax 정규화 가중 평균 (ml=0.20, narrative=0.18, persistence=0.14), BUY≥0.58/SELL≤0.40
+- `scripts/train_ml_strategy.py` (신규): Upbit 30종 일봉, val_acc=60.7%
+- `scripts/train_persistence_cnn.py` (신규): Upbit 30종 일봉, accuracy=62.6%
+- `requirements.txt`: numpy, scikit-learn, lightgbm, torch 추가
+- hot_path_guard.py: 앙상블 신호를 5개 전략(ema_cross/vwap_reclaim/rsi_flip/macd_cross/triple_bull)에 적용
+  - `and not _ensemble_sell`: SELL 신호 시 진입 차단
+  - `and combined >= (X if _ensemble_buy else Y)`: BUY 신호 시 임계값 약 0.02 완화
+
+**[Oracle VM 자동 재학습 cron 설정]**
+- `/home/ubuntu/retrain_models.sh`: git pull + train_ml_strategy.py + train_persistence_cnn.py + systemctl restart
+- cron: `0 12 * * 0` (일요일 UTC 12:00 = KST 21:00)
+
+**[stream_score=0.000 버그 수정 — 거래 없던 원인]**
+- 원인: CryptoDeskAgent가 lead market(BTC)만 stream 계산 → 개별 심볼 all_candidates에 stream_score=0 저장
+  → `_ranging_base_ok` 조건 `stream_score >= 0.48` 항상 False → 모든 RANGING 진입 차단
+- 수정: 캐시된 stream_score < 0.01이면 `summarize_stream_momentum(symbol, max_age_seconds=60.0)` 라이브 조회
+- 수정된 4곳:
+  1. RANGING 공통 `_ranging_base_ok` 블록
+  2. obvious_trend Path B (`_ot_stream_score`)
+  3. RANGING Path B `_elig` 블록 (`_elig_stream_score`)
+  4. vol_breakout 블록 (`_vb_stream_score`) ← 이번 세션 완료
+
+**다음 우선순위**:
+1. 코인 진입 재개 여부 확인 — 다음 사이클 후 diag_candidate.py 또는 VM 로그 확인
+2. ML 모델 신호가 앙상블에 반영되는지 확인 (models/ 디렉토리에 pkl/pt 존재해야 함)
+3. Binance 선물 연결 — 미래 계획
+
+---
 
 ## 0. Latest Claude Notes - 2026-05-11 (session 24 — 한국주식 투트랙 + 코인 급락 대응)
 
