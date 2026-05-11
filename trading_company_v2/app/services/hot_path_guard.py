@@ -383,10 +383,10 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         if (
             _ema_bounce_long
             and _ranging_base_ok
-            and combined >= 0.57            # 기존 0.56 → 0.57
-            and rsi_value <= 40.0           # 기존 45 → 40: 진짜 과매도만
-            and _ranging_stream_score >= 0.54  # 기존 0.52 → 0.54: 틱 매수세 강해야
-            and micro_move_3 >= 0.0         # 가격이 이미 반등 중
+            and combined >= 0.57            # 복합점수 최소 기준
+            and rsi_value <= 50.0           # 40→50: EMA 반등은 RSI 50 이하면 충분 (micro3+stream이 품질 보장)
+            and _ranging_stream_score >= 0.54  # 틱 매수세 강해야 (핵심 품질 게이트)
+            and micro_move_3 >= 0.0         # 가격이 이미 반등 중 (낙하중 진입 차단)
             and not _strategy_is_disabled("crypto.ema_bounce")
         ):
             item["entry_profile"] = "ema_bounce"
@@ -397,7 +397,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             _multi_ranging_combo
             and _ranging_base_ok
             and combined >= 0.54
-            and rsi_value <= 45.0           # 복합신호라 조금 더 허용
+            and rsi_value <= 55.0           # 45→55: 복합신호라 stream+micro3가 품질 보장
             and _ranging_stream_score >= 0.52
             and micro_move_3 >= 0.0         # 가격이 이미 반등 중
             and not _strategy_is_disabled("crypto.multi_ranging")
