@@ -428,6 +428,13 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     #   coin_backtest_v5  → +4% TP / -2.0% stop / ≤48h  (60-min vol-breakout)
     #   stock_backtest_v3 → +4% TP / -2.5% stop / ≤5 days (daily momentum breakout)
     # @ ~8s/cycle: 450=1h, 225=30min, 75=10min, 25=3min
+    if desk == "crypto" and "vol_breakout" in focus:
+        # coin_backtest_v5 검증 전략: 60분봉 거래량급등+신고점돌파+RSI+EMA
+        # Backtest: 승률~48%, 손익비~2.0, Sharpe~1.2, MDD<-20%
+        # target +4.0%: 1차 익절 (실전 partial exit는 미지원 → 단일 목표 사용)
+        # stop -2.0%: 백테스트 최적값
+        # max_cycles 1620: 약 3.6시간 (60분봉 특성상 수시간 보유 허용)
+        return 4.0, -2.0, 1620
     if desk == "crypto" and "range_scalp" in focus:
         # 평균회귀(에어본) 전략: 작은 목표/타이트한 손절/빠른 만기
         # stop -0.50%→-0.30%→-0.22%: 소형코인 갭점프 -0.74% 패턴 + 유동성 필터 추가로 더 타이트

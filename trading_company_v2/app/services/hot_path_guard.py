@@ -647,6 +647,43 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
 
         return False
 
+    # ── coin_backtest_v5 검증 전략: 거래량급등 + 신고점돌파 + RSI + EMA ─────────
+    # 백테스트 결과: 60분봉 기준 승률~48%, 손익비~2.0, Sharpe~1.2 (coin_backtest_v5.py)
+    # 진입 조건: vol_surge_long(거래량급등) + breakout_vol_confirm(신고점+거래량)
+    #           + RSI 55-78(모멘텀확인) + trend_entry_allowed(EMA위) + stream_score(틱확인)
+    # 목표: +4.0% / 손절: -2.0% (_position_thresholds "vol_breakout")
+    _vol_breakout_ok = (
+        vol_surge_long_signal
+        and breakout_vol_confirm_signal
+        and bool(item.get("trend_entry_allowed", False))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and 55.0 <= rsi_value <= 78.0   # RSI 55-78: 모멘텀 확인 + 과열 전
+        and combined >= 0.58
+        and orderbook_bid_ask >= 1.06
+        and not bool(item.get("rsi_bearish_divergence", False))
+        and not bool(item.get("micro_exhausted", False))
+        and not hard_overheat
+        and signal_freshness >= 0.50
+        and _float(item.get("stream_score", 0.0)) >= 0.52   # 틱 레벨 매수 모멘텀 확인
+        and _daily_persist(symbol) >= 0.52                  # 일봉 상승 추세 지속 확인
+        and not _strategy_is_disabled("crypto.vol_breakout")
+    )
+    if _vol_breakout_ok:
+        item["entry_profile"] = "vol_breakout"
+        if _strategy_is_disabled("crypto.vol_breakout"):
+            item["hot_block_reason"] = "strategy_disabled"
+            save_shadow_signal(
+                desk="crypto", symbol=symbol,
+                strategy_id="crypto.vol_breakout", entry_profile="vol_breakout",
+                source="hot_candidate", action="probe_longs",
+                focus=str(item.get("focus", "vol_breakout 60m breakout") or "vol_breakout 60m breakout"),
+                reason="strategy_disabled", score=combined,
+                stream_score=_float(item.get("stream_score", 0.0)),
+                payload={"candidate": item}, dedupe_seconds=120,
+            )
+            return False
+        return True
+
     # ── Option B: 일봉 추세 지속성 점수 (PersistenceCNN 룰 기반) ─────────────
     # TRENDING 전략 게이팅: 일봉 기준으로 상승 추세가 지속 중인 코인만 허용
     # score >= 0.55: 약한 상승 지속 (TRENDING long 허용 하한)
