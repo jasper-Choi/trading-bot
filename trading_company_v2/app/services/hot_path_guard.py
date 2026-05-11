@@ -27,6 +27,10 @@ from app.core.state_store import (
     save_shadow_signal,
 )
 from app.services.upbit_stream_cache import summarize_stream_momentum
+from app.services.daily_persistence import (
+    get_daily_persistence_score_cached_only as _daily_persist,
+    background_warm_cache as _warm_persist_cache,
+)
 
 
 _lock = threading.Lock()
@@ -319,6 +323,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             )
             # 경로 B: 초고점수 + stream 강활성 (ignition 없어도 허용)
             # hot_path_guard obvious_trend_ok Path B와 동일 기준으로 캐시 진입 허용
+            # Option B: 일봉 persistence >= 0.52 → ignition 없는 진입이라 일봉 추세 확인 필수
             _ot_path_b = (
                 _ot_ta == "trend_long"
                 and _ot_trend >= 0.91
@@ -328,6 +333,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 and _ot_ext <= 5.0
                 and not hard_overheat
                 and not _strategy_is_disabled("crypto.obvious_trend")
+                and _daily_persist(symbol) >= 0.52  # 일봉 상승 추세 지속 확인 (Path B는 ignition 없음)
             )
             if _ot_path_a or _ot_path_b:
                 return True  # RANGING에서 강한 개별 돌파 허용 (Path A: ignition / Path B: ultra-high)
@@ -349,8 +355,22 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and _elig_ext <= 5.0
             and not hard_overheat
             and not _strategy_is_disabled("crypto.obvious_trend")
+            and _daily_persist(symbol) >= 0.52  # 일봉 상승 추세 지속 확인
         ):
             return True  # Path B 후보: ultra-high score → 캐시 진입 허용 (tick에서 obvious_trend_ok Path B 재검증)
+
+        # ── [Option A] RANGING: obvious_trend Path A/B 이외 모든 전략 차단 ──────
+        # 근거: 실전 데이터 32건 분석 결과
+        #   range_scalp(4건 0승), higher_lows(7건 0승), trend_reversal_early(7건 0승)
+        #   inside_bar_break(3건 0승) → 구조적 신호 기반 RANGING 진입은 edge 없음
+        # 남기는 것: obvious_trend(stream_ignition 이벤트 기반) 만이 실증된 edge
+        # TRENDING 전환 시 아래 섹션(ema_cross/vwap_reclaim 등)으로 자연스럽게 이관됨
+        return False
+
+        # ────────────────────────────────────────────────────────────────────────
+        # [BELOW: RANGING B3-7 전략 - Option A로 비활성화, 코드 보존]
+        # 재활성화 조건: 실전 누적 데이터에서 특정 전략 승률 30%+ 확인 후
+        # ────────────────────────────────────────────────────────────────────────
         bb_squeeze_bounce = bool(item.get("bb_squeeze_bounce", False))
         vwap_deviation_long = bool(item.get("vwap_deviation_long", False))
         rsi_extreme_long = bool(item.get("rsi_extreme_long", False))
@@ -627,6 +647,16 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
 
         return False
 
+    # ── Option B: 일봉 추세 지속성 점수 (PersistenceCNN 룰 기반) ─────────────
+    # TRENDING 전략 게이팅: 일봉 기준으로 상승 추세가 지속 중인 코인만 허용
+    # score >= 0.55: 약한 상승 지속 (TRENDING long 허용 하한)
+    # score < 0.50: 일봉 기준 하락 또는 중립 → TRENDING long 차단
+    # 캐시 워밍: refresh_hot_entry_candidates에서 background_warm_cache로 사전 조회
+    # 캐시 미스 시 0.5(중립) 반환 → 차단 안 함 (false negative 방지)
+    _daily_persist_score = _daily_persist(symbol)
+    _persist_ok = _daily_persist_score >= 0.50   # 최소: 일봉 하락 추세 차단
+    _persist_strong = _daily_persist_score >= 0.55  # 강화: 명확한 상승 추세
+
     # ── Batch 2 TRENDING 신호 추출 ─────────────────────────────────────────
     ema_cross_long = bool(item.get("ema_cross_long", False))
     vwap_cross_long_signal = bool(item.get("vwap_cross_long", False))
@@ -673,6 +703,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not hard_overheat
         and signal_freshness >= 0.55
         and trend_extension_pct <= 4.0
+        and _persist_ok   # 일봉 하락 추세 차단
     )
     if ema_cross_ok:
         item["entry_profile"] = "ema_cross"
@@ -709,6 +740,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not hard_overheat
         and signal_freshness >= 0.55
         and trend_extension_pct <= 4.5
+        and _persist_ok   # 일봉 하락 추세 차단
     )
     if vwap_reclaim_ok:
         item["entry_profile"] = "vwap_reclaim"
@@ -744,6 +776,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not hard_overheat
         and signal_freshness >= 0.53
         and trend_extension_pct <= 4.5
+        and _persist_strong  # RSI flip: 일봉 상승 추세가 명확할 때만 (모멘텀 전환 조기 진입)
     )
     if rsi_flip_ok:
         item["entry_profile"] = "rsi_flip"
@@ -779,6 +812,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not hard_overheat
         and signal_freshness >= 0.53
         and trend_extension_pct <= 4.5
+        and _persist_ok  # 일봉 하락 추세 차단
     )
     if macd_cross_ok:
         item["entry_profile"] = "macd_cross"
@@ -814,6 +848,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not hard_overheat
         and signal_freshness >= 0.55
         and trend_extension_pct <= 3.5
+        and _persist_strong  # 3연속 양봉: 일봉 추세 지속 확인 (단기 노이즈 필터)
     )
     if triple_bull_ok:
         item["entry_profile"] = "triple_bull"
@@ -1676,7 +1711,18 @@ def refresh_hot_entry_candidates(state: dict[str, Any] | None = None, force: boo
     with _lock:
         _entry_candidates = prepared
         _entry_loaded_at = now
-        return {key: dict(value) for key, value in _entry_candidates.items()}
+
+    # Option B: 백그라운드에서 일봉 persistence 캐시 워밍 (hot path 블락 없이)
+    # 새 캔디데이트 목록이 확정된 후 API 호출 → 다음 tick evaluation 시 캐시 히트
+    if prepared:
+        import threading as _threading
+        _threading.Thread(
+            target=_warm_persist_cache,
+            args=[list(prepared.keys())],
+            daemon=True,
+        ).start()
+
+    return {key: dict(value) for key, value in _entry_candidates.items()}
 
 
 def refresh_hot_crypto_positions(force: bool = False) -> dict[str, list[dict[str, Any]]]:
