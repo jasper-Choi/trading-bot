@@ -457,10 +457,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         if action == "selective_probe":
             return 4.0, -2.0, 150
         return 3.0, -1.5, 120
-    # Korea recovery swing: reachable +3.8% win target, max 1 KRX session.
+    # Korea stock (stock_backtest_v3 validated):
+    # TP2 +8% as primary target, trailing from +4% handles TP1 effect
+    # stop -2.5%, max 2700 cycles ≈ 2.3 trading days (20s/cycle)
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
-        return 3.8, -2.0, 195
-    return 4.0, -2.0, 150
+        return 8.0, -2.5, 2700
+    return 8.0, -2.5, 2700
 
 
 def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
@@ -494,6 +496,20 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
         return 0.20, 0.05  # 0.30→0.20 giveback: peak=0.40% → floor 0.20% (was 0.10%)
     if peak_pnl >= 0.25:
         return 0.15, 0.00  # 신규 tier: 소폭 수익이라도 원금 보호 시작
+    return 0.0, 0.0
+
+
+def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
+    """Korea 주식 트레일링 스탑 (stock_backtest_v3 기반).
+
+    v3 전략: +4% 달성 후 고점 대비 -3.5% 이탈 시 청산
+      peak >= 8.0% → floor 5.0%  (TP2 근접, 수익 확보)
+      peak >= 4.0% → floor 2.0%  (트레일 발동, TP1 수준 확보)
+    """
+    if peak_pnl >= 8.0:
+        return 3.0, 5.0
+    if peak_pnl >= 4.0:
+        return 3.5, 2.0
     return 0.0, 0.0
 
 
@@ -1132,6 +1148,23 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 elif position.cycles_open >= max_cycles and position.pnl_pct < 0.8:
                     _close_position(position, "time_exit")
                 continue
+            # ── Korea 주식 청산 (stock_backtest_v3: 트레일링 스탑 포함) ──
+            if position.desk == "korea":
+                peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
+                trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
+                protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+                if position.pnl_pct >= target_pct:
+                    _close_position(position, "target_hit")
+                elif position.pnl_pct <= stop_pct:
+                    _close_position(position, "stop_hit")
+                elif trail_giveback and position.pnl_pct <= protect_level:
+                    _close_position(position, "korea_trail")
+                elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
+                    _close_position(position, "early_failure")
+                elif position.cycles_open >= max_cycles:
+                    _close_position(position, "stale_exit")
+                continue
+            # ── US / 기타 데스크 청산 ──
             if position.pnl_pct >= target_pct:
                 _close_position(position, "target_hit")
             elif position.pnl_pct <= stop_pct:
