@@ -458,11 +458,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
             return 4.0, -2.0, 150
         return 3.0, -1.5, 120
     # Korea stock (stock_backtest_v3 validated):
-    # TP2 +8% as primary target, trailing from +4% handles TP1 effect
+    # 목표가 25% = 사실상 hard target 없음 → 트레일링 스탑이 청산 전담
+    # +4% 달성 시 trail 발동, 추세 계속되면 청산선도 같이 올라감
     # stop -2.5%, max 2700 cycles ≈ 2.3 trading days (20s/cycle)
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
-        return 8.0, -2.5, 2700
-    return 8.0, -2.5, 2700
+        return 25.0, -2.5, 2700
+    return 25.0, -2.5, 2700
 
 
 def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
@@ -502,10 +503,16 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
 def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
     """Korea 주식 트레일링 스탑 (stock_backtest_v3 기반).
 
-    v3 전략: +4% 달성 후 고점 대비 -3.5% 이탈 시 청산
-      peak >= 8.0% → floor 5.0%  (TP2 근접, 수익 확보)
-      peak >= 4.0% → floor 2.0%  (트레일 발동, TP1 수준 확보)
+    hard target 없이 트레일링만으로 청산 — 상승 추세 최대한 탑승.
+    protect_level = max(floor, peak - giveback)
+
+    peak >= 15% → giveback 3.5%, floor 10%  (대세 상승 구간, 수익 크게 확보)
+    peak >=  8% → giveback 3.0%, floor  5%  (TP2 달성 이후)
+    peak >=  4% → giveback 3.5%, floor  2%  (트레일 발동, TP1 수준 확보)
+    peak <   4% → 트레일 없음 (아직 stop/early_failure에 맡김)
     """
+    if peak_pnl >= 15.0:
+        return 3.5, 10.0
     if peak_pnl >= 8.0:
         return 3.0, 5.0
     if peak_pnl >= 4.0:
