@@ -282,10 +282,10 @@ def get_upbit_orderbook(market: str) -> dict[str, Any]:
         return {}
 
 
-def get_kosdaq_snapshot(top_n: int = 20) -> list[dict[str, Any]]:
+def get_kosdaq_snapshot(top_n: int = 20, top_n_down: int = 0) -> list[dict[str, Any]]:
     # The previous mobile API endpoint now returns 404 on Oracle; use the
     # stable HTML fallback directly to keep the loop quiet and predictable.
-    return _get_kosdaq_snapshot_from_naver_html(top_n)
+    return _get_kosdaq_snapshot_from_naver_html(top_n, top_n_down)
 
 
 def _strip_html(value: str) -> str:
@@ -297,7 +297,7 @@ def _to_number(value: str) -> float:
     return float(cleaned) if cleaned else 0.0
 
 
-def _get_kosdaq_snapshot_from_naver_html(top_n: int) -> list[dict[str, Any]]:
+def _get_kosdaq_snapshot_from_naver_html(top_n: int, top_n_down: int = 0) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for page in range(1, 3):
         try:
@@ -335,7 +335,14 @@ def _get_kosdaq_snapshot_from_naver_html(top_n: int) -> list[dict[str, Any]]:
             )
 
     candidates.sort(key=lambda item: (item["gap_pct"], item["volume"]), reverse=True)
-    return candidates[:top_n]
+    result = candidates[:top_n]
+    if top_n_down > 0:
+        gap_down = sorted(
+            [c for c in candidates if c["gap_pct"] < -0.5],
+            key=lambda item: (item["gap_pct"], -item["volume"]),
+        )[:top_n_down]
+        result = result + gap_down
+    return result
 
 
 _PINNED_CRYPTO = [

@@ -470,6 +470,16 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 종가 추격: 오버나이트 홀딩 허용 — 더 넓은 stop, 더 긴 보유
         # target 3.0%, stop -1.5%, max ~30h (5400 cycles @ 20s)
         return 3.0, -1.5, 5400
+    if desk == "korea" and "gap_fill" in focus:
+        # 갭 메꾸기: 당일 갭다운 → 갭 메꾸기 — 빠른 만기
+        # target 2.0%, stop -0.8%, max 1h (180 cycles @ 20s)
+        return 2.0, -0.8, 180
+    if desk == "korea" and "pullback_ma" in focus:
+        # 눌림목 매수: 상승 추세 내 MA20 눌림 — 표준 Korea와 동일 파라미터
+        return 25.0, -1.5, 2700
+    if desk == "crypto" and "dip_bounce" in focus:
+        # BTC 급락 반등: 빠른 진입/빠른 이탈 — target 1.2%, stop -0.7%, max 20min
+        return 1.2, -0.7, 60
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
         return 25.0, -1.5, 2700
     return 25.0, -1.5, 2700

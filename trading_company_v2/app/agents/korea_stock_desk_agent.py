@@ -14,7 +14,11 @@ from app.services.kis_stream_cache import (
     get_stream_status,
 )
 from app.services.market_gateway import get_kosdaq_snapshot, get_naver_daily_prices
-from app.services.signal_engine import summarize_equity_signal, summarize_breakout_signal
+from app.services.signal_engine import (
+    summarize_equity_signal,
+    summarize_breakout_signal,
+    summarize_pullback_uptrend_signal,
+)
 
 _FETCH_WORKERS = 12
 # Max candidates from dynamic universe to run breakout scoring on (keeps runtime bounded)
@@ -29,7 +33,8 @@ class KoreaStockDeskAgent(BaseAgent):
 
     def run(self) -> AgentResult:
         # ── Path A: Gap-up candidates (KOSDAQ movers today) ─────────────────
-        leaders = get_kosdaq_snapshot(top_n=30)
+        # top_n_down=15: 갭다운 종목도 함께 수집 (Path E 갭 메꾸기에 사용)
+        leaders = get_kosdaq_snapshot(top_n=30, top_n_down=15)
 
         gap_items = [
             item for item in leaders
@@ -106,52 +111,82 @@ class KoreaStockDeskAgent(BaseAgent):
             path_b_results = list(executor.map(_fetch_b, watchlist_items))
 
         breakout_candidates: list[dict] = []
+        pullback_ma_candidates: list[dict] = []
         for ticker, name, candles in path_b_results:
             if len(candles) < 22:
                 continue
             bk = summarize_breakout_signal(candles, breakout_period=20, vol_surge_mult=2.5,
                                            rsi_min=55.0, rsi_max=78.0)
             confirmed_count = int(bk.get("confirmed_count", 0) or 0)
-            if confirmed_count < 2:
-                continue
             signal = summarize_equity_signal(candles)
             signal_score = float(signal.get("score", 0.5) or 0.5)
-            breakout_score = float(bk.get("breakout_score", 0.0) or 0.0)
             last_volume = float(candles[-1].get("volume") or 0.0)
             last_close = float(candles[-1].get("close") or 0.0)
             rsi_value = bk.get("last_rsi")
             overheat_penalty = 0.0
             if rsi_value is not None and float(rsi_value) >= 78.0:
                 overheat_penalty += 0.12
-            # Technical-only score (sentiment enriched below)
-            candidate_score = round(
-                breakout_score * 0.65
-                + signal_score * 0.35
-                - overheat_penalty,
-                2,
-            )
-            breakout_candidates.append(
-                {
-                    "ticker": ticker,
-                    "name": name,
-                    "current_price": last_close,
-                    "gap_pct": 0.0,
-                    "volume": int(last_volume),
-                    "signal_bias": signal.get("bias", "neutral"),
-                    "signal_score": signal_score,
-                    "signal_reasons": signal.get("reasons", []),
-                    "rsi": rsi_value,
-                    "burst_change_pct": float(signal.get("burst_change_pct", 0.0) or 0.0),
-                    "ema_gap_pct": float(signal.get("ema_gap_pct", 0.0) or 0.0),
-                    "overheat_penalty": round(overheat_penalty, 2),
-                    "candidate_score": candidate_score,
-                    "is_breakout": confirmed_count >= 3,
-                    "breakout_count": confirmed_count,
-                    "vol_ratio": float(bk.get("vol_ratio", 0.0) or 0.0),
-                    "breakout_reasons": bk.get("reasons", []),
-                    "sentiment_score": 0.5,
-                }
-            )
+
+            # ── Path B: 브레이크아웃 후보 ───────────────────────────────────
+            if confirmed_count >= 2:
+                breakout_score = float(bk.get("breakout_score", 0.0) or 0.0)
+                candidate_score = round(
+                    breakout_score * 0.65 + signal_score * 0.35 - overheat_penalty, 2
+                )
+                breakout_candidates.append(
+                    {
+                        "ticker": ticker,
+                        "name": name,
+                        "current_price": last_close,
+                        "gap_pct": 0.0,
+                        "volume": int(last_volume),
+                        "signal_bias": signal.get("bias", "neutral"),
+                        "signal_score": signal_score,
+                        "signal_reasons": signal.get("reasons", []),
+                        "rsi": rsi_value,
+                        "burst_change_pct": float(signal.get("burst_change_pct", 0.0) or 0.0),
+                        "ema_gap_pct": float(signal.get("ema_gap_pct", 0.0) or 0.0),
+                        "overheat_penalty": round(overheat_penalty, 2),
+                        "candidate_score": candidate_score,
+                        "is_breakout": confirmed_count >= 3,
+                        "breakout_count": confirmed_count,
+                        "vol_ratio": float(bk.get("vol_ratio", 0.0) or 0.0),
+                        "breakout_reasons": bk.get("reasons", []),
+                        "sentiment_score": 0.5,
+                    }
+                )
+
+            # ── Path F: 눌림목 매수 후보 (상승 추세 + MA 눌림) ───────────────
+            if len(candles) >= 42:
+                pb = summarize_pullback_uptrend_signal(candles)
+                if pb["pullback_ma_detected"] and pb["pullback_ma_score"] >= 0.50:
+                    pb_score = round(pb["pullback_ma_score"] * 0.70 + signal_score * 0.30, 2)
+                    pullback_ma_candidates.append({
+                        "ticker": ticker,
+                        "name": name,
+                        "current_price": last_close,
+                        "gap_pct": 0.0,
+                        "volume": int(last_volume),
+                        "signal_bias": signal.get("bias", "neutral"),
+                        "signal_score": signal_score,
+                        "signal_reasons": signal.get("reasons", []),
+                        "rsi": pb.get("pullback_rsi"),
+                        "burst_change_pct": float(signal.get("burst_change_pct", 0.0) or 0.0),
+                        "ema_gap_pct": float(signal.get("ema_gap_pct", 0.0) or 0.0),
+                        "overheat_penalty": round(overheat_penalty, 2),
+                        "candidate_score": pb_score,
+                        "is_breakout": False,
+                        "breakout_count": 0,
+                        "vol_ratio": float(bk.get("vol_ratio", 0.0) or 0.0),
+                        "sentiment_score": 0.5,
+                        "pullback_ma": True,
+                        "pullback_ma_score": pb["pullback_ma_score"],
+                        "pct_from_ma20": pb["pct_from_ma20"],
+                        "pct_from_ma40": pb["pct_from_ma40"],
+                        "ma20": pb["ma20"],
+                        "vol_declining": pb["vol_declining"],
+                    })
+        pullback_ma_candidates.sort(key=lambda c: c["pullback_ma_score"], reverse=True)
 
         # ── 수급 데이터 (기관 레이더 종목집합) 한 번만 가져오기 ─────────────
         try:
@@ -358,6 +393,72 @@ class KoreaStockDeskAgent(BaseAgent):
                     break
             close_drive_candidates.sort(key=lambda c: c["candidate_score"], reverse=True)
 
+        # ── Path E: 갭 메꾸기 (Gap Fill) ────────────────────────────────────
+        # 09:00~10:00 KST (00:00~01:00 UTC): 이유 없이 갭다운한 종목 → 갭 메꾸기 기대
+        # 조건: gap_pct -3.0~-0.5% + RSI>25 + signal not bearish + volume>=5000
+        gap_fill_candidates: list[dict] = []
+        if _in_open_window:
+            gap_down_items = [
+                item for item in leaders
+                if -3.0 <= float(item.get("gap_pct", 0.0) or 0.0) <= -0.5
+                and str(item.get("ticker", "")).strip()
+            ]
+
+            def _fetch_gf(item: dict) -> tuple[dict, list[dict]]:
+                ticker = str(item.get("ticker", "")).strip()
+                return item, get_naver_daily_prices(ticker, count=42)
+
+            if gap_down_items:
+                with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
+                    gf_results = list(executor.map(_fetch_gf, gap_down_items))
+
+                for item, candles in gf_results:
+                    if len(candles) < 22:
+                        continue
+                    gap_pct = float(item.get("gap_pct", 0.0) or 0.0)
+                    vol = float(item.get("volume", 0) or 0)
+                    if vol < 5000:
+                        continue
+                    signal = summarize_equity_signal(candles)
+                    signal_score = float(signal.get("score", 0.5) or 0.5)
+                    signal_bias = str(signal.get("bias", "neutral") or "neutral")
+                    rsi_v = signal.get("rsi")
+                    if rsi_v is not None and float(rsi_v) < 25:
+                        continue  # 극단 과매도 — 펀더멘털 이슈 가능
+                    if signal_bias == "bearish":
+                        continue  # 기술적 약세 — 갭 메꾸기 가능성 낮음
+                    # MA20 위에 있는 종목만 (상승 추세 내 조정)
+                    pb = summarize_pullback_uptrend_signal(candles)
+                    if pb["ma20"] is not None:
+                        last_close = float(candles[-1].get("close") or 0)
+                        if last_close < pb["ma20"] * 0.97:
+                            continue  # MA20 크게 하회 — 추세 훼손
+                    gf_score = round(
+                        0.45
+                        + (0.15 if rsi_v is not None and 30 <= float(rsi_v) <= 52 else 0.0)
+                        + (0.15 if signal_score >= 0.50 else 0.0)
+                        + (0.15 if vol >= 20000 else 0.05 if vol >= 10000 else 0.0)
+                        + (0.10 if -1.5 <= gap_pct <= -0.5 else 0.0),
+                        2,
+                    )
+                    gap_fill_candidates.append({
+                        **item,
+                        "signal_bias": signal_bias,
+                        "signal_score": signal_score,
+                        "signal_reasons": signal.get("reasons", []),
+                        "rsi": rsi_v,
+                        "burst_change_pct": float(signal.get("burst_change_pct", 0.0) or 0.0),
+                        "ema_gap_pct": float(signal.get("ema_gap_pct", 0.0) or 0.0),
+                        "overheat_penalty": 0.0,
+                        "candidate_score": gf_score,
+                        "is_breakout": False,
+                        "breakout_count": 0,
+                        "sentiment_score": 0.5,
+                        "gap_fill": True,
+                        "gap_fill_score": gf_score,
+                    })
+            gap_fill_candidates.sort(key=lambda c: c["gap_fill_score"], reverse=True)
+
         score = 0.34
         if gap_candidates:
             score += 0.12
@@ -399,6 +500,8 @@ class KoreaStockDeskAgent(BaseAgent):
             payload={
                 "gap_candidates": gap_candidates[:5],
                 "close_drive_candidates": close_drive_candidates[:3],
+                "gap_fill_candidates": gap_fill_candidates[:3],
+                "pullback_ma_candidates": pullback_ma_candidates[:3],
                 "leader_count": len(leaders),
                 "universe_size": len(universe),
                 "active_gap_count": active_gap_count,
@@ -412,5 +515,6 @@ class KoreaStockDeskAgent(BaseAgent):
                 "avg_sentiment_top3": avg_sentiment,
                 "inst_radar_count": inst_radar_count,
                 "in_close_window": _in_close_window,
+                "in_open_window": _in_open_window,
             },
         )

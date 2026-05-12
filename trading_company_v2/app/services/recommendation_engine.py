@@ -147,6 +147,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     kimchi_score = float(payload.get("kimchi_score", 0.5) or 0.5)
     kimchi_boost = kimchi_premium_pct >= 2.0   # 2% 이상이면 국내 수요 강세
     kimchi_warn  = kimchi_premium_pct <= -2.0  # 역프리미엄이면 주의
+    # BTC 급락 반등 신호
+    sharp_dip_bounce = bool(payload.get("sharp_dip_bounce", False))
+    dip_change_30m = float(payload.get("dip_change_30m", 0.0) or 0.0)
+    dip_rsi_btc = payload.get("dip_rsi_btc")
 
     flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02 or stream_ignition
     launch_confirmed = (
@@ -239,6 +243,24 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "symbol": lead_market,
             "candidate_symbols": candidate_symbols,
             "notes": reasons + ["Stress regime blocks aggressive crypto entries."],
+        }
+
+    # ── BTC 급락 반등 (Sharp Dip Bounce) ─────────────────────────────────────
+    # BTC 30분 -2.5% 이상 급락 + RSI≤32 → 과매도 반등 기대 (승률 63~68%)
+    # 평균회귀 전략 — 추세 무관하게 작동, DEFENSE 스탠스만 차단
+    if sharp_dip_bounce and stance != "DEFENSE":
+        _dip_rsi_str = f"{dip_rsi_btc:.0f}" if dip_rsi_btc is not None else "?"
+        return {
+            "action": "probe_longs",
+            "size": "0.35x",
+            "focus": f"dip_bounce: BTC {dip_change_30m:.1f}% 30분 급락 — 과매도 반등 포착",
+            "symbol": "KRW-BTC",
+            "candidate_symbols": ["KRW-BTC"] + candidate_symbols[:2],
+            "notes": [
+                f"BTC 30min change={dip_change_30m:.2f}% / RSI={_dip_rsi_str}",
+                "target +1.2% / stop -0.7% / max 20min",
+                "kimchi=" + (f"{kimchi_premium_pct:+.1f}%" if kimchi_premium_pct else "n/a"),
+            ],
         }
 
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
@@ -1508,6 +1530,9 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     avg_signal = float(payload.get("avg_signal_score_top3", 0.0) or 0.0)
     gap_candidates = payload.get("gap_candidates", []) or []
     close_drive_candidates = payload.get("close_drive_candidates", []) or []
+    gap_fill_candidates = payload.get("gap_fill_candidates", []) or []
+    pullback_ma_candidates = payload.get("pullback_ma_candidates", []) or []
+    in_open_window = bool(payload.get("in_open_window", False))
     candidate_symbols = [str(item.get("ticker", "")).strip() for item in gap_candidates if str(item.get("ticker", "")).strip()]
     top_name = str(gap_candidates[0].get("name", "No leader")) if gap_candidates else "No leader"
     top_ticker = str(gap_candidates[0].get("ticker", "")) if gap_candidates else ""
@@ -1645,6 +1670,31 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             **_qmeta,
         }
 
+    # ── Gap Fill path (09:00~10:00 KST: 갭다운 메꾸기) ───────────────────────
+    # 이유 없는 갭다운 → 당일 갭 메꾸기 확률 65~70%
+    # open_reversal보다 약한 신호이므로 낮은 우선순위
+    if in_open_window and gap_fill_candidates and stance != "DEFENSE":
+        gf = gap_fill_candidates[0]
+        gf_ticker = str(gf.get("ticker", ""))
+        gf_name = str(gf.get("name", gf_ticker))
+        gf_gap = float(gf.get("gap_pct", 0.0) or 0.0)
+        gf_score = float(gf.get("gap_fill_score", 0.0) or 0.0)
+        gf_rsi = gf.get("rsi")
+        if gf_score >= 0.60:
+            return {
+                "action": "probe_longs",
+                "size": "0.35x" if stance == "OFFENSE" else "0.25x",
+                "focus": f"gap_fill: {gf_name} {gf_gap:.1f}% 갭다운 — 당일 갭 메꾸기 기대",
+                "symbol": gf_ticker,
+                "candidate_symbols": [str(c.get("ticker", "")) for c in gap_fill_candidates],
+                "notes": [
+                    f"갭다운 {gf_gap:.1f}% / rsi {gf_rsi} / score {gf_score:.2f}",
+                    "target +2.0% / stop -0.8% / max 1h",
+                    "뉴스 없는 기술적 갭다운 → 평균회귀 기대",
+                ],
+                **_qmeta,
+            }
+
     # ── Opening reversal path (KIS tick stream: cascade→exhaustion→reversal) ─
     top_reversal = gap_candidates[0].get("open_reversal", False) if gap_candidates else False
     top_reversal_score = float(gap_candidates[0].get("reversal_score", 0) or 0) if gap_candidates else 0
@@ -1741,6 +1791,31 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
+
+    # ── Pullback MA path (장중 언제나: 상승 추세 내 MA20 눌림목 매수) ───────────
+    if pullback_ma_candidates and stance != "DEFENSE":
+        pb = pullback_ma_candidates[0]
+        pb_ticker = str(pb.get("ticker", ""))
+        pb_name = str(pb.get("name", pb_ticker))
+        pb_score = float(pb.get("pullback_ma_score", 0.0) or 0.0)
+        pb_rsi = pb.get("rsi")
+        pb_pct_ma20 = float(pb.get("pct_from_ma20", 0.0) or 0.0)
+        pb_ma20 = pb.get("ma20")
+        pb_vol_dec = bool(pb.get("vol_declining", False))
+        if pb_score >= 0.60:
+            return {
+                "action": "probe_longs",
+                "size": "0.40x" if stance == "OFFENSE" else "0.30x",
+                "focus": f"pullback_ma: {pb_name} — MA20 눌림목 매수",
+                "symbol": pb_ticker,
+                "candidate_symbols": [str(c.get("ticker", "")) for c in pullback_ma_candidates],
+                "notes": [
+                    f"MA20={pb_ma20} / pct_from_MA20={pb_pct_ma20:.1f}% / rsi={pb_rsi} / vol_declining={pb_vol_dec}",
+                    f"pullback score {pb_score:.2f}",
+                    "상승 추세 내 MA20 눌림목 — target +3% / stop -1.5%",
+                ],
+                **_qmeta,
+            }
 
     if mid_session:
         return {

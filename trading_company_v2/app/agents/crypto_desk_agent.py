@@ -430,6 +430,21 @@ class CryptoDeskAgent(BaseAgent):
             "stream_reasons": [],
         }
 
+        # ── BTC 급락 반등 감지 (direction_candles 재사용) ───────────────────
+        # BTC 15m 캔들 기준 2봉(-30min) 변화율 + RSI≤32 → 과매도 반등 신호
+        _dip_change_30m = 0.0
+        _dip_rsi_btc = direction_signal.get("rsi")
+        if len(direction_candles) >= 3:
+            _p_now = float(direction_candles[-1].get("close") or 0)
+            _p_30m = float(direction_candles[-3].get("close") or 0)
+            if _p_30m > 0:
+                _dip_change_30m = round((_p_now - _p_30m) / _p_30m * 100, 2)
+        _sharp_dip_bounce = (
+            _dip_change_30m <= -2.5
+            and _dip_rsi_btc is not None
+            and float(_dip_rsi_btc) <= 32
+        )
+
         # ── 김치 프리미엄 계산 (leader 종목 기준) ────────────────────────────
         lead_market = str(leader.get("market", "") or next(iter(weights), "KRW-BTC"))
         _base_currency = lead_market.replace("KRW-", "")
@@ -616,5 +631,9 @@ class CryptoDeskAgent(BaseAgent):
                 # 김치 프리미엄
                 "kimchi_premium_pct": round(kimchi_pct, 2),
                 "kimchi_score": round(kimchi_score_val, 3),
+                # BTC 급락 반등
+                "sharp_dip_bounce": _sharp_dip_bounce,
+                "dip_change_30m": _dip_change_30m,
+                "dip_rsi_btc": _dip_rsi_btc,
             },
         )

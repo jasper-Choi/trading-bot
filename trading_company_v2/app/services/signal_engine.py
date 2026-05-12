@@ -2161,6 +2161,76 @@ def summarize_orderbook_pressure(orderbook: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def summarize_pullback_uptrend_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pullback-to-MA entry using daily candles.
+    Pattern: price above MA20 > MA40 (uptrend) + pulled back near MA20 + RSI 28-58 + volume declining.
+    Requires >= 42 candles (uses MA40, not MA60 to fit within standard 42-day window).
+    """
+    _empty: dict[str, Any] = {
+        "pullback_ma_detected": False,
+        "pullback_ma_score": 0.0,
+        "ma20": None,
+        "ma40": None,
+        "pct_from_ma20": 0.0,
+        "pct_from_ma40": 0.0,
+        "pullback_rsi": None,
+        "vol_declining": False,
+    }
+    closes = [float(c["close"]) for c in candles if c.get("close")]
+    volumes = [float(c.get("volume") or 0.0) for c in candles]
+    if len(closes) < 42:
+        return _empty
+
+    ma20_series = sma(closes, 20)
+    ma40_series = sma(closes, 40)
+    ma20 = ma20_series[-1]
+    ma40 = ma40_series[-1]
+    if ma20 is None or ma40 is None:
+        return _empty
+
+    last_close = closes[-1]
+    pct_from_ma20 = (last_close - ma20) / ma20 * 100
+    pct_from_ma40 = (last_close - ma40) / ma40 * 100
+
+    # Uptrend: MA20 > MA40 (MA 정렬로 추세 확인 — 가격은 MA20 근처에 있으므로 제외)
+    is_uptrend = ma20 > ma40
+    # Pulled back to within -3% to +1.5% of MA20
+    near_ma20 = -3.0 <= pct_from_ma20 <= 1.5
+
+    last_rsi_val = rsi(closes, 14)
+    rsi_ok = last_rsi_val is not None and 28 <= last_rsi_val <= 58
+
+    # Volume declining on pullback: last 3 days < avg of prior 7 days
+    vol_declining = False
+    if len(volumes) >= 10:
+        recent_vol = sum(volumes[-3:]) / 3
+        prior_vol = sum(volumes[-10:-3]) / 7
+        vol_declining = prior_vol > 0 and recent_vol < prior_vol * 0.85
+
+    pullback_ma_detected = is_uptrend and near_ma20 and rsi_ok
+
+    score = 0.0
+    if pullback_ma_detected:
+        score = 0.50
+        if vol_declining:
+            score += 0.20
+        if -1.5 <= pct_from_ma20 <= 0.5:
+            score += 0.15
+        if pct_from_ma40 > 5.0:
+            score += 0.15
+
+    return {
+        "pullback_ma_detected": pullback_ma_detected,
+        "pullback_ma_score": round(min(score, 1.0), 3),
+        "ma20": round(ma20, 2),
+        "ma40": round(ma40, 2),
+        "pct_from_ma20": round(pct_from_ma20, 2),
+        "pct_from_ma40": round(pct_from_ma40, 2),
+        "pullback_rsi": round(last_rsi_val, 1) if last_rsi_val is not None else None,
+        "vol_declining": vol_declining,
+    }
+
+
 def summarize_equity_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     closes = [float(item["close"]) for item in candles]
     if len(closes) < 30:
