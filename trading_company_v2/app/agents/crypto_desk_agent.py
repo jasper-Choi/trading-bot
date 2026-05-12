@@ -117,7 +117,7 @@ class CryptoDeskAgent(BaseAgent):
             micro = summarize_crypto_micro_momentum_signal(candles_1m)
             orderbook = summarize_orderbook_pressure(get_upbit_orderbook(market))
             atr_sizing = summarize_atr_sizing(candles_15m)
-            stream = summarize_stream_momentum(market)
+            stream = summarize_stream_momentum(market, max_age_seconds=30.0)  # 6s→30s: 저빈도 알트코인 stream_score=0 차단 방지
             corr = 1.0 if market == direction_symbol else _pearson_corr(_pct_returns(candles_15m), direction_returns)
             age_minutes = _latest_candle_age_minutes(candles_1m)
             freshness_factor, freshness_reason = _freshness_factor(age_minutes)
