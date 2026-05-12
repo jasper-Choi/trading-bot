@@ -74,6 +74,8 @@ orchestrator = CompanyOrchestrator()
 _SCANNER_CHART_CACHE: dict[str, dict] = {}
 _SCANNER_CHART_TTL_SECONDS = 75.0
 _SCANNER_CHART_COUNT = 24
+_KOREA_CHART_CACHE: dict[str, dict] = {}
+_KOREA_CHART_TTL_SECONDS = 300.0  # 일봉은 5분 캐시로 충분
 
 
 def _safe_parse_utc(value: str) -> datetime | None:
@@ -3450,6 +3452,23 @@ def _scanner_chart_payload(market: str) -> dict:
     return payload
 
 
+def _korea_chart_payload(ticker: str) -> list[dict]:
+    """한국 주식 일봉 캔들 반환 (캐시 5분)"""
+    if not ticker:
+        return []
+    now = time.time()
+    cached = _KOREA_CHART_CACHE.get(ticker) or {}
+    if cached and now - float(cached.get("fetched_at", 0.0) or 0.0) < _KOREA_CHART_TTL_SECONDS:
+        return cached.get("candles", [])
+    try:
+        raw = get_naver_daily_prices(ticker, count=20)
+        candles = [{"o": c["open"], "h": c["high"], "l": c["low"], "c": c["close"]} for c in raw]
+    except Exception:
+        candles = []
+    _KOREA_CHART_CACHE[ticker] = {"fetched_at": now, "candles": candles}
+    return candles
+
+
 @app.get("/scanner-data")
 def scanner_data() -> dict:
     """전체 스캔 코인 데이터 반환 (스캐너 페이지용)"""
@@ -3490,14 +3509,16 @@ def scanner_data() -> dict:
         if isinstance(korea_desk_view, dict) and not korea_desk_view.get("disabled")
         else []
     )
+    _korea_raw_items = [_k for _k in korea_raw[:15] if isinstance(_k, dict) and _k.get("ticker")]
+    _korea_tickers = [str(_k.get("ticker", "")).strip() for _k in _korea_raw_items]
+    with ThreadPoolExecutor(max_workers=6) as _kex:
+        _korea_chart_map = dict(zip(_korea_tickers, _kex.map(_korea_chart_payload, _korea_tickers)))
     korea_candidates: list[dict] = []
-    for _k in korea_raw[:15]:
-        if not isinstance(_k, dict) or not _k.get("ticker"):
-            continue
+    for _k in _korea_raw_items:
         _name = str(_k.get("name", "") or "")
         _ticker = str(_k.get("ticker", "")).strip()
         _display = f"{_name}({_ticker})" if _name else _ticker
-        korea_candidates.append({**_k, "display_name": _display})
+        korea_candidates.append({**_k, "display_name": _display, "candles_daily": _korea_chart_map.get(_ticker, [])})
     return {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "scanned_count": scanned_count,
@@ -3780,7 +3801,7 @@ def _scanner_html() -> str:
             <th onclick="sortKoreaBy('rank')">#</th>
             <th onclick="sortKoreaBy('name')">종목</th>
             <th onclick="sortKoreaBy('current_price')">현재가</th>
-            <th onclick="sortKoreaBy('gap_pct')">갭%</th>
+            <th>일봉 차트</th>
             <th onclick="sortKoreaBy('candidate_score')">점수</th>
             <th onclick="sortKoreaBy('signal_score')">Signal</th>
             <th onclick="sortKoreaBy('rsi')">RSI</th>
@@ -3873,6 +3894,26 @@ function miniChart(c){
   var line=closes.map(function(v,i){return x(i).toFixed(1)+','+y(v).toFixed(1)}).join(' ');
   var ch=sc(c.sparkline_change_pct), chCls=ch>0?'pos':ch<0?'neg':'flat';
   return '<div class="mini-chart-wrap"><svg class="mini-chart" viewBox="0 0 '+w+' '+h+'" aria-label="15분 미니 차트">'+parts+'<polyline class="spark-line" points="'+line+'"></polyline></svg><span class="mini-chart-change '+chCls+'">'+pctText(ch)+'</span></div>';
+}
+function koreaMiniChart(k){
+  var candles=(k.candles_daily||[]).slice(-20);
+  if(!candles.length) return '<div class="mini-chart-empty">일봉 없음</div>';
+  var w=128,h=42,pad=3;
+  var highs=candles.map(function(x){return sc(x.h)}), lows=candles.map(function(x){return sc(x.l)}), closes=candles.map(function(x){return sc(x.c)});
+  var hi=Math.max.apply(null,highs), lo=Math.min.apply(null,lows), rng=(hi-lo)||1;
+  function x(i){return pad+(i/(Math.max(1,candles.length-1)))*(w-pad*2)}
+  function y(v){return pad+((hi-v)/rng)*(h-pad*2)}
+  var cw=Math.max(2,Math.min(5,(w-pad*2)/candles.length*.55));
+  var parts='';
+  candles.forEach(function(row,i){
+    var xx=x(i), yo=y(sc(row.o)), yc=y(sc(row.c)), yh=y(sc(row.h)), yl=y(sc(row.l));
+    var up=sc(row.c)>=sc(row.o), top=Math.min(yo,yc), bh=Math.max(1,Math.abs(yc-yo));
+    parts+='<line class="candle-wick" x1="'+xx.toFixed(1)+'" y1="'+yh.toFixed(1)+'" x2="'+xx.toFixed(1)+'" y2="'+yl.toFixed(1)+'"></line>';
+    parts+='<rect class="'+(up?'candle-up':'candle-down')+'" x="'+(xx-cw/2).toFixed(1)+'" y="'+top.toFixed(1)+'" width="'+cw.toFixed(1)+'" height="'+bh.toFixed(1)+'" rx="1"></rect>';
+  });
+  var line=closes.map(function(v,i){return x(i).toFixed(1)+','+y(v).toFixed(1)}).join(' ');
+  var ch=sc(k.burst_change_pct), chCls=ch>0?'pos':ch<0?'neg':'flat';
+  return '<div class="mini-chart-wrap"><svg class="mini-chart" viewBox="0 0 '+w+' '+h+'" aria-label="일봉 미니 차트">'+parts+'<polyline class="spark-line" points="'+line+'"></polyline></svg><span class="mini-chart-change '+chCls+'">'+pctText(ch)+'</span></div>';
 }
 function rsiCls(v){
   if(v>=75) return 'hot';
@@ -4080,7 +4121,7 @@ function toKST(isoStr){
 // ── 한국 주식 정렬 ──
 function sortKoreaBy(key){
   if(_kSortKey===key){ _kSortAsc=!_kSortAsc; }
-  else { _kSortKey=key; _kSortAsc=(key==='name'||key==='signal_bias'); }
+  else { _kSortKey=key; _kSortAsc=(key==='name'||key==='signal_bias'||key==='rank'); }
   renderKoreaTable();
 }
 function koreaGetStatuses(k){
@@ -4120,8 +4161,6 @@ function renderKoreaTable(){
     var ticker=String(k.ticker||'');
     var chg=sc(k.burst_change_pct);
     var chgCls=chg>0.3?'pos':chg<-0.3?'neg':'flat';
-    var gap=sc(k.gap_pct);
-    var gapCls=gap>0.5?'pos':gap<-0.5?'neg':'flat';
     var price=sc(k.current_price);
     var priceTx=price>0?price.toLocaleString('ko-KR'):'—';
     var rsiV=k.rsi!=null?parseFloat(k.rsi):null;
@@ -4142,7 +4181,7 @@ function renderKoreaTable(){
         +'</div></div>'
       +'</div></td>'
       +'<td><div class="price-cell">'+priceTx+'</div><div class="price-sub">KRW · 일봉</div></td>'
-      +'<td><span class="sym-change '+gapCls+'" style="font-family:var(--mono);font-size:.8rem">'+(gap!==0?pctText(gap):'—')+'</span></td>'
+      +'<td>'+koreaMiniChart(k)+'</td>'
       +'<td>'+scoreBar(k.candidate_score,'linear-gradient(90deg,var(--blue),var(--green))')+'</td>'
       +'<td>'+scoreBar(k.signal_score, scoreColor(sc(k.signal_score)))+'</td>'
       +'<td><span class="rsi-val '+(rsiV!=null?rsiCls(rsiV):'flat')+'">'+(rsiV!=null?rsiV.toFixed(0):'—')+'</span></td>'
@@ -4156,7 +4195,7 @@ function renderKoreaTable(){
   // 정렬 헤더 표시
   document.querySelectorAll('#korea-tbl th').forEach(function(th){th.className='';});
   var kths=document.querySelectorAll('#korea-tbl thead th');
-  var kKeyMap={rank:0,name:1,current_price:2,gap_pct:3,candidate_score:4,signal_score:5,rsi:6,vol_ratio:7,ema_gap_pct:8,signal_bias:9};
+  var kKeyMap={rank:0,name:1,current_price:2,candidate_score:4,signal_score:5,rsi:6,vol_ratio:7,ema_gap_pct:8,signal_bias:9};
   var ki=kKeyMap[_kSortKey];
   if(ki!==undefined) kths[ki].className=_kSortAsc?'sorted-asc':'sorted-desc';
   document.getElementById('korea-sort-label').textContent=(_kSortKey||'candidate_score')+(_kSortAsc?' ↑':' ↓');
