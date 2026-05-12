@@ -461,6 +461,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     # stop -1.5%: 손실 크기 축소 (-2.5% → -1.5%), early_failure도 자동으로 타이트해짐
     # trail +1.5%부터 발동 — 작은 수익도 보호
     # max 2700 cycles ≈ 2.3 trading days (20s/cycle)
+    if desk == "korea" and "open_reversal" in focus:
+        # 오픈 리버설 전용: 갭다운 소진 후 반전 — 빠른 진입/빠른 이탈
+        # target 3.0%, stop -0.8% (패턴 실패 시 즉시 손절), max 2h (360 cycles @ 20s)
+        return 3.0, -0.8, 360
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
         return 25.0, -1.5, 2700
     return 25.0, -1.5, 2700

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
 from app.services.korea_sentiment import get_combined_sentiment
 from app.services.korea_universe import get_korea_universe
+from app.services.kis_stream_cache import (
+    subscribe_tickers,
+    get_opening_reversal_signal,
+    get_stream_status,
+)
 from app.services.market_gateway import get_kosdaq_snapshot, get_naver_daily_prices
 from app.services.signal_engine import summarize_equity_signal, summarize_breakout_signal
 
@@ -226,6 +232,63 @@ class KoreaStockDeskAgent(BaseAgent):
         active_gap_count = sum(1 for c in enriched_candidates if float(c.get("gap_pct", 0) or 0) >= 1.2)
         breakout_confirmed_count = sum(1 for c in breakout_candidates if int(c.get("breakout_count", 0) or 0) >= 4)
         breakout_partial_count = sum(1 for c in breakout_candidates if int(c.get("breakout_count", 0) or 0) == 3)
+
+        # ── Path C: 아침 오픈 리버설 (틱 스트림 기반) ──────────────────────
+        # 09:00~09:40 KST (00:00~00:40 UTC) 구간에만 작동
+        # 매도 쏟아지는 갭다운 → 소진 → 반전 패턴 감지
+        now_utc_hour = datetime.now(timezone.utc).hour
+        now_utc_min  = datetime.now(timezone.utc).minute
+        _in_open_window = (now_utc_hour == 0 and now_utc_min <= 40)
+
+        reversal_candidates: list[dict] = []
+        if _in_open_window:
+            # 틱 구독 유지: gap_candidates 상위 10 + enriched_candidates 상위 10
+            _watch = list({
+                str(c.get("ticker", "")) for c in (gap_candidates[:10] + enriched_candidates[:10])
+                if c.get("ticker")
+            })
+            if _watch:
+                subscribe_tickers(_watch)
+
+            stream_ok = get_stream_status().get("active", False)
+            if stream_ok:
+                for ticker in _watch:
+                    sig = get_opening_reversal_signal(ticker)
+                    if sig["score"] < 55 or not sig["cascade"]:
+                        continue
+                    # 기존 후보 중 해당 종목 찾아서 메타 병합
+                    base = next(
+                        (c for c in gap_candidates if str(c.get("ticker", "")) == ticker),
+                        {"ticker": ticker, "name": ticker, "current_price": 0.0,
+                         "gap_pct": 0.0, "volume": 0, "signal_score": 0.5,
+                         "signal_bias": "neutral", "signal_reasons": [],
+                         "rsi": None, "ema_gap_pct": 0.0, "burst_change_pct": 0.0,
+                         "overheat_penalty": 0.0, "breakout_count": 0,
+                         "is_breakout": False, "sentiment_score": 0.5},
+                    )
+                    rev_score = round(sig["score"] / 100.0 * 0.85 + 0.1, 3)
+                    reversal_candidates.append({
+                        **base,
+                        "candidate_score": rev_score,
+                        "open_reversal": True,
+                        "reversal_score": sig["score"],
+                        "reversal_cascade": sig["cascade"],
+                        "reversal_exhaustion": sig["exhaustion"],
+                        "reversal_reversal": sig["reversal"],
+                        "price_vs_open_pct": sig["price_vs_open_pct"],
+                        "sell_ratio_30": sig["sell_ratio_30"],
+                        "sell_ratio_10": sig["sell_ratio_10"],
+                        "tick_count": sig["tick_count"],
+                    })
+                reversal_candidates.sort(key=lambda c: c["reversal_score"], reverse=True)
+
+        # 리버설 후보를 gap_candidates 앞에 삽입 (오픈 시간에만)
+        if reversal_candidates:
+            existing_tickers = {str(c.get("ticker", "")) for c in gap_candidates}
+            for rc in reversal_candidates:
+                if str(rc.get("ticker", "")) not in existing_tickers:
+                    gap_candidates.insert(0, rc)
+            gap_candidates = gap_candidates[:10]
 
         score = 0.34
         if gap_candidates:

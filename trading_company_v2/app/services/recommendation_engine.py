@@ -1634,6 +1634,25 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             **_qmeta,
         }
 
+    # ── Opening reversal path (KIS tick stream: cascade→exhaustion→reversal) ─
+    top_reversal = gap_candidates[0].get("open_reversal", False) if gap_candidates else False
+    top_reversal_score = float(gap_candidates[0].get("reversal_score", 0) or 0) if gap_candidates else 0
+    if top_reversal and top_reversal_score >= 55 and stance != "DEFENSE":
+        return {
+            "action": "attack_opening_drive",
+            "size": "0.40x",
+            "focus": f"open_reversal: {top_name} — cascade exhaustion detected, buying reversal.",
+            "symbol": top_ticker,
+            "candidate_symbols": candidate_symbols,
+            "notes": [
+                f"reversal score {top_reversal_score:.0f}/100",
+                f"cascade={gap_candidates[0].get('reversal_cascade')} exhaustion={gap_candidates[0].get('reversal_exhaustion')} reversal={gap_candidates[0].get('reversal_reversal')}",
+                f"price_vs_open={gap_candidates[0].get('price_vs_open_pct', 0):.2f}% sell30={gap_candidates[0].get('sell_ratio_30', 0):.0%} sell10={gap_candidates[0].get('sell_ratio_10', 0):.0%}",
+                "Tight stop -0.8% / target +3.0% — reversal trade only, exit within 2h.",
+            ],
+            **_qmeta,
+        }
+
     if opening_window and active_gap_count >= 2 and quality_score >= 0.56 and avg_gap >= 1.8 and avg_volume >= 8000 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and top_signal_bias != "neutral" and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",
