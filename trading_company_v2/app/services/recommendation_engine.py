@@ -1565,10 +1565,27 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
 
     # ── Momentum breakout path (stock_backtest_v3 validated strategy) ──────
     # Fires independently of gap-up conditions; works in any session window
+    # GUARD: daily candle breakout patterns are backward-looking — require bullish signal_bias
+    # to confirm the stock is CURRENTLY trending up, not already reversing.
     if breakout_confirmed_count >= 1 and stance != "DEFENSE" and bk_leader:
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
+        bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
+        bk_signal = float(bk_leader.get("signal_score", 0.0) or 0.0)
+        if bk_bias != "bullish" or bk_signal < 0.50:
+            return {
+                "action": "stand_by",
+                "size": "0.00x",
+                "focus": f"Breakout confirmed ({bk_name}) but signal not bullish — skip entry.",
+                "symbol": bk_ticker,
+                "candidate_symbols": candidate_symbols,
+                "notes": [
+                    f"breakout pattern valid but bias={bk_bias} / signal={bk_signal:.2f} — requires bullish+0.50",
+                    "Daily breakout without current bullish momentum is a reversal trap.",
+                ],
+                **_qmeta,
+            }
         return {
             "action": "probe_longs",
             "size": "0.55x" if stance == "OFFENSE" else "0.40x",
@@ -1588,6 +1605,21 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
+        bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
+        bk_signal = float(bk_leader.get("signal_score", 0.0) or 0.0)
+        if bk_bias != "bullish" or bk_signal < 0.52:
+            return {
+                "action": "stand_by",
+                "size": "0.00x",
+                "focus": f"Breakout partial ({bk_name}) but signal not bullish — skip entry.",
+                "symbol": bk_ticker,
+                "candidate_symbols": candidate_symbols,
+                "notes": [
+                    f"3/4 breakout but bias={bk_bias} / signal={bk_signal:.2f} — requires bullish+0.52 for partial",
+                    "Partial breakout without bullish confirmation is high-risk.",
+                ],
+                **_qmeta,
+            }
         return {
             "action": "selective_probe",
             "size": "0.30x",
