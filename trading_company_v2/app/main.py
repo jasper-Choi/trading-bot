@@ -3768,17 +3768,30 @@ def _scanner_html() -> str:
   </div>
 
   <!-- 한국 주식 스캐너 섹션 -->
-  <div class="discovery-section" id="korea-section" style="display:none">
-    <div class="disc-title">🇰🇷 한국 주식 스캐너 <span class="disc-count" id="korea-cnt">0</span></div>
-    <div style="overflow-x:auto">
-      <table class="pos-table" id="korea-tbl">
+  <div id="korea-section" style="display:none;margin-top:22px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+      <div class="disc-title" style="margin:0">🇰🇷 한국 주식 <span class="disc-count" id="korea-cnt">0</span></div>
+      <div class="sort-hint" style="margin:0">컬럼 클릭으로 정렬 · 현재 정렬: <span id="korea-sort-label">점수 ↓</span></div>
+    </div>
+    <div class="tbl-wrap">
+      <table id="korea-tbl">
         <thead>
           <tr>
-            <th>#</th><th>종목</th><th>현재가</th><th>Signal</th><th>RSI</th><th>Vol배율</th><th>브레이크아웃</th><th>Bias</th><th>점수</th>
+            <th onclick="sortKoreaBy('rank')">#</th>
+            <th onclick="sortKoreaBy('name')">종목</th>
+            <th onclick="sortKoreaBy('current_price')">현재가</th>
+            <th onclick="sortKoreaBy('gap_pct')">갭%</th>
+            <th onclick="sortKoreaBy('candidate_score')">점수</th>
+            <th onclick="sortKoreaBy('signal_score')">Signal</th>
+            <th onclick="sortKoreaBy('rsi')">RSI</th>
+            <th onclick="sortKoreaBy('vol_ratio')">Vol배율</th>
+            <th onclick="sortKoreaBy('ema_gap_pct')">EMA갭%</th>
+            <th onclick="sortKoreaBy('signal_bias')">Bias</th>
+            <th>상태</th>
           </tr>
         </thead>
         <tbody id="korea-body">
-          <tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">로딩 중…</td></tr>
+          <tr><td colspan="11" style="text-align:center;padding:30px;color:var(--muted)">로딩 중…</td></tr>
         </tbody>
       </table>
     </div>
@@ -3792,6 +3805,8 @@ var _data = [];
 var _koreaData = [];
 var _sortKey = 'combined_score';
 var _sortAsc = false;
+var _kSortKey = 'candidate_score';
+var _kSortAsc = false;
 var _filter = 'all';
 
 // ── 한국 주식 종목명 매핑 ──
@@ -4062,6 +4077,23 @@ function toKST(isoStr){
   }catch(e){ return isoStr; }
 }
 
+// ── 한국 주식 정렬 ──
+function sortKoreaBy(key){
+  if(_kSortKey===key){ _kSortAsc=!_kSortAsc; }
+  else { _kSortKey=key; _kSortAsc=(key==='name'||key==='signal_bias'); }
+  renderKoreaTable();
+}
+function koreaGetStatuses(k){
+  var tags=[];
+  var bk=parseInt(k.breakout_count||0);
+  if(bk>=4) tags.push({cls:'breakout',txt:'🚀BK '+bk+'/4'});
+  else if(bk>=3) tags.push({cls:'breakout',txt:'🟡BK '+bk+'/4'});
+  else if(bk>0) tags.push({cls:'ob',txt:'BK '+bk+'/4'});
+  if(sc(k.gap_pct)>=1.5) tags.push({cls:'ignition',txt:'🔥갭업'});
+  if(sc(k.overheat_penalty)>0) tags.push({cls:'exhaust',txt:'⚠과열'});
+  return tags;
+}
+
 // ── 한국 주식 테이블 렌더 ──
 function renderKoreaTable(){
   var sec=document.getElementById('korea-section');
@@ -4070,33 +4102,64 @@ function renderKoreaTable(){
   if(!_koreaData||!_koreaData.length){sec.style.display='none';return;}
   sec.style.display='';
   cnt.textContent=_koreaData.length;
+  // 정렬
+  var sorted=_koreaData.slice().sort(function(a,b){
+    var va,vb;
+    if(_kSortKey==='name'){ va=String(a.display_name||''); vb=String(b.display_name||''); return _kSortAsc?(va>vb?1:-1):(vb>va?1:-1); }
+    if(_kSortKey==='signal_bias'){ va=String(a.signal_bias||''); vb=String(b.signal_bias||''); return _kSortAsc?(va>vb?1:-1):(vb>va?1:-1); }
+    if(_kSortKey==='rsi'){ va=sc(a.rsi||50); vb=sc(b.rsi||50); }
+    else { va=sc(a[_kSortKey]); vb=sc(b[_kSortKey]); }
+    return _kSortAsc?(va-vb):(vb-va);
+  });
   var rows='';
-  _koreaData.forEach(function(k,i){
-    var rsi=parseFloat(k.rsi||0)||0;
-    var rsiCl=rsi>=75?'neg':rsi<=40?'pos':'';
-    var bias=String(k.signal_bias||'').toLowerCase();
-    var biasTx=bias==='bullish'?'상승':bias==='bearish'?'하락':'중립';
-    var biasCl=bias==='bullish'?'offense':bias==='bearish'?'defense':'';
-    var bk=parseInt(k.breakout_count||0);
-    var bkTx=bk>=4?'✅ 확정 '+bk+'/4':bk>=3?'🟡 부분 '+bk+'/4':bk>0?bk+'/4':'—';
-    var price=parseFloat(k.current_price||0);
-    var priceTx=price>0?price.toLocaleString('ko-KR')+'원':'—';
-    var vol=parseFloat(k.vol_ratio||0)||0;
-    var score=parseFloat(k.candidate_score||0)||0;
-    var name=k.display_name||koreaSymName(k.ticker||'');
-    rows+='<tr>'
-      +'<td style="color:var(--muted);font-size:.8rem">'+(i+1)+'</td>'
-      +'<td class="sym" style="font-size:.85rem">'+name+'</td>'
-      +'<td style="font-family:var(--mono);font-size:.82rem">'+priceTx+'</td>'
-      +'<td><div style="background:var(--card-border);border-radius:4px;height:6px;width:60px"><div style="background:var(--blue);height:6px;border-radius:4px;width:'+Math.min(parseFloat(k.signal_score||0)*100,100).toFixed(0)+'%"></div></div></td>'
-      +'<td><span style="font-family:var(--mono);font-size:.8rem" class="'+rsiCl+'">'+(rsi?rsi.toFixed(0):'—')+'</span></td>'
-      +'<td style="font-family:var(--mono);font-size:.78rem;color:var(--muted)">'+(vol>0?vol.toFixed(1)+'x':'—')+'</td>'
-      +'<td style="font-size:.78rem">'+bkTx+'</td>'
-      +'<td><span class="bias-tag '+biasCl+'">'+biasTx+'</span></td>'
-      +'<td style="font-family:var(--mono);font-size:.8rem;color:'+(score>=0.7?'var(--green)':score>=0.5?'var(--yellow)':'var(--muted)')+'">'+score.toFixed(2)+'</td>'
+  sorted.forEach(function(k,idx){
+    var rank=idx+1;
+    var rkCls=rank===1?'rank-1':rank===2?'rank-2':rank===3?'rank-3':'';
+    var rkBadgeCls=rank===1?'r1':rank===2?'r2':rank===3?'r3':'rN';
+    var shortName=k.name||(KOREA_NAMES[k.ticker])||k.ticker||'';
+    var ticker=String(k.ticker||'');
+    var chg=sc(k.burst_change_pct);
+    var chgCls=chg>0.3?'pos':chg<-0.3?'neg':'flat';
+    var gap=sc(k.gap_pct);
+    var gapCls=gap>0.5?'pos':gap<-0.5?'neg':'flat';
+    var price=sc(k.current_price);
+    var priceTx=price>0?price.toLocaleString('ko-KR'):'—';
+    var rsiV=k.rsi!=null?parseFloat(k.rsi):null;
+    var vol=sc(k.vol_ratio);
+    var ema=sc(k.ema_gap_pct);
+    var biasRaw=String(k.signal_bias||'').toLowerCase();
+    var biasCssClass=biasRaw==='bullish'?'offense':biasRaw==='bearish'?'defense':'balanced';
+    var biasTx=biasRaw==='bullish'?'상승':biasRaw==='bearish'?'하락':'중립';
+    var statuses=koreaGetStatuses(k);
+    var statusHtml=statuses.map(function(s){return '<span class="sbadge '+s.cls+'">'+s.txt+'</span>';}).join('');
+    rows+='<tr class="'+rkCls+'" data-ticker="'+ticker+'">'
+      +'<td><div class="rank-badge '+rkBadgeCls+'">'+rank+'</div></td>'
+      +'<td><div class="sym-cell">'
+        +'<div><div class="sym-name">'+shortName+'</div>'
+        +'<div class="sym-pair" style="display:flex;gap:4px;align-items:center">'
+          +'<span style="color:var(--muted);font-size:.65rem">'+ticker+'</span>'
+          +'<span class="sym-change '+chgCls+'">'+pctText(chg)+'</span>'
+        +'</div></div>'
+      +'</div></td>'
+      +'<td><div class="price-cell">'+priceTx+'</div><div class="price-sub">KRW · 일봉</div></td>'
+      +'<td><span class="sym-change '+gapCls+'" style="font-family:var(--mono);font-size:.8rem">'+(gap!==0?pctText(gap):'—')+'</span></td>'
+      +'<td>'+scoreBar(k.candidate_score,'linear-gradient(90deg,var(--blue),var(--green))')+'</td>'
+      +'<td>'+scoreBar(k.signal_score, scoreColor(sc(k.signal_score)))+'</td>'
+      +'<td><span class="rsi-val '+(rsiV!=null?rsiCls(rsiV):'flat')+'">'+(rsiV!=null?rsiV.toFixed(0):'—')+'</span></td>'
+      +'<td><span style="font-family:var(--mono);font-size:.78rem">'+(vol>0?vol.toFixed(1)+'x':'—')+'</span></td>'
+      +'<td><span style="font-family:var(--mono);font-size:.78rem;color:var(--muted)">'+(ema?ema.toFixed(2)+'%':'—')+'</span></td>'
+      +'<td><span class="bias-tag '+biasCssClass+'">'+biasTx+'</span></td>'
+      +'<td><div class="badge-row">'+statusHtml+'</div></td>'
       +'</tr>';
   });
-  body.innerHTML=rows;
+  body.innerHTML=rows||'<tr><td colspan="11" style="text-align:center;padding:24px;color:var(--muted)">조건에 맞는 종목 없음</td></tr>';
+  // 정렬 헤더 표시
+  document.querySelectorAll('#korea-tbl th').forEach(function(th){th.className='';});
+  var kths=document.querySelectorAll('#korea-tbl thead th');
+  var kKeyMap={rank:0,name:1,current_price:2,gap_pct:3,candidate_score:4,signal_score:5,rsi:6,vol_ratio:7,ema_gap_pct:8,signal_bias:9};
+  var ki=kKeyMap[_kSortKey];
+  if(ki!==undefined) kths[ki].className=_kSortAsc?'sorted-asc':'sorted-desc';
+  document.getElementById('korea-sort-label').textContent=(_kSortKey||'candidate_score')+(_kSortAsc?' ↑':' ↓');
 }
 
 // ── 메인 로드 ──
