@@ -64,8 +64,20 @@ class ExecutionAgent(BaseAgent):
             return 0.0
 
     @staticmethod
-    def _infer_strategy_id(action: str = "", focus: str = "", entry_profile: str = "") -> str:
+    def _infer_strategy_id(action: str = "", focus: str = "", entry_profile: str = "", desk: str = "crypto") -> str:
         text = f"{entry_profile} {action} {focus}".lower()
+        ns = desk if desk in {"crypto", "korea", "us"} else "crypto"
+        # Korea-specific patterns
+        if ns == "korea":
+            if "breakout" in text or "돌파" in text:
+                return "korea.breakout"
+            if "gap" in text or "갭" in text:
+                return "korea.gap_up"
+            return f"korea.{entry_profile or action or 'unknown'}"
+        # US patterns
+        if ns == "us":
+            return f"us.{entry_profile or action or 'unknown'}"
+        # Crypto patterns
         if "range_scalp" in text:
             return "crypto.range_scalp"
         if "range_impulse" in text:
@@ -153,7 +165,10 @@ class ExecutionAgent(BaseAgent):
             return 5, 2.4
         if desk == "us":
             return 3, 1.5
-        return 3, 1.5
+        if desk == "korea":
+            # Max 2 concurrent — prevents 3 simultaneous stop-hits wiping out session gains
+            return 2, 1.2
+        return 2, 1.2
 
     @staticmethod
     def _expected_pnl_pct(desk: str, action: str) -> float:
@@ -573,7 +588,7 @@ class ExecutionAgent(BaseAgent):
         stale_signal_block = desk == "crypto" and action in actionable_entries and signal_freshness <= 0.55
         exit_status = "planned" if action in actionable_exits and existing_open else "idle"
         entry_profile = str(plan.get("entry_profile", plan.get("entry_path", "")) or "")
-        strategy_id = str(plan.get("strategy_id", "") or self._infer_strategy_id(action, str(plan.get("focus", "")), entry_profile))
+        strategy_id = str(plan.get("strategy_id", "") or self._infer_strategy_id(action, str(plan.get("focus", "")), entry_profile, desk))
         if not entry_profile:
             entry_profile = strategy_id.split(".", 1)[-1] if "." in strategy_id else strategy_id
         strategy_disabled = self._strategy_disabled(strategy_id) if action in actionable_entries else None

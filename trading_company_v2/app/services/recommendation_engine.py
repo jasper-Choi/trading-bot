@@ -181,7 +181,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     )
     # Volume gate: ignition entries need real volume confirmation.
     # Pullback entries intentionally have low current volume (contracting on retracement).
-    ignition_vol_ok = vol_ratio >= 1.4 or micro_vol_ratio >= 1.5
+    # High-quality signals (>=0.70) bypass the strict vol gate — edge from signal quality is sufficient.
+    _high_quality_signal = signal_score >= 0.70 and micro_score >= 0.46 and orderbook_bid_ask >= 1.0
+    ignition_vol_ok = vol_ratio >= 1.4 or micro_vol_ratio >= 1.5 or _high_quality_signal
     late_chase_risk = (
         micro_exhausted
         or micro_move_3 >= 1.8
