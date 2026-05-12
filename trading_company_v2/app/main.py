@@ -3268,6 +3268,8 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   function toKST(iso){if(!iso||iso==='--')return '--:--';try{return new Date(iso).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false});}catch(e){return String(iso).slice(11,16)||'--:--';}}
   function toKSTFull(iso){if(!iso||iso==='--')return '--';try{var d=new Date(iso);var date=d.toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit'});var time=d.toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false});return date+' '+time;}catch(e){return String(iso).slice(0,16)||'--';}}
   function fmtPct(v){var n=parseFloat(v)||0;return(n>=0?'+':'')+n.toFixed(2)+'%';}
+  var KOREA_NAMES={"247540":"에코프로비엠","196170":"알테오젠","028300":"HLB","141080":"리가켐바이오","000250":"삼천당제약","214150":"클래시스","277810":"레인보우로보틱스","086520":"에코프로","068270":"셀트리온","293490":"카카오게임즈","005930":"삼성전자","000660":"SK하이닉스","005380":"현대차","035720":"카카오","005490":"POSCO홀딩스","373220":"LG에너지솔루션","006400":"삼성SDI","259960":"크래프톤","035420":"네이버","034020":"두산에너빌리티"};
+  function koreaSymName(code){var n=KOREA_NAMES[code];return n?n+'('+code+')':code;}
   function fmtKrw(v){var n=Math.abs(parseInt(v)||0);return n>=1000000?(n/1000000).toFixed(2)+'M':n>=1000?(n/1000).toFixed(0)+'K':String(n);}
   function fmtKrwFull(v,sign){var n=parseInt(v)||0;var prefix=sign?(n>=0?'+':''):'';return prefix+'\\u20a9'+Math.abs(n).toLocaleString('ko-KR');}
   function pctCls(v){var n=parseFloat(v)||0;return n>0?'pos':n<0?'neg':'';}
@@ -3352,8 +3354,8 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
       var bkEl=document.getElementById(pfx+'-bk');if(bkEl){var bkC=parseInt(item.breakout_confirmed_count||0),bkP=parseInt(item.breakout_partial_count||0);if(bkC>0){bkEl.textContent='BK '+bkC;bkEl.className='desk-bk-badge full';bkEl.style.display='inline-block';}else if(bkP>0){bkEl.textContent='BK ~'+bkP;bkEl.className='desk-bk-badge partial';bkEl.style.display='inline-block';}else{bkEl.style.display='none';}}
     });}
   function renderOrderBar(exec){var pending=parseInt(exec.pending_count||0),partial=parseInt(exec.partial_count||0),stale=parseInt(exec.stale_count||0),live=parseInt(exec.live_count||0);var items=[];if(stale>0)items.push('<div class="o-badge bad"><span class="num">'+stale+'</span> 미처리 주문</div>');if(partial>0)items.push('<div class="o-badge warn"><span class="num">'+partial+'</span> 부분 체결</div>');if(pending>0)items.push('<div class="o-badge warn"><span class="num">'+pending+'</span> 대기 중</div>');if(live>0&&!pending&&!partial&&!stale)items.push('<div class="o-badge ok"><span class="num">'+live+'</span> 실전 주문 정상</div>');var bar=document.getElementById('order-bar');if(items.length){bar.innerHTML=items.join('');bar.style.display='flex';}else{bar.style.display='none';}}
-  function renderPositions(pos){var cnt=document.getElementById('pos-count'),body=document.getElementById('positions-body');if(!pos||!pos.length){cnt.textContent='0';body.innerHTML='<div class="empty-row">보유 포지션 없음</div>';return;}cnt.textContent=String(pos.length);var rows=pos.map(function(p){var pnl=parseFloat(p.pnl_pct||p.unrealized_pnl_pct||0);return '<tr><td class="sym">'+(p.symbol||'--')+'</td><td><span class="desk-tag">'+(p.desk||'--')+'</span></td><td>'+Number(p.entry_price||0).toLocaleString('ko-KR')+'</td><td class="'+(pnl>0?'pos':pnl<0?'neg':'')+'" style="font-weight:700">'+fmtPct(pnl)+'</td><td style="color:var(--muted);font-size:.78rem">'+toKST(p.opened_at||'')+'</td></tr>';}).join('');body.innerHTML='<table class="pos-table"><thead><tr><th>종목</th><th>데스크</th><th>진입가</th><th>미실현</th><th>시각</th></tr></thead><tbody>'+rows+'</tbody></table>';}
-  function renderTrades(closed){var body=document.getElementById('trades-body');var items=(closed||[]).slice(0,15);if(!items.length){body.innerHTML='<div class="empty-row">청산 내역 없음</div>';return;}var rows=items.map(function(t){var pnl=parseFloat(t.pnl_pct||0);return '<tr><td class="sym">'+(t.symbol||'--')+'</td><td><span class="desk-tag">'+(t.desk||'--')+'</span></td><td class="'+(pnl>0?'pos':pnl<0?'neg':'')+'" style="font-weight:700">'+fmtPct(pnl)+'</td><td style="color:var(--muted);font-size:.78rem">'+(t.closed_reason||'--')+'</td><td style="color:var(--muted);font-size:.78rem">'+toKST(t.closed_at||'')+'</td></tr>';}).join('');body.innerHTML='<table class="pos-table"><thead><tr><th>종목</th><th>데스크</th><th>손익</th><th>사유</th><th>시각</th></tr></thead><tbody>'+rows+'</tbody></table>';}
+  function renderPositions(pos){var cnt=document.getElementById('pos-count'),body=document.getElementById('positions-body');if(!pos||!pos.length){cnt.textContent='0';body.innerHTML='<div class="empty-row">보유 포지션 없음</div>';return;}cnt.textContent=String(pos.length);var rows=pos.map(function(p){var pnl=parseFloat(p.pnl_pct||p.unrealized_pnl_pct||0);var symDisplay=p.desk==='korea'?koreaSymName(p.symbol||''):(p.symbol||'--');return '<tr><td class="sym">'+symDisplay+'</td><td><span class="desk-tag">'+(p.desk||'--')+'</span></td><td>'+Number(p.entry_price||0).toLocaleString('ko-KR')+'</td><td class="'+(pnl>0?'pos':pnl<0?'neg':'')+'" style="font-weight:700">'+fmtPct(pnl)+'</td><td style="color:var(--muted);font-size:.78rem">'+toKST(p.opened_at||'')+'</td></tr>';}).join('');body.innerHTML='<table class="pos-table"><thead><tr><th>종목</th><th>데스크</th><th>진입가</th><th>미실현</th><th>시각</th></tr></thead><tbody>'+rows+'</tbody></table>';}
+  function renderTrades(closed){var body=document.getElementById('trades-body');var items=(closed||[]).slice(0,15);if(!items.length){body.innerHTML='<div class="empty-row">청산 내역 없음</div>';return;}var rows=items.map(function(t){var pnl=parseFloat(t.pnl_pct||0);var symDisplay=t.desk==='korea'?koreaSymName(t.symbol||''):(t.symbol||'--');return '<tr><td class="sym">'+symDisplay+'</td><td><span class="desk-tag">'+(t.desk||'--')+'</span></td><td class="'+(pnl>0?'pos':pnl<0?'neg':'')+'" style="font-weight:700">'+fmtPct(pnl)+'</td><td style="color:var(--muted);font-size:.78rem">'+(t.closed_reason||'--')+'</td><td style="color:var(--muted);font-size:.78rem">'+toKST(t.closed_at||'')+'</td></tr>';}).join('');body.innerHTML='<table class="pos-table"><thead><tr><th>종목</th><th>데스크</th><th>손익</th><th>사유</th><th>시각</th></tr></thead><tbody>'+rows+'</tbody></table>';}
   function renderEquity(points){var svg=document.getElementById('equity-svg');if(!points||points.length<2){svg.innerHTML='<text x="50%" y="50%" text-anchor="middle" fill="#7d8590" font-size="12">수익 데이터 없음</text>';document.getElementById('equity-label').textContent='';return;}var w=400,h=140,pad=20,vals=points.map(function(p){return Number(p.equity||0);}),mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rng=mx-mn||1;var last=vals[vals.length-1],color=last>=100?'#3fb950':'#f85149';document.getElementById('equity-label').textContent=(last>=100?'+':'')+((last-100).toFixed(2))+'%';var xi=function(i){return pad+(i/(points.length-1))*(w-pad*2);};var yi=function(v){return pad+((mx-v)/rng)*(h-pad*2);};var pts=points.map(function(p,i){return xi(i).toFixed(1)+','+yi(Number(p.equity||0)).toFixed(1);}).join(' ');var fill=xi(0).toFixed(1)+','+h+' '+pts+' '+xi(points.length-1).toFixed(1)+','+h;svg.innerHTML='<defs><linearGradient id="eg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="'+color+'" stop-opacity=".25"/><stop offset="100%" stop-color="'+color+'" stop-opacity="0"/></linearGradient></defs><polygon points="'+fill+'" fill="url(#eg)"/><polyline points="'+pts+'" fill="none" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="'+xi(points.length-1).toFixed(1)+'" cy="'+yi(last).toFixed(1)+'" r="4" fill="'+color+'"/>';}
   function renderAgentLog(log){
     var body=document.getElementById('agent-log-body');
@@ -3481,6 +3483,21 @@ def scanner_data() -> dict:
         row["price_change_pct"] = _scanner_price_change_pct(row.get("change_rate", 0.0))
         row.update(chart_map.get(market) or _scanner_chart_payload(market))
         enriched_candidates.append(row)
+    # ── Korea stock candidates ──
+    korea_desk_view = state.desk_views.get("korea_stock_desk", {}) if state.desk_views else {}
+    korea_raw = (
+        korea_desk_view.get("gap_candidates", [])
+        if isinstance(korea_desk_view, dict) and not korea_desk_view.get("disabled")
+        else []
+    )
+    korea_candidates: list[dict] = []
+    for _k in korea_raw[:15]:
+        if not isinstance(_k, dict) or not _k.get("ticker"):
+            continue
+        _name = str(_k.get("name", "") or "")
+        _ticker = str(_k.get("ticker", "")).strip()
+        _display = f"{_name}({_ticker})" if _name else _ticker
+        korea_candidates.append({**_k, "display_name": _display})
     return {
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "scanned_count": scanned_count,
@@ -3489,6 +3506,7 @@ def scanner_data() -> dict:
         "price_source": "upbit_ws_cache_or_rest",
         "chart_ttl_seconds": _SCANNER_CHART_TTL_SECONDS,
         "candidates": enriched_candidates,
+        "korea_candidates": korea_candidates,
     }
 
 
@@ -3749,14 +3767,45 @@ def _scanner_html() -> str:
     <div class="disc-grid" id="disc-si"></div>
   </div>
 
+  <!-- 한국 주식 스캐너 섹션 -->
+  <div class="discovery-section" id="korea-section" style="display:none">
+    <div class="disc-title">🇰🇷 한국 주식 스캐너 <span class="disc-count" id="korea-cnt">0</span></div>
+    <div style="overflow-x:auto">
+      <table class="pos-table" id="korea-tbl">
+        <thead>
+          <tr>
+            <th>#</th><th>종목</th><th>현재가</th><th>Signal</th><th>RSI</th><th>Vol배율</th><th>브레이크아웃</th><th>Bias</th><th>점수</th>
+          </tr>
+        </thead>
+        <tbody id="korea-body">
+          <tr><td colspan="9" style="text-align:center;padding:20px;color:var(--muted)">로딩 중…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <div class="spacer"></div>
 </div>
 
 <script>
 var _data = [];
+var _koreaData = [];
 var _sortKey = 'combined_score';
 var _sortAsc = false;
 var _filter = 'all';
+
+// ── 한국 주식 종목명 매핑 ──
+var KOREA_NAMES = {
+  "247540":"에코프로비엠","196170":"알테오젠","028300":"HLB","141080":"리가켐바이오",
+  "000250":"삼천당제약","214150":"클래시스","277810":"레인보우로보틱스","086520":"에코프로",
+  "068270":"셀트리온","293490":"카카오게임즈","005930":"삼성전자","000660":"SK하이닉스",
+  "005380":"현대차","035720":"카카오","005490":"POSCO홀딩스","373220":"LG에너지솔루션",
+  "006400":"삼성SDI","259960":"크래프톤","035420":"네이버","034020":"두산에너빌리티"
+};
+function koreaSymName(code){
+  var n=KOREA_NAMES[code];
+  return n ? n+'('+code+')' : code;
+}
 
 // ── 유틸 ──
 function sc(v){ return typeof v==='number'?v:parseFloat(v||0)||0; }
@@ -4013,17 +4062,56 @@ function toKST(isoStr){
   }catch(e){ return isoStr; }
 }
 
+// ── 한국 주식 테이블 렌더 ──
+function renderKoreaTable(){
+  var sec=document.getElementById('korea-section');
+  var body=document.getElementById('korea-body');
+  var cnt=document.getElementById('korea-cnt');
+  if(!_koreaData||!_koreaData.length){sec.style.display='none';return;}
+  sec.style.display='';
+  cnt.textContent=_koreaData.length;
+  var rows='';
+  _koreaData.forEach(function(k,i){
+    var rsi=parseFloat(k.rsi||0)||0;
+    var rsiCl=rsi>=75?'neg':rsi<=40?'pos':'';
+    var bias=String(k.signal_bias||'').toLowerCase();
+    var biasTx=bias==='bullish'?'상승':bias==='bearish'?'하락':'중립';
+    var biasCl=bias==='bullish'?'offense':bias==='bearish'?'defense':'';
+    var bk=parseInt(k.breakout_count||0);
+    var bkTx=bk>=4?'✅ 확정 '+bk+'/4':bk>=3?'🟡 부분 '+bk+'/4':bk>0?bk+'/4':'—';
+    var price=parseFloat(k.current_price||0);
+    var priceTx=price>0?price.toLocaleString('ko-KR')+'원':'—';
+    var vol=parseFloat(k.vol_ratio||0)||0;
+    var score=parseFloat(k.candidate_score||0)||0;
+    var name=k.display_name||koreaSymName(k.ticker||'');
+    rows+='<tr>'
+      +'<td style="color:var(--muted);font-size:.8rem">'+(i+1)+'</td>'
+      +'<td class="sym" style="font-size:.85rem">'+name+'</td>'
+      +'<td style="font-family:var(--mono);font-size:.82rem">'+priceTx+'</td>'
+      +'<td><div style="background:var(--card-border);border-radius:4px;height:6px;width:60px"><div style="background:var(--blue);height:6px;border-radius:4px;width:'+Math.min(parseFloat(k.signal_score||0)*100,100).toFixed(0)+'%"></div></div></td>'
+      +'<td><span style="font-family:var(--mono);font-size:.8rem" class="'+rsiCl+'">'+(rsi?rsi.toFixed(0):'—')+'</span></td>'
+      +'<td style="font-family:var(--mono);font-size:.78rem;color:var(--muted)">'+(vol>0?vol.toFixed(1)+'x':'—')+'</td>'
+      +'<td style="font-size:.78rem">'+bkTx+'</td>'
+      +'<td><span class="bias-tag '+biasCl+'">'+biasTx+'</span></td>'
+      +'<td style="font-family:var(--mono);font-size:.8rem;color:'+(score>=0.7?'var(--green)':score>=0.5?'var(--yellow)':'var(--muted)')+'">'+score.toFixed(2)+'</td>'
+      +'</tr>';
+  });
+  body.innerHTML=rows;
+}
+
 // ── 메인 로드 ──
 async function loadScanner(){
   try{
     var res = await fetch('/scanner-data');
     var json = await res.json();
     _data = json.candidates || [];
+    _koreaData = json.korea_candidates || [];
     document.getElementById('hdr-sub').textContent =
-      toKST(json.updated_at)+' KST · '+_data.length+'개 코인 스캔';
+      toKST(json.updated_at)+' KST · '+_data.length+'개 코인 스캔'+(_koreaData.length?' · 주식 '+_koreaData.length+'개':'');
     renderMarketBar(json);
     renderTable();
     renderDiscovery();
+    renderKoreaTable();
     document.getElementById('rdot').style.background='var(--green)';
   }catch(e){
     document.getElementById('hdr-sub').textContent = '로딩 실패: '+e.message;
