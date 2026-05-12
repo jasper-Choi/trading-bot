@@ -1,9 +1,47 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-12 (session 27 — KIS 틱 스트림 오픈 리버설 전략)
+Last updated: 2026-05-12 (session 28 — 6대 전략 확장: 수급/종가/호가/테마/김치프리미엄/피라미딩)
 Maintained for: Claude / Codex continuation
 
-## 0. Latest Claude Notes - 2026-05-12 (session 27 — KIS 틱 스트림 오픈 리버설 전략)
+## 0. Latest Claude Notes - 2026-05-12 (session 28 — 6대 전략 확장)
+
+### 커밋 bb9856d — Oracle VM 배포 완료
+
+**[6대 전략 전체 구현 + 간섭 방지 설계]**
+
+1. **기관 수급 필터** (`app/services/korea_supply_demand.py` NEW)
+   - Naver sise_invest 스크래핑 → 기관 레이더 종목집합 (1h TTL)
+   - Path B 브레이크아웃 점수 10% + sentiment enrichment 15% 수급 가중치
+
+2. **종가 추격 전략** (Path D, 14:50~15:10 KST = 05:50~06:10 UTC)
+   - 당일 gap>=2% 유지 + 기관 레이더 + signal>=0.55 + sentiment>=0.52
+   - target +3.0% / stop -1.5% / max 30h (오버나이트)
+   - close_drive 슬롯 최대 1개 (중복 진입 방지)
+
+3. **호가잔량 연동** (H0STASP0 TR, `kis_stream_cache.py`)
+   - KIS 호가 TR 동시 구독 → get_orderbook_imbalance()
+   - 오픈리버설 점수에 매수잔량 우세 시 +10점
+
+4. **테마 감지** (`korea_sentiment.py`)
+   - 8개 핫 테마(AI/반도체/2차전지/바이오 등) 감지
+   - 종목 토론방/뉴스에서 테마 언급 시 0.0~0.15 부스트
+
+5. **김치프리미엄** (`app/services/kimchi_premium.py` NEW)
+   - Dunamu 환율 + Binance 가격 비교 (5m TTL)
+   - 역프리미엄(-2%) 시 crypto ignition threshold 0.56→0.62
+
+6. **피라미딩** (`state_store.py`)
+   - Korea 포지션 peak_pnl>=3.0% + current>=2.0% → +0.20x 추가 진입
+   - open_reversal / close_drive / pyramid 대상 제외
+   - is_pyramided 컬럼 추가 (schema migration 자동)
+
+**간섭 방지:**
+- Korea max 슬롯 2→3 (execution_agent)
+- per-strategy 슬롯: open_reversal max1, close_drive max1
+- 피라미드는 별도 카운팅 (max1)
+- 시간창 자연 분리: 리버설(9:00~9:40) / 브레이크아웃(장중) / 종가(14:50~15:10)
+
+## 0-prev. Latest Claude Notes - 2026-05-12 (session 27 — KIS 틱 스트림 오픈 리버설 전략)
 
 ### 커밋 8f17a54 — Oracle VM 배포 완료
 
