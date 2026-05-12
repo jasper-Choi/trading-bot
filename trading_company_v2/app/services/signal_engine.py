@@ -2175,8 +2175,10 @@ def summarize_pullback_uptrend_signal(candles: list[dict[str, Any]]) -> dict[str
         "pct_from_ma40": 0.0,
         "pullback_rsi": None,
         "vol_declining": False,
+        "last_candle_bullish": False,
     }
     closes = [float(c["close"]) for c in candles if c.get("close")]
+    opens = [float(c.get("open") or c["close"]) for c in candles if c.get("close")]
     volumes = [float(c.get("volume") or 0.0) for c in candles]
     if len(closes) < 42:
         return _empty
@@ -2207,6 +2209,9 @@ def summarize_pullback_uptrend_signal(candles: list[dict[str, Any]]) -> dict[str
         prior_vol = sum(volumes[-10:-3]) / 7
         vol_declining = prior_vol > 0 and recent_vol < prior_vol * 0.85
 
+    # 마지막 캔들 양봉 확인 (당일 반등 시작 신호)
+    last_candle_bullish = len(closes) == len(opens) and closes[-1] >= opens[-1]
+
     pullback_ma_detected = is_uptrend and near_ma20 and rsi_ok
 
     score = 0.0
@@ -2218,6 +2223,8 @@ def summarize_pullback_uptrend_signal(candles: list[dict[str, Any]]) -> dict[str
             score += 0.15
         if pct_from_ma40 > 5.0:
             score += 0.15
+        if last_candle_bullish:
+            score += 0.10
 
     return {
         "pullback_ma_detected": pullback_ma_detected,
@@ -2228,6 +2235,7 @@ def summarize_pullback_uptrend_signal(candles: list[dict[str, Any]]) -> dict[str
         "pct_from_ma40": round(pct_from_ma40, 2),
         "pullback_rsi": round(last_rsi_val, 1) if last_rsi_val is not None else None,
         "vol_declining": vol_declining,
+        "last_candle_bullish": last_candle_bullish,
     }
 
 

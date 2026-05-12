@@ -151,6 +151,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     sharp_dip_bounce = bool(payload.get("sharp_dip_bounce", False))
     dip_change_30m = float(payload.get("dip_change_30m", 0.0) or 0.0)
     dip_rsi_btc = payload.get("dip_rsi_btc")
+    dip_bounce_symbol: str = str(payload.get("dip_bounce_symbol") or "") or "KRW-BTC"
 
     flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02 or stream_ignition
     launch_confirmed = (
@@ -250,15 +251,17 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # 평균회귀 전략 — 추세 무관하게 작동, DEFENSE 스탠스만 차단
     if sharp_dip_bounce and stance != "DEFENSE":
         _dip_rsi_str = f"{dip_rsi_btc:.0f}" if dip_rsi_btc is not None else "?"
+        _is_alt = dip_bounce_symbol != "KRW-BTC"
+        _focus_sym = dip_bounce_symbol.replace("KRW-", "") if _is_alt else "BTC"
         return {
             "action": "probe_longs",
             "size": "0.35x",
-            "focus": f"dip_bounce: BTC {dip_change_30m:.1f}% 30분 급락 — 과매도 반등 포착",
-            "symbol": "KRW-BTC",
-            "candidate_symbols": ["KRW-BTC"] + candidate_symbols[:2],
+            "focus": f"dip_bounce: BTC {dip_change_30m:.1f}% 30분 급락 → {_focus_sym} 반등 포착",
+            "symbol": dip_bounce_symbol,
+            "candidate_symbols": [dip_bounce_symbol, "KRW-BTC"] + candidate_symbols[:2],
             "notes": [
                 f"BTC 30min change={dip_change_30m:.2f}% / RSI={_dip_rsi_str}",
-                "target +1.2% / stop -0.7% / max 20min",
+                f"target +1.2% / stop -0.7% / max 20min ({_focus_sym} 선택{'=알트' if _is_alt else '=BTC'})",
                 "kimchi=" + (f"{kimchi_premium_pct:+.1f}%" if kimchi_premium_pct else "n/a"),
             ],
         }

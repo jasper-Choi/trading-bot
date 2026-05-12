@@ -163,6 +163,57 @@ def get_theme_boost(texts: list[str], hot_themes: dict[str, int] | None = None) 
     return min(0.05 * len(detected), 0.10)
 
 
+# 펀더멘털 갭다운 리스크 키워드 (기술적 갭과 구분)
+_GAP_RISK_KEYWORDS = [
+    "적자", "영업손실", "순손실", "실적 부진", "실적쇼크", "어닝쇼크",
+    "하향", "목표주가 하향", "투자의견 하향",
+    "소송", "검찰", "수사", "조사", "고발", "기소",
+    "상장폐지", "거래정지", "불성실공시",
+    "대표이사 교체", "대표이사 사임", "최대주주 변경",
+    "계약 해지", "계약 취소", "수주 취소",
+    "횡령", "배임", "사기",
+]
+_NEWS_RISK_TTL = 600.0  # 10분
+_news_risk_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_news_risk_lock = threading.Lock()
+
+
+def get_stock_news_risk(ticker: str) -> dict[str, Any]:
+    """당일 뉴스에서 펀더멘털 갭다운 리스크 키워드를 감지한다.
+    Returns: {"has_risk": bool, "risk_keywords": list[str]}
+    갭 메꾸기 전략에서 이유 있는 갭다운(실적악화, 소송 등)을 필터링하는 데 사용.
+    """
+    with _news_risk_lock:
+        cached = _news_risk_cache.get(ticker)
+        if cached and (time.time() - cached[0]) < _NEWS_RISK_TTL:
+            return cached[1]
+    try:
+        resp = requests.get(
+            _NEWS_URL.format(ticker=ticker),
+            headers=NAVER_HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        html = resp.content.decode("euc-kr", errors="ignore")
+    except RequestException:
+        result: dict[str, Any] = {"has_risk": False, "risk_keywords": []}
+        with _news_risk_lock:
+            _news_risk_cache[ticker] = (time.time(), result)
+        return result
+
+    headlines = re.findall(r'class="articleSubject"[^>]*>.*?<a[^>]*>([^<]{5,})', html, flags=re.S | re.I)
+    if not headlines:
+        headlines = re.findall(r'<a[^>]*title="([^"]{5,})"', html)
+    headlines = [_strip_html(h) for h in headlines[:15]]
+    joined = " ".join(headlines)
+
+    found = [kw for kw in _GAP_RISK_KEYWORDS if kw in joined]
+    result = {"has_risk": bool(found), "risk_keywords": found[:5]}
+    with _news_risk_lock:
+        _news_risk_cache[ticker] = (time.time(), result)
+    return result
+
+
 def get_combined_sentiment(ticker: str) -> dict[str, Any]:
     """
     Returns:

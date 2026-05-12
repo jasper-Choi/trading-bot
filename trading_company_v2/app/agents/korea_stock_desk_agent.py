@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
-from app.services.korea_sentiment import get_combined_sentiment, get_theme_boost
+from app.services.korea_sentiment import get_combined_sentiment, get_theme_boost, get_stock_news_risk
 from app.services.korea_supply_demand import get_institutional_tickers, get_supply_demand_score
 from app.services.korea_universe import get_korea_universe
 from app.services.kis_stream_cache import (
@@ -395,18 +395,23 @@ class KoreaStockDeskAgent(BaseAgent):
 
         # ── Path E: 갭 메꾸기 (Gap Fill) ────────────────────────────────────
         # 09:00~10:00 KST (00:00~01:00 UTC): 이유 없이 갭다운한 종목 → 갭 메꾸기 기대
-        # 조건: gap_pct -3.0~-0.5% + RSI>25 + signal not bearish + volume>=5000
+        # 조건: gap_pct -3.0~-0.5% + vol>=15000 + RSI>25 + signal not bearish
+        #       + 뉴스 리스크 없음 + 종목 특이 갭 (시장 전체 갭다운이 아닌 경우 우선)
         gap_fill_candidates: list[dict] = []
         if _in_open_window:
+            # 시장 평균 갭 계산 (브로드 마켓 갭다운 판단)
+            all_gaps = [float(item.get("gap_pct", 0.0) or 0.0) for item in leaders if item.get("ticker")]
+            market_avg_gap = sum(all_gaps) / len(all_gaps) if all_gaps else 0.0
+
             gap_down_items = [
                 item for item in leaders
                 if -3.0 <= float(item.get("gap_pct", 0.0) or 0.0) <= -0.5
                 and str(item.get("ticker", "")).strip()
+                and float(item.get("volume", 0) or 0) >= 15000
             ]
 
             def _fetch_gf(item: dict) -> tuple[dict, list[dict]]:
-                ticker = str(item.get("ticker", "")).strip()
-                return item, get_naver_daily_prices(ticker, count=42)
+                return item, get_naver_daily_prices(str(item.get("ticker", "")).strip(), count=42)
 
             if gap_down_items:
                 with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
@@ -415,30 +420,44 @@ class KoreaStockDeskAgent(BaseAgent):
                 for item, candles in gf_results:
                     if len(candles) < 22:
                         continue
+                    ticker = str(item.get("ticker", "")).strip()
                     gap_pct = float(item.get("gap_pct", 0.0) or 0.0)
                     vol = float(item.get("volume", 0) or 0)
-                    if vol < 5000:
-                        continue
+
                     signal = summarize_equity_signal(candles)
                     signal_score = float(signal.get("score", 0.5) or 0.5)
                     signal_bias = str(signal.get("bias", "neutral") or "neutral")
                     rsi_v = signal.get("rsi")
+
                     if rsi_v is not None and float(rsi_v) < 25:
                         continue  # 극단 과매도 — 펀더멘털 이슈 가능
                     if signal_bias == "bearish":
                         continue  # 기술적 약세 — 갭 메꾸기 가능성 낮음
+
+                    # 뉴스 리스크 필터: 실적/소송/조사 등 이유 있는 갭다운 제외
+                    try:
+                        news_risk = get_stock_news_risk(ticker)
+                        if news_risk.get("has_risk"):
+                            continue
+                    except Exception:
+                        pass
+
                     # MA20 위에 있는 종목만 (상승 추세 내 조정)
                     pb = summarize_pullback_uptrend_signal(candles)
                     if pb["ma20"] is not None:
                         last_close = float(candles[-1].get("close") or 0)
                         if last_close < pb["ma20"] * 0.97:
                             continue  # MA20 크게 하회 — 추세 훼손
+
+                    # 종목 특이 갭 여부: 시장 평균 갭보다 더 많이 빠졌을 때 우선
+                    stock_specific = gap_pct < market_avg_gap - 0.5
                     gf_score = round(
                         0.45
                         + (0.15 if rsi_v is not None and 30 <= float(rsi_v) <= 52 else 0.0)
                         + (0.15 if signal_score >= 0.50 else 0.0)
-                        + (0.15 if vol >= 20000 else 0.05 if vol >= 10000 else 0.0)
-                        + (0.10 if -1.5 <= gap_pct <= -0.5 else 0.0),
+                        + (0.10 if vol >= 30000 else 0.05 if vol >= 15000 else 0.0)
+                        + (0.10 if -1.5 <= gap_pct <= -0.5 else 0.0)
+                        + (0.05 if stock_specific else 0.0),
                         2,
                     )
                     gap_fill_candidates.append({
@@ -456,6 +475,8 @@ class KoreaStockDeskAgent(BaseAgent):
                         "sentiment_score": 0.5,
                         "gap_fill": True,
                         "gap_fill_score": gf_score,
+                        "stock_specific_gap": stock_specific,
+                        "market_avg_gap": round(market_avg_gap, 2),
                     })
             gap_fill_candidates.sort(key=lambda c: c["gap_fill_score"], reverse=True)
 

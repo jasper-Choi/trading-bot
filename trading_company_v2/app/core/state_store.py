@@ -88,6 +88,7 @@ class PaperPositionRecord(Base):
     strategy_id: Mapped[str] = mapped_column(String(80), default="")
     entry_profile: Mapped[str] = mapped_column(String(80), default="")
     is_pyramided: Mapped[bool] = mapped_column(Boolean, default=False)
+    strategy_type: Mapped[str] = mapped_column(String(50), default="")
 
 
 class PositionRecord(Base):
@@ -710,6 +711,7 @@ def _ensure_schema() -> None:
         "strategy_id": "ALTER TABLE paper_positions ADD COLUMN strategy_id VARCHAR(80) DEFAULT ''",
         "entry_profile": "ALTER TABLE paper_positions ADD COLUMN entry_profile VARCHAR(80) DEFAULT ''",
         "is_pyramided": "ALTER TABLE paper_positions ADD COLUMN is_pyramided BOOLEAN DEFAULT 0",
+        "strategy_type": "ALTER TABLE paper_positions ADD COLUMN strategy_type VARCHAR(50) DEFAULT ''",
     }
     missing_paper_position = [ddl for column, ddl in paper_position_defs.items() if column not in paper_position_columns]
     if missing_paper_position:
@@ -1231,6 +1233,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                                 strategy_id="korea.pyramid",
                                 entry_profile="pyramid",
                                 is_pyramided=False,
+                                strategy_type="pyramid",
                             )
                             db.add(pyr)
                             _log.info(
@@ -1277,6 +1280,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 focus=order.focus,
                 strategy_id=strategy_id,
                 entry_profile=entry_profile,
+                strategy_type=_derive_strategy_type(order.focus or "", order.action or "", order.desk or ""),
             )
             db.add(
                 position
@@ -2700,6 +2704,60 @@ def load_performance_quick_stats() -> dict:
             "open_positions": 0,
             "total_unrealized_pnl_pct": 0.0,
         }
+
+
+def _derive_strategy_type(focus: str, action: str, desk: str) -> str:
+    f = (focus or "").lower()
+    a = (action or "").lower()
+    if "gap_fill" in f:        return "gap_fill"
+    if "pullback_ma" in f:     return "pullback_ma"
+    if "open_reversal" in f:   return "open_reversal"
+    if "close_drive" in f:     return "close_drive"
+    if "dip_bounce" in f:      return "dip_bounce"
+    if "pyramid" in f:         return "pyramid"
+    if "breakout" in f:        return "breakout"
+    if a == "attack_opening_drive": return "opening_drive"
+    if a in {"probe_longs", "selective_probe"}:
+        return f"{desk}_probe"
+    return "other"
+
+
+def get_strategy_stats() -> list[dict]:
+    """전략별 성과 통계 — 전략 유형별 승률/평균 수익 집계."""
+    init_db()
+    try:
+        with SessionLocal() as db:
+            rows = db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "closed",
+                       PaperPositionRecord.pnl_pct.isnot(None))
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(500)
+            ).scalars().all()
+    except Exception:
+        return []
+    by_type: dict[str, dict] = {}
+    for r in rows:
+        st = r.strategy_type or _derive_strategy_type(r.focus or "", r.action or "", r.desk or "")
+        if st not in by_type:
+            by_type[st] = {"n": 0, "wins": 0, "pnl_sum": 0.0, "desk": r.desk or ""}
+        by_type[st]["n"] += 1
+        if (r.pnl_pct or 0.0) > 0:
+            by_type[st]["wins"] += 1
+        by_type[st]["pnl_sum"] += float(r.pnl_pct or 0.0)
+    result = []
+    for st, d in sorted(by_type.items(), key=lambda x: -x[1]["n"]):
+        n = d["n"]
+        result.append({
+            "strategy_type": st,
+            "desk": d["desk"],
+            "n_trades": n,
+            "wins": d["wins"],
+            "win_rate": round(d["wins"] / n * 100, 1) if n else 0.0,
+            "avg_pnl": round(d["pnl_sum"] / n, 2) if n else 0.0,
+            "total_pnl": round(d["pnl_sum"], 2),
+        })
+    return result
 
 
 def load_symbol_score_adjustments(window: int = 60) -> dict[str, float]:

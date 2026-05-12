@@ -445,6 +445,24 @@ class CryptoDeskAgent(BaseAgent):
             and float(_dip_rsi_btc) <= 32
         )
 
+        # ── BTC 급락 시 상관 알트코인 탐색 ──────────────────────────────────
+        # BTC 급락 반등이 감지되면 BTC 대신 매수할 최적 알트코인을 찾는다.
+        # 조건: BTC 상관관계 높음(≥0.65) + 동반 하락(≤-1.5%) + 매수벽 우위(≥1.1)
+        _dip_bounce_symbol: str | None = None
+        if _sharp_dip_bounce and ranked_candidates:
+            _alt_scored: list[tuple[float, str]] = []
+            for _cand in ranked_candidates:
+                _mkt = str(_cand.get("market", "") or "")
+                if _mkt in ("KRW-BTC", ""):
+                    continue
+                _corr = float(_cand.get("btc_corr_15m", 0.0) or 0.0)
+                _chg = float(_cand.get("recent_change_pct", 0.0) or 0.0)
+                _bid_ask = float(_cand.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
+                if _corr >= 0.65 and _chg <= -1.5 and _bid_ask >= 1.1:
+                    _alt_scored.append((_corr + _bid_ask * 0.3, _mkt))
+            if _alt_scored:
+                _dip_bounce_symbol = max(_alt_scored, key=lambda x: x[0])[1]
+
         # ── 김치 프리미엄 계산 (leader 종목 기준) ────────────────────────────
         lead_market = str(leader.get("market", "") or next(iter(weights), "KRW-BTC"))
         _base_currency = lead_market.replace("KRW-", "")
@@ -635,5 +653,6 @@ class CryptoDeskAgent(BaseAgent):
                 "sharp_dip_bounce": _sharp_dip_bounce,
                 "dip_change_30m": _dip_change_30m,
                 "dip_rsi_btc": _dip_rsi_btc,
+                "dip_bounce_symbol": _dip_bounce_symbol,
             },
         )

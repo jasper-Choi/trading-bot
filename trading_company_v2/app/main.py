@@ -46,6 +46,7 @@ from app.core.state_store import (
     load_recent_shadow_signals,
     load_shadow_signal_stats,
     load_strategy_performance_stats,
+    get_strategy_stats,
 )
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
@@ -1578,6 +1579,11 @@ def api_trades(limit: int = 50) -> list[dict]:
 @app.get("/api/stats")
 def api_stats() -> dict:
     return _api_stats_payload()
+
+
+@app.get("/api/strategy-stats")
+def api_strategy_stats() -> list[dict]:
+    return get_strategy_stats()
 
 
 @app.get("/api/logs")
