@@ -457,13 +457,13 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         if action == "selective_probe":
             return 4.0, -2.0, 150
         return 3.0, -1.5, 120
-    # Korea stock (stock_backtest_v3 validated):
-    # 목표가 25% = 사실상 hard target 없음 → 트레일링 스탑이 청산 전담
-    # +4% 달성 시 trail 발동, 추세 계속되면 청산선도 같이 올라감
-    # stop -2.5%, max 2700 cycles ≈ 2.3 trading days (20s/cycle)
+    # Korea stock:
+    # stop -1.5%: 손실 크기 축소 (-2.5% → -1.5%), early_failure도 자동으로 타이트해짐
+    # trail +1.5%부터 발동 — 작은 수익도 보호
+    # max 2700 cycles ≈ 2.3 trading days (20s/cycle)
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
-        return 25.0, -2.5, 2700
-    return 25.0, -2.5, 2700
+        return 25.0, -1.5, 2700
+    return 25.0, -1.5, 2700
 
 
 def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
@@ -501,22 +501,28 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
 
 
 def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
-    """Korea 주식 트레일링 스탑 (stock_backtest_v3 기반).
+    """Korea 주식 트레일링 스탑.
 
     hard target 없이 트레일링만으로 청산 — 상승 추세 최대한 탑승.
     protect_level = max(floor, peak - giveback)
 
-    peak >= 15% → giveback 3.5%, floor 10%  (대세 상승 구간, 수익 크게 확보)
-    peak >=  8% → giveback 3.0%, floor  5%  (TP2 달성 이후)
-    peak >=  4% → giveback 3.5%, floor  2%  (트레일 발동, TP1 수준 확보)
-    peak <   4% → 트레일 없음 (아직 stop/early_failure에 맡김)
+    peak >= 15% → giveback 3.5%, floor 10%  (대세 상승)
+    peak >=  8% → giveback 3.0%, floor  5%
+    peak >=  4% → giveback 2.5%, floor  2.0%
+    peak >=  2% → giveback 1.2%, floor  1.0%  (중소형 수익 보호)
+    peak >= 1.5% → giveback 0.8%, floor  0.5%  (작은 수익도 보호)
+    peak <  1.5% → 트레일 없음
     """
     if peak_pnl >= 15.0:
         return 3.5, 10.0
     if peak_pnl >= 8.0:
         return 3.0, 5.0
     if peak_pnl >= 4.0:
-        return 3.5, 2.0
+        return 2.5, 2.0
+    if peak_pnl >= 2.0:
+        return 1.2, 1.0
+    if peak_pnl >= 1.5:
+        return 0.8, 0.5
     return 0.0, 0.0
 
 
