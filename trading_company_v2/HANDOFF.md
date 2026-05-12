@@ -1,9 +1,45 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-12 (session 26 — KIS 연동 + 스캐너 주식 추가 + 종목명 표시)
+Last updated: 2026-05-12 (session 27 — KIS 틱 스트림 오픈 리버설 전략)
 Maintained for: Claude / Codex continuation
 
-## 0. Latest Claude Notes - 2026-05-12 (session 26 — KIS 연동 + 스캐너 주식 추가 + 종목명 표시)
+## 0. Latest Claude Notes - 2026-05-12 (session 27 — KIS 틱 스트림 오픈 리버설 전략)
+
+### 커밋 8f17a54 — Oracle VM 배포 완료
+
+**[KIS WebSocket H0STCNT0 틱 스트림 + 오픈 리버설 전략]**
+
+새 파일 `app/services/kis_stream_cache.py`:
+- KIS WebSocket (H0STCNT0 TR) 실시간 체결 틱 수신
+- 종목당 300틱 ring buffer, background daemon thread
+- `get_opening_reversal_signal(ticker)`: cascade→exhaustion→reversal 3단계 감지
+  - cascade: 30틱 매도비율 ≥65% AND 시가 대비 -0.8%↓
+  - exhaustion: cascade AND 10틱 매도비율 <52% AND 틱볼륨 수축
+  - reversal: 5틱 매수 우세 AND 저점 위
+  - score 0~100 (cascade +30+최대20, exhaustion +25, reversal +25, 매도비율개선 +10)
+- `subscribe_tickers()`, `get_stream_status()` 공개 API
+
+`app/agents/korea_stock_desk_agent.py` Path C 추가:
+- 09:00~09:40 KST (00:00~00:40 UTC) 구간에만 활성화
+- gap_candidates[:10] + enriched_candidates[:10] 틱 구독
+- score ≥ 55 AND cascade=True인 종목 → reversal_candidates (gap_candidates 앞에 삽입)
+
+`app/services/recommendation_engine.py` open_reversal 핸들러:
+- top candidate에 `open_reversal=True` 있으면 → `attack_opening_drive` 0.40x
+- focus 문자열에 "open_reversal:" 포함 → _position_thresholds 트리거
+
+`app/core/state_store.py` 전용 임계값:
+- focus에 "open_reversal" 포함 시: target +3.0% / stop -0.8% / max 360 cycles (2h)
+
+**이전 세션 주요 변경 (session 26):**
+- Korea stop -2.5%→-1.5%, trail trigger +4%→+1.5%
+- Korea 최대 동시 포지션 3→2
+- `_infer_strategy_id` desk 파라미터 추가 (korea.*, us.*)
+- crypto ignition gate 완화 (high quality signal bypass)
+- 전체 유니버스 스캔 (KOSPI+KOSDAQ 상위거래량 120종목)
+- Naver 종목토론방+뉴스 sentiment enrichment
+
+## 0-prev. Latest Claude Notes - 2026-05-12 (session 26 — KIS 연동 + 스캐너 주식 추가 + 종목명 표시)
 
 ### 커밋 b09442c — Oracle VM 배포 완료
 
