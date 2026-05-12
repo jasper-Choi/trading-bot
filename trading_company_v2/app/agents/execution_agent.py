@@ -182,9 +182,15 @@ class ExecutionAgent(BaseAgent):
                 if item.get("ticker") == symbol:
                     return float(item.get("current_price") or 0.0)
             return 0.0
-        for item in self.market_snapshot.get("gap_candidates", []) + self.market_snapshot.get("stock_leaders", []):
-            if item.get("ticker") == symbol:
-                return float(item.get("current_price") or 0.0)
+        # gap_candidates = KOSDAQ 갭업 + korea stock desk watchlist 브레이크아웃 포함
+        for item in (
+            self.market_snapshot.get("gap_candidates", [])
+            + self.market_snapshot.get("stock_leaders", [])
+        ):
+            if str(item.get("ticker", "")).strip() == symbol:
+                price = float(item.get("current_price") or 0.0)
+                if price > 0:
+                    return price
         return 0.0
 
     def _recent_loss_cooldown(self, desk: str, symbol: str) -> bool:

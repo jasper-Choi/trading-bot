@@ -49,7 +49,11 @@ def route_orders(orders: list[PaperOrder], requested_mode: str) -> dict:
         applied_mode = "upbit_live" if settings.upbit_allow_live else "paper"
         unsupported_live_orders = 0
         for order in active_orders:
-            result = place_upbit_order(order)
+            # korea desk → KIS 브로커로 분기 (KIS_ALLOW_LIVE=true인 경우)
+            if order.desk == "korea" and settings.kis_allow_live and settings.kis_app_key:
+                result = place_kis_order(order)
+            else:
+                result = place_upbit_order(order)
             details.append(result.detail)
             if result.ok:
                 routed_orders += 1

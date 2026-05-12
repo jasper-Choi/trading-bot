@@ -600,12 +600,20 @@ class CompanyOrchestrator:
             f"crypto_desk={crypto_desk_result.payload.get('desk_bias', 'unknown')}",
             f"active_desks={','.join(sorted(active_desks))}",
         ]
+        # korea stock desk gap_candidates (watchlist 브레이크아웃 포함)와 병합
+        _mkt_gap = market_data_result.payload.get("gap_candidates", [])
+        _desk_gap = stock_desk_result.payload.get("gap_candidates", []) if "korea" in active_desks else []
+        _gap_by_ticker: dict = {}
+        for _g in _mkt_gap + _desk_gap:
+            _tk = str(_g.get("ticker", "")).strip()
+            if _tk:
+                _gap_by_ticker[_tk] = _g
         state.market_snapshot = {
             "as_of": market_data_result.payload.get("as_of"),
             "crypto_leaders": market_data_result.payload.get("crypto_leaders", []),
             "crypto_view": crypto_desk_result.payload,
             "stock_leaders": market_data_result.payload.get("stock_leaders", []),
-            "gap_candidates": market_data_result.payload.get("gap_candidates", []),
+            "gap_candidates": list(_gap_by_ticker.values()),
             "us_leaders": market_data_result.payload.get("us_leaders", []),
         }
         state.session_state = strategy_allocator_result.payload.get("session", {})
