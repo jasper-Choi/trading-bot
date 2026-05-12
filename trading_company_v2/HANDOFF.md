@@ -1,7 +1,40 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-12 (session 25 — best3 전략 이식 완료 + stream_score 버그 수정)
+Last updated: 2026-05-12 (session 26 — KIS 연동 + 스캐너 주식 추가 + 종목명 표시)
 Maintained for: Claude / Codex continuation
+
+## 0. Latest Claude Notes - 2026-05-12 (session 26 — KIS 연동 + 스캐너 주식 추가 + 종목명 표시)
+
+### 커밋 b09442c — Oracle VM 배포 완료
+
+**[스캐너 한국 주식 섹션 추가]**
+- `/scanner-data` API: `korea_candidates` 필드 추가 (desk_views.korea_stock_desk 기반, 최대 15개)
+- 스캐너 페이지: 🇰🇷 한국 주식 스캐너 테이블 섹션 추가 (korea_candidates가 있을 때만 표시)
+  - 컬럼: 순위, 종목, 현재가, Signal 게이지, RSI, Vol배율, 브레이크아웃, Bias, 점수
+- `KOREA_NAMES` 매핑 딕셔너리 (20종목) + `koreaSymName()` 헬퍼 추가 (대시보드/스캐너 양쪽)
+- `renderPositions()`: korea 데스크 포지션 "회사명(종목코드)" 형식으로 표시
+- `renderTrades()`: korea 데스크 청산 내역 "회사명(종목코드)" 형식으로 표시
+
+**[이번 세션에서 완료된 KIS 연동 작업]** (이전 커밋들)
+- `broker_router.py`: upbit_live 모드에서 korea 데스크 → KIS 브로커로 분기
+- `config.py`: `KIS_CAPITAL_KRW` 설정 추가 (KIS 전용 자본금, 기본값=LIVE_CAPITAL_KRW)
+- `orchestrator.py`: 마켓 snap과 KoreaStockDesk의 gap_candidates 병합
+- `execution_agent.py`: `_reference_price()` 개선 — KOSPI 감시종목도 조회 가능
+- VM `.env`: `KIS_ALLOW_LIVE=true`, `KIS_MOCK=true`, `KIS_CAPITAL_KRW=5000000`
+- stream 신선도 6s→30s 완화 (`crypto_desk_agent.py`)
+
+**현황 (2026-05-12 09:56 KST)**:
+- 스캐너: 코인 18개 + 주식 5개 (펩트론, 휴림로봇, 에이프릴바이오, 대주전자재료, 브이엠)
+- KIS 모의투자(mock) 모드로 주식 주문 라우팅 활성화
+- 모의투자 → 실전 전환: VM .env에서 `KIS_MOCK=false`로 변경 후 uvicorn 재시작
+
+**다음 우선순위**:
+1. KIS 모의투자 주문 실제 체결 확인 — cycle_journal에서 `applied_mode: kis_live` 확인
+2. KIS 실전 전환 (`KIS_MOCK=false`) 결정
+3. ML 모델 신호 반영 확인 (models/ 디렉토리 pkl/pt 존재 여부)
+4. Binance 선물 연결 — 미래 계획
+
+---
 
 ## 0. Latest Claude Notes - 2026-05-12 (session 25 — best3 전략 이식 + stream_score=0 버그 수정)
 
