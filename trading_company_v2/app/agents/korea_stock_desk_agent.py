@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
-from app.services.korea_sentiment import get_combined_sentiment
+from app.services.korea_sentiment import get_combined_sentiment, get_theme_boost
+from app.services.korea_supply_demand import get_institutional_tickers, get_supply_demand_score
 from app.services.korea_universe import get_korea_universe
 from app.services.kis_stream_cache import (
     subscribe_tickers,
@@ -152,6 +153,24 @@ class KoreaStockDeskAgent(BaseAgent):
                 }
             )
 
+        # ── 수급 데이터 (기관 레이더 종목집합) 한 번만 가져오기 ─────────────
+        try:
+            inst_tickers = get_institutional_tickers()
+        except Exception:
+            inst_tickers = set()
+
+        # 수급 점수를 Path B 브레이크아웃 후보에 반영 (기술점수 재계산)
+        for bc in breakout_candidates:
+            ticker = str(bc.get("ticker", "")).strip()
+            sd_score = get_supply_demand_score(ticker, inst_tickers)
+            bc["supply_demand_score"] = round(sd_score, 3)
+            bc["inst_radar"] = ticker in inst_tickers
+            # candidate_score 재계산: 수급 10% 가중치 추가
+            bc["candidate_score"] = round(
+                bc["candidate_score"] * 0.90 + sd_score * 0.10,
+                2,
+            )
+
         # ── Merge, take top-15 by technical score, then enrich with sentiment ─
         all_candidates = enriched_candidates + breakout_candidates
         all_candidates.sort(
@@ -172,19 +191,26 @@ class KoreaStockDeskAgent(BaseAgent):
                 sent = get_combined_sentiment(ticker)
                 sentiment_score = float(sent.get("combined_score", 0.5))
                 attention_boost = bool(sent.get("attention_boost", False))
+                theme_boost = float(sent.get("theme_boost", 0.0))
+                detected_themes = sent.get("detected_themes", {})
+                # supply/demand score (이미 있으면 재사용, 없으면 inst_tickers 사용)
+                sd_score = float(c.get("supply_demand_score", get_supply_demand_score(ticker, inst_tickers)))
                 overheat_penalty = float(c.get("overheat_penalty", 0.0))
-                # Recalculate with sentiment component
                 bk_score = float(c.get("breakout_count", 0)) / 5.0 if c.get("is_breakout") else 0.0
                 sig_score = float(c.get("signal_score", 0.5))
-                # Weights: breakout/gap 50%, signal 25%, sentiment 25%
+                # Weights: technical 45%, sentiment 20%, supply/demand 15%, theme 10%, gap/liq 10%
                 if c.get("is_breakout"):
-                    base = bk_score * 0.50 + sig_score * 0.25
+                    base = bk_score * 0.45 + sig_score * 0.20
                 else:
                     gap = float(c.get("gap_pct", 0.0)) * 0.022
-                    liq = min(float(c.get("volume", 0)), 250000) / 250000 * 0.12
-                    base = gap + liq + sig_score * 0.38
+                    liq = min(float(c.get("volume", 0)), 250000) / 250000 * 0.10
+                    base = gap + liq + sig_score * 0.33
                 new_score = round(
-                    base + sentiment_score * 0.25 - overheat_penalty,
+                    base
+                    + sentiment_score * 0.20
+                    + sd_score * 0.15
+                    + theme_boost
+                    - overheat_penalty,
                     2,
                 )
                 c = {
@@ -192,6 +218,10 @@ class KoreaStockDeskAgent(BaseAgent):
                     "sentiment_score": round(sentiment_score, 3),
                     "sentiment_attention": attention_boost,
                     "top_discussion": sent.get("top_discussion", []),
+                    "detected_themes": detected_themes,
+                    "theme_boost": round(theme_boost, 3),
+                    "supply_demand_score": round(sd_score, 3),
+                    "inst_radar": c.get("inst_radar", ticker in inst_tickers),
                     "candidate_score": new_score,
                 }
             except Exception:
@@ -290,6 +320,44 @@ class KoreaStockDeskAgent(BaseAgent):
                     gap_candidates.insert(0, rc)
             gap_candidates = gap_candidates[:10]
 
+        # ── Path D: 종가 추격 (Close Drive) ─────────────────────────────────
+        # 14:50~15:10 KST (05:50~06:10 UTC) 구간에만 작동
+        # 당일 강세 유지 + 기관 수급 확인 종목 → 오버나이트 홀딩
+        now_utc = datetime.now(timezone.utc)
+        _in_close_window = (
+            (now_utc.hour == 5 and now_utc.minute >= 50)
+            or (now_utc.hour == 6 and now_utc.minute <= 10)
+        )
+        close_drive_candidates: list[dict] = []
+        if _in_close_window and gap_candidates:
+            for c in gap_candidates:
+                ticker = str(c.get("ticker", "")).strip()
+                gap = float(c.get("gap_pct", 0) or 0)
+                vol = float(c.get("volume", 0) or 0)
+                sig = float(c.get("signal_score", 0) or 0)
+                sent = float(c.get("sentiment_score", 0.5) or 0.5)
+                rsi = float(c.get("rsi", 0) or 0)
+                sd = float(c.get("supply_demand_score", 0.4) or 0.4)
+                # 당일 강세 유지 + 거래량 + 신호 + 감성 + 기관 레이더 조건
+                if (
+                    gap >= 2.0
+                    and vol >= 20000
+                    and sig >= 0.55
+                    and sent >= 0.52
+                    and (rsi == 0 or rsi <= 75)
+                    and sd >= 0.70   # 기관 레이더에 있어야 함
+                ):
+                    cd_score = round(gap * 0.025 + sig * 0.38 + sent * 0.20 + sd * 0.15, 2)
+                    close_drive_candidates.append({
+                        **c,
+                        "close_drive": True,
+                        "candidate_score": cd_score,
+                        "inst_radar": ticker in inst_tickers,
+                    })
+                if len(close_drive_candidates) >= 3:
+                    break
+            close_drive_candidates.sort(key=lambda c: c["candidate_score"], reverse=True)
+
         score = 0.34
         if gap_candidates:
             score += 0.12
@@ -322,12 +390,15 @@ class KoreaStockDeskAgent(BaseAgent):
             score -= 0.06
         score = min(round(score, 2), 0.95)
 
+        inst_radar_count = sum(1 for c in gap_candidates[:5] if c.get("inst_radar", False))
+
         return AgentResult(
             name=self.name,
             score=max(score, 0.2),
-            reason="Full universe scan (KOSPI+KOSDAQ top-vol) + sentiment enrichment ranked by composite score",
+            reason="Full universe scan + sentiment + supply/demand + theme enrichment",
             payload={
                 "gap_candidates": gap_candidates[:5],
+                "close_drive_candidates": close_drive_candidates[:3],
                 "leader_count": len(leaders),
                 "universe_size": len(universe),
                 "active_gap_count": active_gap_count,
@@ -339,5 +410,7 @@ class KoreaStockDeskAgent(BaseAgent):
                 "avg_volume_top3": avg_volume,
                 "avg_signal_score_top3": avg_signal,
                 "avg_sentiment_top3": avg_sentiment,
+                "inst_radar_count": inst_radar_count,
+                "in_close_window": _in_close_window,
             },
         )

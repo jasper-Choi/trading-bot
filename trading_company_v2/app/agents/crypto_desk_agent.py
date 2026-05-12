@@ -8,6 +8,7 @@ from app.agents.base import BaseAgent
 from app.config import settings
 from app.core.models import AgentResult
 from app.core.state_store import load_symbol_score_adjustments
+from app.services.kimchi_premium import get_kimchi_premium, get_kimchi_premium_score
 from app.services.atr_sizing import summarize_atr_sizing
 from app.services.backtest_advisor import get_crypto_weights
 from app.services.market_gateway import (
@@ -429,7 +430,18 @@ class CryptoDeskAgent(BaseAgent):
             "stream_reasons": [],
         }
 
+        # ── 김치 프리미엄 계산 (leader 종목 기준) ────────────────────────────
         lead_market = str(leader.get("market", "") or next(iter(weights), "KRW-BTC"))
+        _base_currency = lead_market.replace("KRW-", "")
+        _lead_price = float(leader.get("recent_change_pct", 0.0) or 0.0)  # price proxy unused
+        # 가격 정보: discovery_map에서 현재가를 가져옴 (없으면 스킵)
+        _upbit_price = float((discovery_map.get(lead_market, {}) or {}).get("trade_price", 0.0) or 0.0)
+        try:
+            kimchi_pct = get_kimchi_premium(_upbit_price, _base_currency) if _upbit_price > 0 else 0.0
+        except Exception:
+            kimchi_pct = 0.0
+        kimchi_score_val = get_kimchi_premium_score(kimchi_pct)
+
         candidate_markets = [str(item.get("market", "")).strip() for item in ranked_candidates if str(item.get("market", "")).strip()]
         candidate_summary = [
             f"{item['market']} score {item['combined_score']:.2f} / bias {item['bias']} / weight {item['weight']:.2f}"
@@ -601,5 +613,8 @@ class CryptoDeskAgent(BaseAgent):
                 "rsi_bullish_div": bool(leader.get("rsi_bullish_div", False)),
                 "multi_ranging_combo": bool(leader.get("multi_ranging_combo", False)),
                 "momentum_breakout_cont": bool(leader.get("momentum_breakout_cont", False)),
+                # 김치 프리미엄
+                "kimchi_premium_pct": round(kimchi_pct, 2),
+                "kimchi_score": round(kimchi_score_val, 3),
             },
         )

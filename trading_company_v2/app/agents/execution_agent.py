@@ -166,8 +166,9 @@ class ExecutionAgent(BaseAgent):
         if desk == "us":
             return 3, 1.5
         if desk == "korea":
-            # Max 2 concurrent — prevents 3 simultaneous stop-hits wiping out session gains
-            return 2, 1.2
+            # Max 3 concurrent — supports: 1 open_reversal + 1 breakout + 1 close_drive
+            # Pyramid positions are separate and use a 4th slot tracked independently.
+            return 3, 1.8
         return 2, 1.2
 
     @staticmethod
@@ -576,7 +577,25 @@ class ExecutionAgent(BaseAgent):
             total_notional_cap = 2.05 if self.risk_budget >= 0.4 else 1.45 if self.risk_budget >= 0.25 else 1.0
         else:
             total_notional_cap = 1.05 if self.risk_budget >= 0.4 else 0.8 if self.risk_budget >= 0.25 else 0.55
-        desk_position_cap_hit = desk_open_count >= max_positions
+        # Pyramid entries don't count against regular desk position cap
+        _is_pyramid_entry = "pyramid" in str(plan.get("entry_profile", "") or "").lower() or "pyramid" in str(plan.get("focus", "") or "").lower()
+        if _is_pyramid_entry:
+            # Pyramid slot: max 1 pyramid per desk (they're tiny 0.20x follow-ons)
+            _pyramid_open = sum(1 for p in self.open_positions if p.desk == desk and "pyramid" in (getattr(p, "entry_profile", "") or "").lower())
+            desk_position_cap_hit = _pyramid_open >= 1
+        else:
+            # Regular slot: exclude pyramid positions from count
+            _non_pyramid_open = sum(1 for p in self.open_positions if p.desk == desk and "pyramid" not in (getattr(p, "entry_profile", "") or "").lower())
+            desk_position_cap_hit = _non_pyramid_open >= max_positions
+        # Per-strategy Korea slot limits (prevent duplicate open_reversal / close_drive)
+        if desk == "korea" and action in actionable_entries and not _is_pyramid_entry:
+            _focus_lower = str(plan.get("focus", "") or "").lower()
+            def _korea_strategy_open(key: str) -> int:
+                return sum(1 for p in self.open_positions if p.desk == "korea" and key in (p.focus or "").lower())
+            if "open_reversal" in _focus_lower and _korea_strategy_open("open_reversal") >= 1:
+                desk_position_cap_hit = True
+            if "close_drive" in _focus_lower and _korea_strategy_open("close_drive") >= 1:
+                desk_position_cap_hit = True
         desk_notional_cap_hit = (desk_open_notional + notional_pct) > max_desk_notional and action in actionable_entries
         gross_notional_cap_hit = (gross_open_notional + notional_pct) > total_notional_cap and action in actionable_entries
         high_corr_cap_hit = (

@@ -142,6 +142,12 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         ),
         3,
     )
+    # 김치 프리미엄 신호 — 업비트에서 국내 수요가 높은 코인 우선
+    kimchi_premium_pct = float(payload.get("kimchi_premium_pct", 0.0) or 0.0)
+    kimchi_score = float(payload.get("kimchi_score", 0.5) or 0.5)
+    kimchi_boost = kimchi_premium_pct >= 2.0   # 2% 이상이면 국내 수요 강세
+    kimchi_warn  = kimchi_premium_pct <= -2.0  # 역프리미엄이면 주의
+
     flow_support = orderbook_score >= 0.48 or orderbook_bid_ask >= 1.02 or stream_ignition
     launch_confirmed = (
         (micro_score >= 0.55 and micro_vol_ratio >= 1.1)
@@ -151,12 +157,15 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     )
     # research_support removed from ignition_ready: historical backtest weight shouldn't block fresh movers.
     # CryptoDeskAgent already integrated all signals into combined_score — trust it here.
-    ignition_ready = trend_ignition_score >= 0.56 and flow_support and trend_entry_allowed
+    # 김치프리미엄 역프리미엄(-2% 이하) 시 ignition threshold 소폭 상향 (국내 수요 약함)
+    _ignition_threshold = 0.56 if not kimchi_warn else 0.62
+    ignition_ready = trend_ignition_score >= _ignition_threshold and flow_support and trend_entry_allowed
     ignition_note = (
         f"trend_ignition={trend_ignition_score:.2f} / chart={trend_follow_score:.2f} {trend_alignment} "
         f"/ micro={micro_score:.2f} "
         f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / stream={stream_score:.2f} "
         f"({stream_move_15:.2f}%/15s) / breakout={breakout_count}/4"
+        f" / kimchi={kimchi_premium_pct:+.1f}%{'↑' if kimchi_boost else '↓' if kimchi_warn else ''}"
     )
     trend_note = (
         f"chart trend gate: {trend_alignment} score={trend_follow_score:.2f} "
@@ -1498,6 +1507,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     avg_volume = float(payload.get("avg_volume_top3", 0.0) or 0.0)
     avg_signal = float(payload.get("avg_signal_score_top3", 0.0) or 0.0)
     gap_candidates = payload.get("gap_candidates", []) or []
+    close_drive_candidates = payload.get("close_drive_candidates", []) or []
     candidate_symbols = [str(item.get("ticker", "")).strip() for item in gap_candidates if str(item.get("ticker", "")).strip()]
     top_name = str(gap_candidates[0].get("name", "No leader")) if gap_candidates else "No leader"
     top_ticker = str(gap_candidates[0].get("ticker", "")) if gap_candidates else ""
@@ -1512,6 +1522,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     bk_leader = next((c for c in gap_candidates if int(c.get("breakout_count", 0) or 0) >= 3), None)
     opening_window = bool(session.get("korea_opening_window"))
     mid_session = bool(session.get("korea_mid_session"))
+    in_close_window = bool(payload.get("in_close_window", False))
     _qmeta = {"quality_score": quality_score, "avg_signal": avg_signal, "quality_threshold": 0.54}
 
     if not session.get("korea_open"):
@@ -1707,6 +1718,30 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
+    # ── 종가 추격 (Close Drive, 14:50~15:10 KST) ─────────────────────────────
+    if in_close_window and close_drive_candidates and stance != "DEFENSE":
+        cd = close_drive_candidates[0]
+        cd_ticker = str(cd.get("ticker", ""))
+        cd_name = str(cd.get("name", cd_ticker))
+        cd_gap = float(cd.get("gap_pct", 0) or 0)
+        cd_sig = float(cd.get("signal_score", 0) or 0)
+        cd_sent = float(cd.get("sentiment_score", 0.5) or 0.5)
+        cd_score = float(cd.get("candidate_score", 0) or 0)
+        return {
+            "action": "probe_longs",
+            "size": "0.35x" if stance == "OFFENSE" else "0.25x",
+            "focus": f"close_drive: {cd_name} — 당일 강세 유지, 기관 수급 확인.",
+            "symbol": cd_ticker,
+            "candidate_symbols": [str(c.get("ticker", "")) for c in close_drive_candidates],
+            "notes": [
+                f"종가 추격 — gap {cd_gap:.1f}% / signal {cd_sig:.2f} / sentiment {cd_sent:.2f}",
+                f"기관 레이더 종목: inst_radar={cd.get('inst_radar', False)}",
+                f"candidate_score {cd_score:.2f}",
+                "오버나이트 홀딩 허용 — target +3.0% / stop -1.5% / 최대 30시간",
+            ],
+            **_qmeta,
+        }
+
     if mid_session:
         return {
             "action": "stand_by",

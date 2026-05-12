@@ -41,6 +41,7 @@ _REQUEST_TIMEOUT = 8
 # ── 전역 상태 ────────────────────────────────────────────────────────────────
 _lock = threading.Lock()
 _tick_cache: dict[str, deque[dict[str, Any]]] = {}   # ticker → deque of ticks
+_orderbook_cache: dict[str, dict[str, Any]] = {}     # ticker → latest orderbook snapshot
 _subscribed: set[str] = set()
 _stream_thread: threading.Thread | None = None
 _stream_error: str = ""
@@ -58,6 +59,14 @@ _F_HIGH   = 8   # 고가
 _F_LOW    = 9   # 저가
 _F_VOL    = 12  # 체결거래량
 _F_SIDE   = 21  # 체결구분 1=매수 5=매도 3=장전시간외
+
+# H0STASP0 호가 필드 인덱스 ('^' 분리 후)
+# ask(매도) 1~5호가 잔량: fields 13..17 (KIS 실전 스펙 기준)
+# bid(매수) 1~5호가 잔량: fields 32..36
+# 총매도잔량: field 52 / 총매수잔량: field 53
+_ASP_F_CODE      = 0
+_ASP_F_TOTAL_ASK = 52   # 총매도잔량
+_ASP_F_TOTAL_BID = 53   # 총매수잔량
 
 
 def _is_mock() -> bool:
@@ -132,8 +141,24 @@ def _parse_tick(raw: str) -> dict[str, Any] | None:
         return None
 
 
+def _parse_orderbook(raw: str) -> dict[str, Any] | None:
+    """H0STASP0 단일 레코드 → orderbook dict (총매수/매도잔량)."""
+    parts = raw.split("^")
+    if len(parts) < 54:
+        return None
+    try:
+        return {
+            "ticker": parts[_ASP_F_CODE].strip(),
+            "total_ask": int(float(parts[_ASP_F_TOTAL_ASK] or 0)),
+            "total_bid": int(float(parts[_ASP_F_TOTAL_BID] or 0)),
+            "ts": time.time(),
+        }
+    except (ValueError, IndexError):
+        return None
+
+
 def _process_message(raw_text: str) -> None:
-    """WebSocket 메시지 처리 (PINGPONG 무시, 틱 파싱 후 캐시 저장)"""
+    """WebSocket 메시지 처리 (PINGPONG 무시, 틱/호가 파싱 후 캐시 저장)"""
     if not raw_text or "PINGPONG" in raw_text:
         return
     # 포맷: {recv_type}|{tr_id}|{tr_cnt}|{data}
@@ -141,29 +166,36 @@ def _process_message(raw_text: str) -> None:
     if len(parts) < 4:
         return
     tr_id = parts[1].strip()
-    if tr_id != "H0STCNT0":
-        return
-    # tr_cnt 건 이상 포함될 수 있음 (실제론 대부분 1건)
     try:
         cnt = int(parts[2].strip())
     except ValueError:
         cnt = 1
     data_block = parts[3]
-    # 여러 건이면 줄바꿈으로 구분
     records = data_block.strip().split("\n") if cnt > 1 else [data_block]
-    for record in records:
-        tick = _parse_tick(record.strip())
-        if tick is None:
-            continue
-        ticker = tick["ticker"]
-        with _lock:
-            if ticker not in _tick_cache:
-                _tick_cache[ticker] = deque(maxlen=_TICK_BUFFER)
-            _tick_cache[ticker].append(tick)
+
+    if tr_id == "H0STCNT0":
+        for record in records:
+            tick = _parse_tick(record.strip())
+            if tick is None:
+                continue
+            ticker = tick["ticker"]
+            with _lock:
+                if ticker not in _tick_cache:
+                    _tick_cache[ticker] = deque(maxlen=_TICK_BUFFER)
+                _tick_cache[ticker].append(tick)
+
+    elif tr_id == "H0STASP0":
+        for record in records:
+            ob = _parse_orderbook(record.strip())
+            if ob is None:
+                continue
+            ticker = ob["ticker"]
+            with _lock:
+                _orderbook_cache[ticker] = ob
 
 
 # ── WebSocket 비동기 루프 ─────────────────────────────────────────────────────
-def _subscribe_msg(approval_key: str, ticker: str) -> str:
+def _subscribe_msg(approval_key: str, ticker: str, tr_id: str = "H0STCNT0") -> str:
     return json.dumps({
         "header": {
             "approval_key": approval_key,
@@ -173,7 +205,7 @@ def _subscribe_msg(approval_key: str, ticker: str) -> str:
         },
         "body": {
             "input": {
-                "tr_id": "H0STCNT0",
+                "tr_id": tr_id,
                 "tr_key": ticker,
             }
         },
@@ -200,7 +232,8 @@ async def _stream_loop() -> None:
                 _stream_started_at = time.monotonic()
                 _stream_error = ""
                 for ticker in tickers:
-                    await ws.send(_subscribe_msg(approval_key, ticker))
+                    await ws.send(_subscribe_msg(approval_key, ticker, "H0STCNT0"))
+                    await ws.send(_subscribe_msg(approval_key, ticker, "H0STASP0"))
                     _log.debug("KIS stream subscribed: %s", ticker)
                 async for message in ws:
                     if isinstance(message, bytes):
@@ -210,7 +243,8 @@ async def _stream_loop() -> None:
                     with _lock:
                         new = _subscribed - set(tickers)
                     for t in new:
-                        await ws.send(_subscribe_msg(approval_key, t))
+                        await ws.send(_subscribe_msg(approval_key, t, "H0STCNT0"))
+                        await ws.send(_subscribe_msg(approval_key, t, "H0STASP0"))
                         tickers.append(t)
                         _log.debug("KIS stream subscribed (live): %s", t)
         except Exception as exc:
@@ -253,6 +287,23 @@ def get_tick_buffer(ticker: str) -> list[dict[str, Any]]:
     with _lock:
         buf = _tick_cache.get(ticker.strip())
         return list(buf) if buf else []
+
+
+def get_orderbook_imbalance(ticker: str) -> float:
+    """매수 잔량 비율 0.0~1.0. 0.5=균형, >0.6=매수 우세, <0.4=매도 우세.
+
+    H0STASP0 데이터 미수신 시 0.5 반환.
+    """
+    with _lock:
+        ob = _orderbook_cache.get(ticker.strip())
+    if ob is None:
+        return 0.5
+    total_ask = ob.get("total_ask", 0)
+    total_bid = ob.get("total_bid", 0)
+    total = total_ask + total_bid
+    if total == 0:
+        return 0.5
+    return round(total_bid / total, 3)
 
 
 def get_stream_status() -> dict[str, Any]:
@@ -330,19 +381,23 @@ def get_opening_reversal_signal(ticker: str) -> dict[str, Any]:
     exhaustion = cascade and sell_ratio_10 < 0.52 and vol_contracting
     reversal   = buy5 > sell5 and current_price > session_low * 1.001
 
+    # ── 호가 잔량 (H0STASP0) ────────────────────────────────────────────────
+    bid_ratio = get_orderbook_imbalance(ticker)
+    orderbook_bullish = bid_ratio >= 0.60   # 매수 잔량이 60% 이상
+
     # ── 점수 (0~100) ─────────────────────────────────────────────────────────
     score = 0
     if cascade:
         score += 30
-        # 낙폭이 클수록 반등 여지도 큼
         score += min(20, int(abs(price_vs_open_pct) * 8))
     if exhaustion:
         score += 25
     if reversal:
         score += 25
-    # 매수비율 상승 보너스
     if sell_ratio_10 < sell_ratio_30 - 0.10:
         score += 10
+    if orderbook_bullish:
+        score += 10   # 매수잔량 우세 = 추가 확인
     score = min(score, 100)
 
     return {
@@ -355,4 +410,6 @@ def get_opening_reversal_signal(ticker: str) -> dict[str, Any]:
         "sell_ratio_30": round(sell_ratio_30, 3),
         "sell_ratio_10": round(sell_ratio_10, 3),
         "tick_count": len(ticks),
+        "bid_ratio": round(bid_ratio, 3),
+        "orderbook_bullish": orderbook_bullish,
     }

@@ -28,6 +28,20 @@ _NEWS_URL = "https://finance.naver.com/item/news_news.naver?code={ticker}"
 _CACHE_TTL = 900.0  # 15 minutes
 _lock = threading.Lock()
 _cache: dict[str, tuple[float, dict[str, Any]]] = {}  # ticker → (ts, result)
+_theme_cache: tuple[float, dict[str, int]] = (0.0, {})  # (ts, {theme: count})
+_HOT_THEME_TTL = 1800.0  # 30분
+
+# ── 테마 키워드 매핑 ─────────────────────────────────────────────────────────
+_THEME_KEYWORDS: dict[str, list[str]] = {
+    "AI":      ["AI", "인공지능", "LLM", "GPT", "딥러닝", "머신러닝", "챗봇", "생성형", "온디바이스"],
+    "반도체":  ["반도체", "HBM", "파운드리", "DRAM", "낸드", "웨이퍼", "칩", "엔비디아", "TSMC"],
+    "2차전지": ["배터리", "2차전지", "전기차", "EV", "양극재", "음극재", "전해질", "리튬", "전고체"],
+    "바이오":  ["바이오", "신약", "임상", "FDA", "항체", "mRNA", "세포치료", "신약", "의약품"],
+    "방산":    ["방산", "무기", "미사일", "탱크", "방위산업", "방위", "수출", "NATO", "K방산"],
+    "로봇":    ["로봇", "자동화", "협동로봇", "산업용로봇", "휴머노이드", "RPA"],
+    "조선":    ["조선", "LNG", "선박", "수주", "VLCC", "컨테이너선"],
+    "원전":    ["원전", "핵발전", "SMR", "우라늄", "원자력", "핵융합"],
+}
 
 # ── Keyword tables ──────────────────────────────────────────────────────────
 _BULLISH_WORDS = [
@@ -117,6 +131,38 @@ def _fetch_news(ticker: str) -> tuple[float, list[str]]:
     return score, headlines[:5]
 
 
+def _detect_themes(texts: list[str]) -> dict[str, int]:
+    """텍스트 리스트에서 테마별 언급 횟수를 반환."""
+    counts: dict[str, int] = {}
+    joined = " ".join(texts)
+    for theme, keywords in _THEME_KEYWORDS.items():
+        count = sum(kw in joined for kw in keywords)
+        if count:
+            counts[theme] = count
+    return counts
+
+
+def get_hot_themes(board_titles: list[str]) -> dict[str, int]:
+    """종목토론방 제목 리스트에서 오늘의 핫 테마 집계.
+
+    외부에서 여러 종목 board_titles를 모아 넘겨주면 시장 전체 테마 열기를 파악한다.
+    반환: {테마명: 언급수}
+    """
+    return _detect_themes(board_titles)
+
+
+def get_theme_boost(texts: list[str], hot_themes: dict[str, int] | None = None) -> float:
+    """특정 종목의 텍스트에 핫 테마 키워드가 있으면 0.0~0.15 부스트 반환."""
+    detected = _detect_themes(texts)
+    if not detected:
+        return 0.0
+    if hot_themes:
+        # 시장에서 핫한 테마에 해당하면 추가 부스트
+        overlap = sum(1 for t in detected if t in hot_themes and hot_themes[t] >= 3)
+        return min(0.05 * len(detected) + 0.05 * overlap, 0.15)
+    return min(0.05 * len(detected), 0.10)
+
+
 def get_combined_sentiment(ticker: str) -> dict[str, Any]:
     """
     Returns:
@@ -138,8 +184,11 @@ def get_combined_sentiment(ticker: str) -> dict[str, Any]:
     news_score, top_news = _fetch_news(ticker)
 
     combined = round(board_score * 0.60 + news_score * 0.40, 3)
-    # attention_boost: 종목토론방 최근 게시글 100개 이상
     attention_boost = post_count >= 100
+
+    all_texts = top_discussion + top_news
+    detected_themes = _detect_themes(all_texts)
+    theme_boost = get_theme_boost(all_texts)
 
     result: dict[str, Any] = {
         "combined_score": combined,
@@ -149,6 +198,8 @@ def get_combined_sentiment(ticker: str) -> dict[str, Any]:
         "post_count": post_count,
         "top_discussion": top_discussion,
         "top_news": top_news,
+        "detected_themes": detected_themes,
+        "theme_boost": round(theme_boost, 3),
     }
     with _lock:
         _cache[ticker] = (time.monotonic(), result)

@@ -87,6 +87,7 @@ class PaperPositionRecord(Base):
     focus: Mapped[str] = mapped_column(String(200), default="")
     strategy_id: Mapped[str] = mapped_column(String(80), default="")
     entry_profile: Mapped[str] = mapped_column(String(80), default="")
+    is_pyramided: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class PositionRecord(Base):
@@ -462,9 +463,13 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     # trail +1.5%부터 발동 — 작은 수익도 보호
     # max 2700 cycles ≈ 2.3 trading days (20s/cycle)
     if desk == "korea" and "open_reversal" in focus:
-        # 오픈 리버설 전용: 갭다운 소진 후 반전 — 빠른 진입/빠른 이탈
-        # target 3.0%, stop -0.8% (패턴 실패 시 즉시 손절), max 2h (360 cycles @ 20s)
+        # 오픈 리버설: 갭다운 소진 → 반전 — 빠른 진입/빠른 이탈
+        # target 3.0%, stop -0.8%, max 2h
         return 3.0, -0.8, 360
+    if desk == "korea" and "close_drive" in focus:
+        # 종가 추격: 오버나이트 홀딩 허용 — 더 넓은 stop, 더 긴 보유
+        # target 3.0%, stop -1.5%, max ~30h (5400 cycles @ 20s)
+        return 3.0, -1.5, 5400
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
         return 25.0, -1.5, 2700
     return 25.0, -1.5, 2700
@@ -694,6 +699,7 @@ def _ensure_schema() -> None:
     paper_position_defs = {
         "strategy_id": "ALTER TABLE paper_positions ADD COLUMN strategy_id VARCHAR(80) DEFAULT ''",
         "entry_profile": "ALTER TABLE paper_positions ADD COLUMN entry_profile VARCHAR(80) DEFAULT ''",
+        "is_pyramided": "ALTER TABLE paper_positions ADD COLUMN is_pyramided BOOLEAN DEFAULT 0",
     }
     missing_paper_position = [ddl for column, ddl in paper_position_defs.items() if column not in paper_position_columns]
     if missing_paper_position:
@@ -1180,6 +1186,47 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     _close_position(position, "early_failure")
                 elif position.cycles_open >= max_cycles:
                     _close_position(position, "stale_exit")
+                else:
+                    # ── 피라미딩 트리거 ──────────────────────────────────────
+                    # 브레이크아웃/갭업 종목이 peak +3% 이상 도달 시 0.20x 추가 진입
+                    _pyramid_ok = (
+                        not getattr(position, "is_pyramided", False)
+                        and "open_reversal" not in pos_focus
+                        and "close_drive" not in pos_focus
+                        and "pyramid" not in pos_focus
+                        and peak_pnl >= 3.0
+                        and position.pnl_pct >= 2.0
+                    )
+                    if _pyramid_ok and position.current_price > 0:
+                        # Korea desk 내 총 포지션(피라미드 포함) 4개 미만일 때만 허용
+                        _total_korea = sum(
+                            1 for p in open_positions
+                            if p.desk == "korea" and p.status == "open"
+                        )
+                        if _total_korea < 4:
+                            position.is_pyramided = True
+                            pyr = PaperPositionRecord(
+                                desk="korea",
+                                symbol=position.symbol,
+                                status="open",
+                                action="probe_longs",
+                                size="0.20x",
+                                opened_at=utcnow_iso(),
+                                entry_price=position.current_price,
+                                current_price=position.current_price,
+                                pnl_pct=0.0,
+                                peak_pnl_pct=0.0,
+                                cycles_open=0,
+                                focus=f"pyramid: {pos_focus or position.action}",
+                                strategy_id="korea.pyramid",
+                                entry_profile="pyramid",
+                                is_pyramided=False,
+                            )
+                            db.add(pyr)
+                            _log.info(
+                                "Korea pyramid: %s peak=%.1f%% → +0.20x @ %.0f",
+                                position.symbol, peak_pnl, position.current_price,
+                            )
                 continue
             # ── US / 기타 데스크 청산 ──
             if position.pnl_pct >= target_pct:
