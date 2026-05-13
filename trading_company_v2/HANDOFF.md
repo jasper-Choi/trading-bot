@@ -1,5 +1,41 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-13 (session 30 - Korea loss-control hotfix)
+
+### Oracle VM deployment status
+- Local commits:
+  - `c8527cb fix: ignore flat Korea stop exits in pressure gate`
+  - `5680fd5 fix: tighten Korea selective probe risk`
+  - `702562b fix: define state store logger`
+- Oracle VM applied commits:
+  - `98cb579 fix: ignore flat Korea stop exits in pressure gate`
+  - `f687cdb fix: tighten Korea selective probe risk`
+  - `e965b53 fix: define state store logger`
+- Services verified active after deployment:
+  - `trading-loop`: active
+  - `trading-dashboard`: active
+
+### Why loss appeared after Korea entries
+- `491000` closed at raw `-1.62%` from a Korea `selective_probe`.
+- Root cause: Korea exploratory entries were falling through to the broad default threshold `target +25% / stop -1.5% / max 2700 cycles`.
+- That is too wide for exploratory Korea entries. A selective probe should test the idea with limited downside, not behave like a full swing position.
+- The other two entries validated that the scanner was not fully broken:
+  - `064760` closed `+4.25%` at target.
+  - `131290` remained open around `+1.14%` at the last check.
+
+### Fixes applied
+- `app/core/state_store.py`
+  - Added Korea `selective_probe` thresholds: target `+3.0%`, stop `-0.8%`, max `360` cycles.
+  - Tightened Korea non-attack fast-fail to `12` minutes / `8` cycles.
+  - Added `_log = logging.getLogger(__name__)` because Korea pyramiding used `_log.info()` and caused `name '_log' is not defined`.
+- `app/agents/execution_agent.py`
+  - `_is_stop_like_exit()` now ignores flat/slightly positive exits (`pnl_pct >= -0.05`) so Korea desk stop-pressure is not poisoned by incorrectly tagged flat `stop_hit` rows.
+
+### Follow-up risks
+- Korea dashboard labels currently reuse the top candidate name in focus text for multiple symbols. Example: `064760` and `131290` can show `티에스이 selective probe...`.
+- This is a reporting/focus-labeling bug, not necessarily an execution-symbol bug. Next cleanup should make per-symbol Korea order messages use the actual candidate name.
+- Local `git push` is still blocked by HTTPS credential/token auth. Oracle VM has the patches applied, but GitHub remote may not have these local commits until credentials or connector push is fixed.
+
 Last updated: 2026-05-13 (session 29 — Korea stop-pressure false positive fix)
 Maintained for: Claude / Codex continuation
 
