@@ -1,5 +1,34 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-14 (session 37 - Peak-zero loss streak quarantine)
+
+### Why this change was needed
+- User reported a 5-loss streak after the no-falling-knife patch.
+- Oracle VM closed-position analysis showed all 5 recent crypto losses had `peak_pnl_pct=0.0`.
+- Root cause: cycle-level long-flip logic improved, but websocket hot path still allowed `crypto.ranging_momentum_leader` and `crypto.ema_bounce` entries from cached candidates.
+- Live paper stats:
+  - `crypto.ranging_momentum_leader`: 4 trades, 0 wins, 4 losses, 100% peak0, total raw PnL about -1.46%.
+  - `crypto.ema_bounce`: 1 trade, 0 wins, 100% peak0.
+
+### Changes
+- `app/services/hot_path_guard.py`
+  - Permanently quarantined `crypto.ranging_momentum_leader` and `crypto.ema_bounce` alongside `crypto.candidate_rotation`.
+  - This blocks websocket/tick hot entries even if stale cached candidates still exist.
+- `app/agents/execution_agent.py`
+  - Same permanent quarantine applied at cycle execution level.
+- `app/core/state_store.py`
+  - Strategy health now disables crypto strategies much earlier:
+    - `count >= 2`, `win_rate=0`, `peak0_pct >= 80`, negative raw PnL.
+    - `count >= 3`, `stop_like_pct >= 80`, negative raw PnL.
+  - This prevents waiting for 7-15 samples while a strategy is obviously failing.
+- `app/services/recommendation_engine.py`
+  - `ranging_momentum_leader` no longer participates in the RANGING strategy blend or fallback local leader path.
+  - `ema_bounce` cycle path is disabled pending redesign/backtest.
+
+### Current rule
+- Any crypto entry path that produces repeated `peak=0` losses is treated as invalid direction detection, not normal drawdown.
+- Do not re-enable quarantined strategies without a redesign plus replay/backtest proof that entries occur after a real long flip.
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 36 - No falling knife core rule)
 
 ### User-defined core rule

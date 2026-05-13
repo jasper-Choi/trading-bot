@@ -397,7 +397,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 "note": f"local_continuation breakout={range_breakout_long} high_tight={high_tight_flag_long} ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% / {transition_note}",
             })
         if (
-            signal_score >= 0.74
+            False  # quarantined: crypto.ranging_momentum_leader needs redesign/backtest
+            and signal_score >= 0.74
             and trend_follow_score >= 0.55
             and blend_safe
             and long_flip_confirmed
@@ -489,6 +490,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         # Broad tape can be RANGING while a single coin is clearly trending.
         # Let scanner leaders participate with reduced size instead of missing the whole move.
         local_momentum_leader_ok = (
+            False  # quarantined: crypto.ranging_momentum_leader needs redesign/backtest
+            and
             signal_score >= 0.74
             and trend_follow_score >= 0.55
             and (
@@ -1628,7 +1631,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # ── EMA Bounce Long ──────────────────────────────────────────────────────
     ema_bounce_ok = (
-        ema_bounce_long and stance != "DEFENSE" and not hard_overheat
+        False  # quarantined: crypto.ema_bounce produced peak=0 loss after long-flip patch
+        and ema_bounce_long and stance != "DEFENSE" and not hard_overheat
         and not rsi_bearish_divergence and signal_score >= 0.42
         and orderbook_bid_ask >= 1.04
         and (trend_entry_allowed or range_scalp_eligible)

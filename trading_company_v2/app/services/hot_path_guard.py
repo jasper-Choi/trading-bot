@@ -91,7 +91,13 @@ _strategy_blocklist: set[str] = set()
 
 # 영구 차단 전략: health window 밖으로 벗어나도 재활성화 불가
 # candidate_rotation: cycle-path 구조적 실패, hot-path 전용 아키텍처와 충돌
-_PERMANENTLY_DISABLED_STRATEGIES: frozenset[str] = frozenset({"crypto.candidate_rotation"})
+_PERMANENTLY_DISABLED_STRATEGIES: frozenset[str] = frozenset({
+    "crypto.candidate_rotation",
+    # 2026-05-14: both profiles produced only peak=0 losses after the
+    # no-falling-knife change. Keep them quarantined until redesigned/backtested.
+    "crypto.ranging_momentum_leader",
+    "crypto.ema_bounce",
+})
 
 
 def _disabled_strategy_ids(force: bool = False) -> set[str]:

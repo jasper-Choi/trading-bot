@@ -108,7 +108,12 @@ class ExecutionAgent(BaseAgent):
 
     # 영구 차단 전략: health window 밖으로 벗어나도 재활성화 불가
     # candidate_rotation: cycle-path 구조적 실패 (0%win, 100%peak0, hot-path 전용 아키텍처와 충돌)
-    _PERMANENTLY_DISABLED: frozenset[str] = frozenset({"crypto.candidate_rotation"})
+    _PERMANENTLY_DISABLED: frozenset[str] = frozenset({
+        "crypto.candidate_rotation",
+        # 2026-05-14: quarantined after live paper peak=0 loss streak.
+        "crypto.ranging_momentum_leader",
+        "crypto.ema_bounce",
+    })
 
     def _strategy_disabled(self, strategy_id: str) -> dict | None:
         if strategy_id in self._PERMANENTLY_DISABLED:

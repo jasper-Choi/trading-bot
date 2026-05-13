@@ -899,8 +899,24 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         bucket["peak0_pct"] = round(float(bucket["peak0_count"]) / count * 100, 1)
         bucket["stop_like_pct"] = round(float(bucket["stop_like_count"]) / count * 100, 1)
         bucket["avg_size"] = round(float(bucket.pop("_size_sum", 0.0)) / count, 4)
+        is_crypto_strategy = str(bucket["strategy_id"]).startswith("crypto.")
+        catastrophic_peak0 = (
+            is_crypto_strategy
+            and count >= 2
+            and wins == 0
+            and bucket["peak0_pct"] >= 80.0
+            and bucket["raw_pnl_pct"] < 0
+        )
+        repeated_stop_like = (
+            is_crypto_strategy
+            and count >= 3
+            and bucket["stop_like_pct"] >= 80.0
+            and bucket["raw_pnl_pct"] < 0
+        )
         bucket["health"] = (
             "disabled_candidate"
+            if catastrophic_peak0 or repeated_stop_like
+            else "disabled_candidate"
             # 최극단 케이스: 7건+ 이고 peak0 100% (단 한 번도 긍정적 모멘텀 없음) → 즉시 차단
             if count >= 7 and bucket["peak0_pct"] >= 100.0
             else "disabled_candidate"
