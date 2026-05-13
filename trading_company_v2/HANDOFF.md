@@ -2,6 +2,16 @@
 
 ## 0. Latest Codex Notes - 2026-05-13 (session 30 - Korea loss-control hotfix)
 
+### Addendum - Korea per-symbol order labels
+- Fixed a dashboard/telegram clarity bug in `app/agents/execution_agent.py`.
+- Korea multi-candidate plans used to expand several symbols while preserving the first candidate's `focus` text.
+- Result: actual orders for symbols such as `064760` / `131290` could display the same leader name, e.g. `티에스이 selective probe...`.
+- New behavior:
+  - each Korea order looks up its own latest market snapshot row,
+  - rewrites `focus` with the actual candidate name and ticker,
+  - carries candidate-specific signal/candidate/gap/volume details into notes,
+  - preserves strategy namespace such as `korea.selective_probe`, `korea.breakout`, `korea.gap_fill`, etc.
+
 ### Oracle VM deployment status
 - Local commits:
   - `c8527cb fix: ignore flat Korea stop exits in pressure gate`

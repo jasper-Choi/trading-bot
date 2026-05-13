@@ -214,6 +214,87 @@ class ExecutionAgent(BaseAgent):
                     return price
         return 0.0
 
+    def _candidate_snapshot(self, desk: str, symbol: str) -> dict:
+        """Return the latest market snapshot row for a symbol.
+
+        Korea plans often arrive as a basket of candidate symbols. The original
+        plan focus names only the top candidate, so each expanded order needs
+        its own display metadata to avoid misleading dashboard labels.
+        """
+        if not symbol:
+            return {}
+        if desk == "crypto":
+            pools = (self.market_snapshot.get("crypto_leaders", []) or [])
+            key = "market"
+        elif desk == "us":
+            pools = (self.market_snapshot.get("us_leaders", []) or [])
+            key = "ticker"
+        else:
+            pools = (
+                (self.market_snapshot.get("gap_candidates", []) or [])
+                + (self.market_snapshot.get("stock_leaders", []) or [])
+                + (self.market_snapshot.get("close_drive_candidates", []) or [])
+                + (self.market_snapshot.get("gap_fill_candidates", []) or [])
+                + (self.market_snapshot.get("pullback_ma_candidates", []) or [])
+            )
+            key = "ticker"
+        for item in pools:
+            if str(item.get(key, "")).strip() == symbol:
+                return dict(item)
+        return {}
+
+    def _apply_korea_candidate_snapshot(self, plan: dict, symbol: str) -> dict:
+        """Rewrite a multi-candidate Korea plan into a symbol-specific order plan."""
+        snapshot = self._candidate_snapshot("korea", symbol)
+        if not snapshot:
+            return plan
+
+        mapped = dict(plan)
+        name = str(snapshot.get("name", "") or symbol)
+        signal = float(snapshot.get("signal_score", mapped.get("signal_score", 0.0)) or 0.0)
+        candidate_score = float(snapshot.get("candidate_score", mapped.get("quality_score", 0.0)) or 0.0)
+        gap_pct = float(snapshot.get("gap_pct", 0.0) or 0.0)
+        vol_ratio = float(snapshot.get("vol_ratio", snapshot.get("volume_ratio", 0.0)) or 0.0)
+        base_focus = str(mapped.get("focus", "") or "").lower()
+
+        if "gap_fill" in base_focus:
+            focus = f"gap_fill: {name} ({symbol}) gap {gap_pct:.1f}% mean-reversion entry"
+            entry_profile = "gap_fill"
+            strategy_id = "korea.gap_fill"
+        elif "open_reversal" in base_focus:
+            focus = f"open_reversal: {name} ({symbol}) opening exhaustion reversal"
+            entry_profile = "open_reversal"
+            strategy_id = "korea.open_reversal"
+        elif "close_drive" in base_focus:
+            focus = f"close_drive: {name} ({symbol}) close-drive strength"
+            entry_profile = "close_drive"
+            strategy_id = "korea.close_drive"
+        elif "pullback_ma" in base_focus:
+            focus = f"pullback_ma: {name} ({symbol}) MA pullback continuation"
+            entry_profile = "pullback_ma"
+            strategy_id = "korea.pullback_ma"
+        elif "breakout" in base_focus:
+            focus = f"breakout: {name} ({symbol}) momentum breakout candidate"
+            entry_profile = "breakout"
+            strategy_id = "korea.breakout"
+        else:
+            focus = f"{name} ({symbol}) selective probe while confirmation improves"
+            entry_profile = str(mapped.get("entry_profile", "") or "selective_probe")
+            strategy_id = str(mapped.get("strategy_id", "") or "korea.selective_probe")
+
+        mapped["focus"] = focus
+        mapped["entry_profile"] = entry_profile
+        mapped["strategy_id"] = strategy_id
+        mapped["signal_score"] = signal
+        mapped["candidate_symbols"] = []
+        notes = list(mapped.get("notes", []) or [])
+        notes.append(
+            f"korea candidate-specific: {name} {symbol} signal={signal:.2f} "
+            f"candidate={candidate_score:.2f} gap={gap_pct:.2f}% vol={vol_ratio:.1f}x"
+        )
+        mapped["notes"] = notes
+        return mapped
+
     def _recent_loss_cooldown(self, desk: str, symbol: str) -> bool:
         if not symbol:
             return False
@@ -1167,6 +1248,11 @@ class ExecutionAgent(BaseAgent):
                 return [self._plan_to_order(desk, blocked_plan).model_dump()]
 
         if slots <= 1 or len(all_candidates) <= 1:
+            if desk == "korea" and all_candidates:
+                single_plan = dict(plan)
+                single_plan["symbol"] = all_candidates[0]
+                single_plan = self._apply_korea_candidate_snapshot(single_plan, all_candidates[0])
+                return [self._plan_to_order(desk, single_plan).model_dump()]
             return [self._single_crypto_candidate_order(desk, plan, all_candidates, candidate_meta, skipped_candidates)]
 
         # Divide base size evenly across eligible concurrent slots.
@@ -1199,6 +1285,9 @@ class ExecutionAgent(BaseAgent):
                     single_plan["notes"] = list(single_plan.get("notes", []) or []) + [
                         f"skipped weaker candidates: {'; '.join(skipped_candidates[:3])}"
                     ]
+            elif desk == "korea":
+                single_plan = self._apply_korea_candidate_snapshot(single_plan, candidate)
+                single_plan["size"] = per_order_size
             for key in (
                 "atr_size_multiplier",
                 "atr_pct",
