@@ -478,6 +478,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "korea" and "pullback_ma" in focus:
         # 눌림목 매수: 상승 추세 내 MA20 눌림 — 표준 Korea와 동일 파라미터
         return 25.0, -1.5, 2700
+    if desk == "korea" and action == "selective_probe":
+        # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
+        # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
+        return 3.0, -0.8, 360
     if desk == "crypto" and "dip_bounce" in focus:
         # BTC 급락 반등: 빠른 진입/빠른 이탈 — target 1.2%, stop -0.7%, max 20min
         return 1.2, -0.7, 60
@@ -1136,14 +1140,14 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             if position.desk == "crypto":
                 fast_fail_minutes = 16.0  # 24→16: cut failed ignitions faster; trail rules protect winners
             elif position.desk == "korea":
-                fast_fail_minutes = 30.0 if position.action == "attack_opening_drive" else 45.0
+                fast_fail_minutes = 30.0 if position.action == "attack_opening_drive" else 12.0
             else:
                 fast_fail_minutes = 30.0
             # Cycles fallback for non-crypto desks (korea/us still use cycle-based check below)
             if position.desk == "crypto":
                 fast_fail_cycle = 12
             elif position.desk == "korea":
-                fast_fail_cycle = 20 if position.action == "attack_opening_drive" else 30
+                fast_fail_cycle = 20 if position.action == "attack_opening_drive" else 8
             else:
                 fast_fail_cycle = 20
             if position.desk == "crypto":
