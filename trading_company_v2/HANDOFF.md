@@ -1,5 +1,32 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-13 (session 33 - Crypto opportunity + mobile stock visibility)
+
+### Crypto opportunity recovery
+- User feedback: crypto entries became too quiet after loss-control hardening.
+- Added `crypto.ranging_momentum_leader` for cases where broad regime is `RANGING` but an individual coin is visibly leading.
+- `app/services/recommendation_engine.py`
+  - New RANGING path allows reduced-size entries when:
+    - `signal_score >= 0.74`
+    - `trend_follow_score >= 0.55`
+    - recent/burst/change move is strong, or local breakout/high-tight flag is active
+    - orderbook is not hostile (`bid/ask >= 0.35`)
+    - no overheat, stream reversal, bearish RSI divergence, or bearish CHoCH.
+  - Size is intentionally reduced (`0.22x` to `0.38x`) because the broad tape is still flat.
+- `app/services/hot_path_guard.py`
+  - Added hot-path eligibility and tick sizing for `ranging_momentum_leader`.
+- `app/core/state_store.py`
+  - Added thresholds: target `+2.00%`, stop `-0.70%`, max `90` cycles.
+  - Added strategy attribution label.
+- `app/agents/execution_agent.py`
+  - Added strategy id inference for `crypto.ranging_momentum_leader`.
+
+### Mobile stock visibility
+- `app/main.py`
+  - Dashboard desk cards no longer hide Korea/US when inactive; they show as `준비중` with a dashed disabled style.
+  - Scanner Korea section no longer disappears when there are zero candidates.
+  - Empty Korea scanner state now says candidates will appear there when a market-hours signal fires.
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 32 - Strategy stats UI + Emma/Neo crypto paths)
 
 ### Operations checks

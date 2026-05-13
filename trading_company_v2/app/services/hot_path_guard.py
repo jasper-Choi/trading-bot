@@ -264,6 +264,12 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if airborne_score >= 0.70:
             return 0.06
         return 0.04
+    if entry_profile == "ranging_momentum_leader":
+        if combined >= 0.68 and stream_score >= 0.58:
+            return 0.07
+        if combined >= 0.60 and stream_score >= 0.48:
+            return 0.055
+        return 0.04
     if combined >= 0.86 and trend >= 0.82 and stream_score >= 0.76:
         return 0.12
     if combined >= 0.78 and stream_score >= 0.70:
@@ -429,6 +435,30 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and not _strategy_is_disabled("crypto.multi_ranging")
         ):
             item["entry_profile"] = "multi_ranging"
+            return True
+
+        # Individual momentum leader in a flat broad tape.
+        # The cycle planner can scout these with reduced size; the hot path confirms
+        # live stream or immediate micro action is not fighting the move.
+        _leader_recent = max(
+            _float(item.get("recent_change_pct", 0.0)),
+            _float(item.get("burst_change_pct", 0.0)),
+            _float(item.get("change_rate", 0.0)),
+        )
+        if (
+            combined >= 0.58
+            and chart_score >= 0.74
+            and trend_score >= 0.55
+            and _leader_recent >= 2.0
+            and orderbook_bid_ask >= 0.35
+            and micro_move_3 >= -0.75
+            and micro_vwap_gap <= 6.0
+            and signal_freshness >= 0.45
+            and rsi_value <= 86.0
+            and (_ranging_stream_score >= 0.40 or micro_move_3 >= -0.15)
+            and not _strategy_is_disabled("crypto.ranging_momentum_leader")
+        ):
+            item["entry_profile"] = "ranging_momentum_leader"
             return True
 
         # 나머지 모든 RANGING 전략 차단

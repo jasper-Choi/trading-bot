@@ -78,6 +78,8 @@ class ExecutionAgent(BaseAgent):
         if ns == "us":
             return f"us.{entry_profile or action or 'unknown'}"
         # Crypto patterns
+        if "ranging_momentum_leader" in text:
+            return "crypto.ranging_momentum_leader"
         if "range_scalp" in text:
             return "crypto.range_scalp"
         if "range_impulse" in text:

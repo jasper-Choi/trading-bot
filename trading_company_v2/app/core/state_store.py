@@ -454,6 +454,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         return 2.20, -1.00, 90
     if desk == "crypto" and "high_tight_flag" in focus:
         return 1.80, -0.90, 90
+    if desk == "crypto" and "ranging_momentum_leader" in focus:
+        # Broad tape is flat, but the symbol is an individual momentum leader.
+        # Use a reachable target and a tighter stop than normal trend mode.
+        return 2.00, -0.70, 90
     if desk == "crypto" and "emma_scalp" in focus:
         # Emma-style scalp: Keltner + Supertrend + MACD confluence.
         # Keep it quick: small target, tight stop, short max hold.
@@ -2734,6 +2738,7 @@ def _derive_strategy_type(focus: str, action: str, desk: str) -> str:
     if "dip_bounce" in f:      return "dip_bounce"
     if "emma_scalp" in f:      return "emma_scalp"
     if "neo_micro_scalp" in f: return "neo_micro_scalp"
+    if "ranging_momentum_leader" in f: return "ranging_momentum_leader"
     if "pyramid" in f:         return "pyramid"
     if "breakout" in f:        return "breakout"
     if a == "attack_opening_drive": return "opening_drive"

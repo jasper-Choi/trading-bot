@@ -313,6 +313,49 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             }
         # ── 평균회귀 신호 조합 (멀티 컨펌 → 사이즈 확대) ──────────────────────
         # 신호 1: 에어본 (EMA 이격 과대)
+        # Broad tape can be RANGING while a single coin is clearly trending.
+        # Let scanner leaders participate with reduced size instead of missing the whole move.
+        local_momentum_leader_ok = (
+            signal_score >= 0.74
+            and trend_follow_score >= 0.55
+            and (
+                recent_change >= 2.0
+                or burst_change >= 2.5
+                or change_rate >= 3.0
+                or range_breakout_long
+                or high_tight_flag_long
+            )
+            and orderbook_bid_ask >= 0.35
+            and micro_move_3 >= -0.75
+            and micro_vwap_gap <= 6.0
+            and (rsi_value is None or float(rsi_value) <= 86.0)
+            and not rsi_bearish_divergence
+            and not hard_overheat
+            and not stream_reversal
+            and not _choch_bearish_early
+            and stance != "DEFENSE"
+        )
+        if local_momentum_leader_ok:
+            entry_size = "0.38x" if (signal_score >= 0.80 and recent_change >= 4.0) else "0.28x"
+            if orderbook_bid_ask < 0.65:
+                entry_size = "0.22x"
+            return {
+                "action": "probe_longs",
+                "size": entry_size,
+                "focus": f"ranging_momentum_leader: {lead_market or 'KRW-BTC'} individual momentum leader in RANGING",
+                "symbol": lead_market,
+                "candidate_symbols": candidate_symbols,
+                "strategy_id": "crypto.ranging_momentum_leader",
+                "entry_profile": "ranging_momentum_leader",
+                "notes": reasons + [
+                    f"leader momentum: signal={signal_score:.2f} trend={trend_follow_score:.2f} "
+                    f"recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}%",
+                    f"timing: ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% "
+                    f"vwap_gap={micro_vwap_gap:.2f}% rsi={rsi_value}",
+                    "Broad market is RANGING, so size is reduced and trailing/stop are tighter.",
+                ],
+            }
+
         sig_airborne    = airborne_long and airborne_score >= 0.35
         # 신호 2: BB 스퀴즈 반등 (변동성 수축 + 하단 터치)
         sig_bb_squeeze  = bb_squeeze_bounce
