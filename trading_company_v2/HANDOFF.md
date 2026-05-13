@@ -1,5 +1,36 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-13 (session 31 - KIS mock visibility/routing fix)
+
+### Why KIS mock app did not show Korea trades
+- Oracle `live_order_log` showed recent Korea orders as `requested_mode=upbit_live`, `applied_mode=paper`, `broker_live=false`.
+- Recent fallback reasons included `unsupported_order_shape`, `request_exception`, and older `unsupported_desk_for_upbit`.
+- Therefore the Korea rows visible on the dashboard were mostly internal paper positions, not actual KIS mock account orders.
+
+### Fixes applied
+- `app/services/broker_router.py`
+  - Reworked routing to be desk-aware under `EXECUTION_MODE=upbit_live`.
+  - Crypto orders route to Upbit when Upbit is ready.
+  - Korea orders route to KIS when `KIS_ALLOW_LIVE=true`, KIS credentials are present, and `LIVE_CAPITAL_KRW > 0`.
+  - Route details now carry per-order `applied_mode` and `broker_live` so mixed broker cycles are recorded correctly.
+- `app/orchestrator.py`
+  - Live duplicate guard now treats Korea as a live desk when KIS is configured even if global mode is `upbit_live`.
+  - Live order refresh now dispatches by desk/applied broker, so KIS order IDs are queried through KIS, not Upbit.
+  - Live position sync now uses `route_summary.live_desks` instead of assuming one global broker per cycle.
+- `app/core/state_store.py`
+  - `save_live_order_attempts()` records per-order `applied_mode` / `broker_live`.
+  - `refresh_live_order_statuses()` passes `applied_mode` to broker-specific refresh dispatch.
+- `app/agents/execution_agent.py`
+  - Korea `reference_price` lookup now includes `close_drive_candidates`, `gap_fill_candidates`, and `pullback_ma_candidates`.
+  - This prevents supported KIS buy actions from falling back because quantity calculation received price `0`.
+
+### Verification
+- Local compile passed for:
+  - `app/services/broker_router.py`
+  - `app/orchestrator.py`
+  - `app/core/state_store.py`
+  - `app/agents/execution_agent.py`
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 30 - Korea loss-control hotfix)
 
 ### Addendum - Korea per-symbol order labels

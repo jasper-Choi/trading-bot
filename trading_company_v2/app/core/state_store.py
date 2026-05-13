@@ -2408,14 +2408,16 @@ def save_live_order_attempts(route_summary: dict, paper_orders: list[PaperOrder]
         if order.status == "planned"
     }
     requested_mode = str(route_summary.get("requested_mode") or "paper")
-    applied_mode = str(route_summary.get("applied_mode") or "paper")
-    broker_live = bool(route_summary.get("broker_live"))
+    summary_applied_mode = str(route_summary.get("applied_mode") or "paper")
+    summary_broker_live = bool(route_summary.get("broker_live"))
     with SessionLocal() as db:
         for detail in details:
             desk = str(detail.get("desk", "") or "")
             symbol = str(detail.get("symbol", "") or "")
             action = str(detail.get("action", "") or "")
             order = order_lookup.get((desk, symbol, action))
+            applied_mode = str(detail.get("applied_mode") or summary_applied_mode or "paper")
+            broker_live = bool(detail.get("broker_live", summary_broker_live))
             broker_order_id = str(detail.get("broker_order_id") or detail.get("uuid") or detail.get("odno") or "")
             broker_state = str(detail.get("state") or detail.get("broker_state") or "")
             request_status = "submitted" if broker_order_id else "fallback"
@@ -2556,6 +2558,7 @@ def refresh_live_order_statuses(fetch_order_details) -> dict:
                 payload = fetch_order_details(
                     {
                         "broker_order_id": row.broker_order_id,
+                        "applied_mode": row.applied_mode,
                         "desk": row.desk,
                         "symbol": row.symbol,
                         "action": row.action,

@@ -207,6 +207,9 @@ class ExecutionAgent(BaseAgent):
         for item in (
             self.market_snapshot.get("gap_candidates", [])
             + self.market_snapshot.get("stock_leaders", [])
+            + self.market_snapshot.get("close_drive_candidates", [])
+            + self.market_snapshot.get("gap_fill_candidates", [])
+            + self.market_snapshot.get("pullback_ma_candidates", [])
         ):
             if str(item.get("ticker", "")).strip() == symbol:
                 price = float(item.get("current_price") or 0.0)

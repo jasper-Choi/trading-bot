@@ -142,7 +142,16 @@ def _manage_positions(paper_orders: list[PaperOrder], market_snapshot: dict, ski
 
 def _live_desks_for_mode(execution_mode: str) -> set[str]:
     if execution_mode == "upbit_live":
-        return {"crypto"}
+        live_desks = {"crypto"}
+        if (
+            settings.kis_allow_live
+            and settings.kis_app_key
+            and settings.kis_app_secret
+            and settings.kis_account_no
+            and settings.kis_product_code
+        ):
+            live_desks.add("korea")
+        return live_desks
     if execution_mode == "kis_live":
         return {"korea"}
     return set()
@@ -777,21 +786,11 @@ class CompanyOrchestrator:
             state.notes.append(note)
         save_live_order_attempts(route_summary, paper_orders)
         broker_prices: dict[str, float] = dict(_extract_prices(state.market_snapshot))
-        if state.execution_mode == "upbit_live":
+        route_live_desks = set(route_summary.get("live_desks") or [])
+        if route_summary.get("broker_live"):
             try:
                 refresh_summary = refresh_live_order_statuses(
-                    lambda row: normalize_order_state(get_order(str(row.get("broker_order_id") or "")))
-                )
-                if refresh_summary.get("checked"):
-                    state.notes.append(
-                        f"live order refresh checked={refresh_summary.get('checked', 0)} updated={refresh_summary.get('updated', 0)} failed={refresh_summary.get('failed', 0)}"
-                    )
-            except Exception as exc:
-                state.notes.append(f"live order refresh failed: {exc}")
-        elif state.execution_mode == "kis_live":
-            try:
-                refresh_summary = refresh_live_order_statuses(
-                    _refresh_kis_order
+                    _refresh_live_order
                 )
                 if refresh_summary.get("checked"):
                     state.notes.append(
@@ -801,7 +800,7 @@ class CompanyOrchestrator:
                 state.notes.append(f"live order refresh failed: {exc}")
         save_paper_orders(paper_orders)
         sync_paper_positions(paper_orders=paper_orders, market_snapshot=state.market_snapshot)
-        live_crypto_enabled = bool(route_summary.get("broker_live")) and state.execution_mode == "upbit_live"
+        live_crypto_enabled = "crypto" in route_live_desks
         if live_crypto_enabled:
             try:
                 account_positions = get_account_positions()
@@ -822,7 +821,7 @@ class CompanyOrchestrator:
                     )
             except Exception as exc:
                 state.notes.append(f"live effect reconcile failed: {exc}")
-        live_korea_enabled = bool(route_summary.get("broker_live")) and state.execution_mode == "kis_live"
+        live_korea_enabled = "korea" in route_live_desks
         if live_korea_enabled:
             try:
                 account_positions = get_kis_account_positions()
@@ -948,6 +947,14 @@ class CompanyOrchestrator:
             "state": current_state,
             "results": [result.model_dump() for result in results],
         }
+
+
+def _refresh_live_order(row: dict[str, str]) -> dict[str, str]:
+    applied_mode = str(row.get("applied_mode") or "")
+    desk = str(row.get("desk") or "")
+    if applied_mode == "kis_live" or desk == "korea":
+        return _refresh_kis_order(row)
+    return normalize_order_state(get_order(str(row.get("broker_order_id") or "")))
 
 
 def _refresh_kis_order(row: dict[str, str]) -> dict[str, str]:
