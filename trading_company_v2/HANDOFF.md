@@ -23,9 +23,13 @@
 - `app/agents/execution_agent.py`
   - Korea `reference_price` lookup now includes `close_drive_candidates`, `gap_fill_candidates`, and `pullback_ma_candidates`.
   - This prevents supported KIS buy actions from falling back because quantity calculation received price `0`.
+- `app/services/kis_broker.py`
+  - Added a shared file token cache at `app/data/kis_access_token_cache.json`.
+  - KIS VTS token issuance can return `403` when loop/dashboard/diagnostics request tokens repeatedly; all processes now reuse the cached token until expiry.
 
 ### Verification
 - Local compile passed for:
+  - `app/services/kis_broker.py`
   - `app/services/broker_router.py`
   - `app/orchestrator.py`
   - `app/core/state_store.py`

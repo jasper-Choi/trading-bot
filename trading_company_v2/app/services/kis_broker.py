@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import json
 import math
+from pathlib import Path
 from typing import Any
 
 import requests
 from requests import RequestException
 
-from app.config import settings
+from app.config import DATA_DIR, settings
 from app.core.models import PaperOrder
 
 
@@ -21,6 +23,7 @@ KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_DAILY_CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
 REQUEST_TIMEOUT = 8
 _TOKEN_CACHE: dict[str, Any] = {"access_token": "", "expires_at": None}
+_TOKEN_CACHE_FILE = DATA_DIR / "kis_access_token_cache.json"
 
 
 @dataclass(slots=True)
@@ -376,25 +379,84 @@ def _get_access_token() -> str:
     if cached_token and isinstance(expires_at, datetime) and now < expires_at:
         return cached_token
 
-    response = requests.post(
-        f"{_kis_base_url()}{KIS_TOKEN_PATH}",
-        headers={"content-type": "application/json; charset=utf-8"},
-        json={
-            "grant_type": "client_credentials",
-            "appkey": settings.kis_app_key,
-            "appsecret": settings.kis_app_secret,
-        },
-        timeout=REQUEST_TIMEOUT,
-    )
-    response.raise_for_status()
+    disk_token, disk_expires_at = _read_token_cache(now)
+    if disk_token and disk_expires_at and now < disk_expires_at:
+        _TOKEN_CACHE["access_token"] = disk_token
+        _TOKEN_CACHE["expires_at"] = disk_expires_at
+        return disk_token
+
+    try:
+        response = requests.post(
+            f"{_kis_base_url()}{KIS_TOKEN_PATH}",
+            headers={"content-type": "application/json; charset=utf-8"},
+            json={
+                "grant_type": "client_credentials",
+                "appkey": settings.kis_app_key,
+                "appsecret": settings.kis_app_secret,
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+    except RequestException:
+        # KIS VTS can reject repeated token issuance across loop/dashboard
+        # processes. If a still-valid shared token exists, prefer it.
+        disk_token, disk_expires_at = _read_token_cache(now, allow_grace=True)
+        if disk_token and disk_expires_at and now < disk_expires_at:
+            _TOKEN_CACHE["access_token"] = disk_token
+            _TOKEN_CACHE["expires_at"] = disk_expires_at
+            return disk_token
+        raise
     payload = response.json()
     access_token = str(payload.get("access_token") or "")
     if not access_token:
         raise RuntimeError(str(payload.get("msg1") or "KIS access token missing in response"))
     expires_in = int(payload.get("expires_in") or 3600)
+    expires_at = now + timedelta(seconds=max(expires_in - 60, 60))
     _TOKEN_CACHE["access_token"] = access_token
-    _TOKEN_CACHE["expires_at"] = now + timedelta(seconds=max(expires_in - 60, 60))
+    _TOKEN_CACHE["expires_at"] = expires_at
+    _write_token_cache(access_token, expires_at)
     return access_token
+
+
+def _read_token_cache(now: datetime, *, allow_grace: bool = False) -> tuple[str, datetime | None]:
+    try:
+        raw = json.loads(_TOKEN_CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return "", None
+    token = str(raw.get("access_token") or "")
+    expires_text = str(raw.get("expires_at") or "")
+    try:
+        expires_at = datetime.fromisoformat(expires_text)
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        expires_at = expires_at.astimezone(timezone.utc)
+    except ValueError:
+        return "", None
+    if allow_grace and token and expires_at <= now:
+        # Do not use expired tokens, but keep this branch explicit for future
+        # broker-specific grace behavior.
+        return "", None
+    return token, expires_at
+
+
+def _write_token_cache(access_token: str, expires_at: datetime) -> None:
+    try:
+        _TOKEN_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = Path(str(_TOKEN_CACHE_FILE) + ".tmp")
+        temp_path.write_text(
+            json.dumps(
+                {
+                    "access_token": access_token,
+                    "expires_at": expires_at.astimezone(timezone.utc).isoformat(),
+                    "mock": bool(settings.kis_mock),
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        temp_path.replace(_TOKEN_CACHE_FILE)
+    except OSError:
+        return
 
 
 def _issue_hashkey(payload: dict[str, Any]) -> str:
