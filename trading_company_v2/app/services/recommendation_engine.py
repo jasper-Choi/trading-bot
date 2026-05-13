@@ -1897,7 +1897,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
             return {
                 "action": "probe_longs",
-                "size": "0.35x",
+                "size": "0.45x",
                 "focus": f"Breakout confirmed: {bk_name} (gap leader overheated, using breakout path).",
                 "symbol": bk_ticker,
                 "candidate_symbols": [bk_ticker],
@@ -1945,7 +1945,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             }
         return {
             "action": "probe_longs",
-            "size": "0.55x" if stance == "OFFENSE" else "0.40x",
+            "size": "0.70x" if stance == "OFFENSE" else "0.50x",
             "focus": f"Momentum breakout: {bk_name} — all 4 signals confirmed.",
             "symbol": bk_ticker,
             "candidate_symbols": [bk_ticker] + [
@@ -1979,7 +1979,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             }
         return {
             "action": "selective_probe",
-            "size": "0.30x",
+            "size": "0.38x",
             "focus": f"Breakout partial ({bk_name}) — 3/4 signals confirmed.",
             "symbol": bk_ticker,
             "candidate_symbols": [bk_ticker],
@@ -2016,7 +2016,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 }
             return {
                 "action": "probe_longs",
-                "size": "0.35x" if stance == "OFFENSE" else "0.25x",
+                "size": "0.45x" if stance == "OFFENSE" else "0.32x",
                 "focus": f"gap_fill: {gf_name} {gf_gap:.1f}% 갭다운 — 당일 갭 메꾸기 기대",
                 "symbol": gf_ticker,
                 "candidate_symbols": [str(c.get("ticker", "")) for c in gap_fill_candidates],
@@ -2041,7 +2041,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     ):
         return {
             "action": "attack_opening_drive",
-            "size": "0.40x",
+            "size": "0.48x",
             "focus": f"open_reversal: {top_name} — cascade exhaustion detected, buying reversal.",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
@@ -2057,7 +2057,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     if opening_window and active_gap_count >= 2 and quality_score >= 0.56 and avg_gap >= 1.8 and avg_volume >= 8000 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and top_signal_bias == "bullish" and top_signal >= 0.52 and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",
-            "size": "0.55x" if stance == "BALANCED" else "0.75x",
+            "size": "0.65x" if stance == "BALANCED" else "0.85x",
             "focus": f"Opening drive follow-through on {top_name}.",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
@@ -2070,7 +2070,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     if active_gap_count >= 1 and quality_score >= 0.5 and avg_signal >= 0.48 and avg_volume >= 3500 and top_candidate_score >= 0.52 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.50) and not _stock_falling_knife(gap_candidates[0]):
         return {
             "action": "selective_probe",
-            "size": "0.40x",
+            "size": "0.50x",
             "focus": f"{top_name} selective probe while confirmation improves.",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
@@ -2085,7 +2085,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     if active_gap_count >= 1 and quality_score >= 0.54 and avg_signal >= 0.5 and top_candidate_score >= 0.56 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.52) and not _stock_falling_knife(gap_candidates[0]) and not mid_session:
         return {
             "action": "selective_probe",
-            "size": "0.25x",
+            "size": "0.32x",
             "focus": f"{top_name} cautious single-candidate probe (opening window).",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
@@ -2098,7 +2098,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     if mid_session and active_gap_count >= 1 and quality_score >= 0.58 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.52) and not _stock_falling_knife(gap_candidates[0]):
         return {
             "action": "selective_probe",
-            "size": "0.18x",
+            "size": "0.24x",
             "focus": f"{top_name} mid-session follow-through probe.",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
@@ -2119,7 +2119,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         cd_score = float(cd.get("candidate_score", 0) or 0)
         return {
             "action": "probe_longs",
-            "size": "0.35x" if stance == "OFFENSE" else "0.25x",
+            "size": "0.45x" if stance == "OFFENSE" else "0.32x",
             "focus": f"close_drive: {cd_name} — 당일 강세 유지, 기관 수급 확인.",
             "symbol": cd_ticker,
             "candidate_symbols": [str(c.get("ticker", "")) for c in close_drive_candidates],
@@ -2159,7 +2159,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 }
             return {
                 "action": "probe_longs",
-                "size": "0.40x" if stance == "OFFENSE" else "0.30x",
+                "size": "0.50x" if stance == "OFFENSE" else "0.38x",
                 "focus": f"pullback_ma: {pb_name} — MA20 눌림목 매수",
                 "symbol": pb_ticker,
                 "candidate_symbols": [str(c.get("ticker", "")) for c in pullback_ma_candidates],

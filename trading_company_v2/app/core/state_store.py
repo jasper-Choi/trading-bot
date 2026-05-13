@@ -555,13 +555,13 @@ def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
     if peak_pnl >= 15.0:
         return 3.5, 10.0
     if peak_pnl >= 8.0:
-        return 3.0, 5.0
+        return 2.5, 5.5
     if peak_pnl >= 4.0:
-        return 2.5, 2.0
+        return 1.5, 2.5
     if peak_pnl >= 2.0:
-        return 1.2, 1.0
+        return 0.9, 1.2
     if peak_pnl >= 1.5:
-        return 0.8, 0.5
+        return 0.6, 0.7
     return 0.0, 0.0
 
 

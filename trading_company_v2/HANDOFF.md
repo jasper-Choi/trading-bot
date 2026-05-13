@@ -29,6 +29,34 @@
 - Any crypto entry path that produces repeated `peak=0` losses is treated as invalid direction detection, not normal drawdown.
 - Do not re-enable quarantined strategies without a redesign plus replay/backtest proof that entries occur after a real long flip.
 
+## 0. Latest Codex Notes - 2026-05-14 (session 38 - Korea win-rate monetization)
+
+### Why this change was needed
+- Recent Oracle VM sample showed Korea desk had a strong hit rate but weak capital contribution:
+  - 14 recent Korea closes, win rate about 78.6%, raw PnL about +6.8%.
+  - Capital-weighted PnL was only about +0.52% because many orders were scaled down to ~0.04-0.07x.
+- Root cause: crypto-driven global `risk_budget` was suppressing Korea sizing even when Korea desk was in a positive/high-win state.
+- Also found old Korea rows tagged as `crypto.*` strategy IDs, which muddied strategy attribution.
+
+### Changes
+- `app/agents/execution_agent.py`
+  - Korea desk now uses a separate effective risk floor when desk offense is positive:
+    - `press`: at least 0.65 risk multiplier.
+    - `balanced`: at least 0.50 risk multiplier.
+  - Korea `press` entries get a small notional floor when no stop pressure exists:
+    - `attack_opening_drive`: at least 0.16x.
+    - other Korea entries: at least 0.12x.
+  - Candidate-specific Korea orders now force `korea.*` strategy IDs if inherited plan metadata accidentally carries a non-Korea namespace.
+- `app/core/state_store.py`
+  - Korea trailing tiers tightened to protect more of a good move:
+    - peak >= 4% now protects at least 2.5% and gives back only 1.5%.
+    - peak >= 2% now protects at least 1.2%.
+- `app/services/recommendation_engine.py`
+  - Korea setup sizes increased modestly across breakout, opening drive, gap fill, close drive, pullback MA, and selective probe paths.
+
+### Ops note
+- Oracle VM had `ACTIVE_DESKS` unset, so default runtime was crypto-only. Set `.env` to `ACTIVE_DESKS=crypto,korea` before restarting services when deploying this session.
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 36 - No falling knife core rule)
 
 ### User-defined core rule

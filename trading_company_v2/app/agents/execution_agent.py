@@ -291,6 +291,8 @@ class ExecutionAgent(BaseAgent):
             focus = f"{name} ({symbol}) selective probe while confirmation improves"
             entry_profile = str(mapped.get("entry_profile", "") or "selective_probe")
             strategy_id = str(mapped.get("strategy_id", "") or "korea.selective_probe")
+            if not strategy_id.startswith("korea."):
+                strategy_id = f"korea.{entry_profile or 'selective_probe'}"
 
         mapped["focus"] = focus
         mapped["entry_profile"] = entry_profile
@@ -621,7 +623,15 @@ class ExecutionAgent(BaseAgent):
             2,
         )
         volatility_scaled_base = round(offense_scaled_base * atr_multiplier, 2)
-        risk_scaled_notional = round(volatility_scaled_base * max(min(self.risk_budget, 1.0), 0.0), 2)
+        effective_risk_budget = max(min(self.risk_budget, 1.0), 0.0)
+        if desk == "korea":
+            # Korea has a separate edge profile from crypto. Do not let crypto-driven
+            # global caution shrink a profitable/high-win Korea desk into dust size.
+            if desk_offense.get("tone") == "press":
+                effective_risk_budget = max(effective_risk_budget, 0.65)
+            elif desk_offense.get("tone") == "balanced":
+                effective_risk_budget = max(effective_risk_budget, 0.50)
+        risk_scaled_notional = round(volatility_scaled_base * effective_risk_budget, 2)
         desk_stop_pressure = self._desk_stop_pressure(desk)
         symbol_stop_pressure = self._symbol_stop_pressure(desk, symbol)
         downgrade_notes: list[str] = []
@@ -640,6 +650,16 @@ class ExecutionAgent(BaseAgent):
             downgrade_notes.append(f"{desk} desk stop pressure high, reduced to selective_probe")
         stop_pressure_scale = 0.5 if desk_stop_pressure == "medium" else 1.0
         scaled_notional_pct = round(risk_scaled_notional * stop_pressure_scale, 2)
+        if (
+            desk == "korea"
+            and action in {"probe_longs", "attack_opening_drive", "selective_probe"}
+            and desk_offense.get("tone") == "press"
+            and desk_stop_pressure == "none"
+        ):
+            # Recent Korea entries have high hit rate but low capital contribution
+            # because multi-candidate orders were scaled to ~0.04-0.07x.
+            floor = 0.16 if action == "attack_opening_drive" else 0.12
+            scaled_notional_pct = max(scaled_notional_pct, floor)
         size = f"{scaled_notional_pct:.2f}x"
         notional_pct = scaled_notional_pct
         reference_price = self._reference_price(desk, symbol)
