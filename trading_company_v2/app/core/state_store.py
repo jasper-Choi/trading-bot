@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
 import hashlib
+import logging
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -14,6 +15,9 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, obje
 from app.config import settings
 from app.core.models import AgentSnapshot, ClosedPosition, CompanyState, CycleJournalEntry, PaperOrder, Position, utcnow_iso
 from app.services.upbit_stream_cache import summarize_stream_momentum
+
+
+_log = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
