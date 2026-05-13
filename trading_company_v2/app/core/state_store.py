@@ -2921,6 +2921,8 @@ def load_performance_analytics(limit: int = 500) -> dict:
             "worst_pnl_pct": round(min(pnl_values), 2) if pnl_values else 0.0,
         }
 
+    snapshot_name_lookup: dict[tuple[str, str], str] = {}
+
     def _position_display_name(row: PaperPositionRecord) -> str:
         symbol = str(row.symbol or "").strip()
         if not symbol:
@@ -2929,6 +2931,9 @@ def load_performance_analytics(limit: int = 500) -> dict:
         if row.desk == "crypto":
             return symbol.replace("KRW-", "")
         if row.desk in {"korea", "us"}:
+            snapshot_name = snapshot_name_lookup.get((row.desk, symbol), "")
+            if snapshot_name:
+                return f"{snapshot_name}({symbol})"
             marker = f"({symbol})"
             if marker in focus:
                 name = focus.split(marker, 1)[0].strip()
@@ -2983,6 +2988,21 @@ def load_performance_analytics(limit: int = 500) -> dict:
                 .order_by(PaperPositionRecord.id.desc())
                 .limit(limit)
             ).scalars().all()
+            rec = db.get(StateRecord, "primary")
+            snapshot = dict(rec.market_snapshot or {}) if rec else {}
+            for key, desk in (
+                ("gap_candidates", "korea"),
+                ("stock_leaders", "korea"),
+                ("close_drive_candidates", "korea"),
+                ("gap_fill_candidates", "korea"),
+                ("pullback_ma_candidates", "korea"),
+                ("us_leaders", "us"),
+            ):
+                for item in snapshot.get(key, []) or []:
+                    symbol = str(item.get("ticker", "")).strip()
+                    name = str(item.get("name", "") or "").strip()
+                    if symbol and name:
+                        snapshot_name_lookup[(desk, symbol)] = name
     except OperationalError:
         rebuild_db()
         rows = []
