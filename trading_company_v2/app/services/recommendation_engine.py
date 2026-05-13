@@ -273,6 +273,103 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # 데이터: RANGING에서 추세 추종 승률 9%, 누적 -122% → 구조적 적자
     _choch_bearish_early = bool(payload.get("choch_bearish", False))
     if regime == "RANGING":
+        ranging_blend: list[dict[str, Any]] = []
+        blend_safe = (
+            not rsi_bearish_divergence
+            and not hard_overheat
+            and not stream_reversal
+            and not _choch_bearish_early
+            and stance != "DEFENSE"
+        )
+        blend_mean_rev_signals = sum([
+            airborne_long and airborne_score >= 0.35,
+            bb_squeeze_bounce,
+            vwap_deviation_long,
+            rsi_extreme_long,
+            rsi_mean_rev_long or range_scalp_eligible,
+            stoch_oversold_cross,
+            macd_histogram_reversal,
+            hammer_candle or doji_candle,
+            volume_climax_reversal,
+            support_reclaim_long,
+            williams_r_oversold,
+            cci_oversold_bounce,
+            keltner_lower_touch,
+            mfi_oversold,
+        ])
+        if blend_mean_rev_signals >= 1 and blend_safe and orderbook_bid_ask >= 1.05 and micro_move_3 >= -1.0:
+            ranging_blend.append({
+                "score": 54 + blend_mean_rev_signals * 7 + min(airborne_score * 10, 8),
+                "profile": "range_scalp",
+                "strategy_id": "crypto.range_scalp",
+                "size": "0.55x" if blend_mean_rev_signals >= 3 else "0.45x" if blend_mean_rev_signals >= 2 else "0.35x",
+                "reason": f"mean reversion blend ({blend_mean_rev_signals}/14)",
+                "note": f"mean_rev={blend_mean_rev_signals}/14 dev={airborne_deviation_pct:.2f}% vwap={vwap_deviation_pct:.1f}% rsi={rsi_value}",
+            })
+        if (
+            (range_breakout_long or high_tight_flag_long)
+            and blend_safe
+            and orderbook_bid_ask >= 0.98
+            and micro_move_3 >= -0.35
+            and micro_vwap_gap <= 4.8
+        ):
+            profile = "range_breakout" if range_breakout_long else "high_tight_flag"
+            reason = "range_breakout + high_tight_flag" if range_breakout_long and high_tight_flag_long else profile
+            ranging_blend.append({
+                "score": 62 + signal_score * 18 + (6 if range_breakout_long and high_tight_flag_long else 0),
+                "profile": profile,
+                "strategy_id": f"crypto.{profile}",
+                "size": "0.50x" if range_breakout_long and high_tight_flag_long else "0.45x" if range_breakout_long else "0.38x",
+                "reason": reason,
+                "note": f"local_continuation breakout={range_breakout_long} high_tight={high_tight_flag_long} ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}%",
+            })
+        if (
+            signal_score >= 0.74
+            and trend_follow_score >= 0.55
+            and blend_safe
+            and (
+                recent_change >= 2.0
+                or burst_change >= 2.5
+                or change_rate >= 3.0
+                or range_breakout_long
+                or high_tight_flag_long
+            )
+            and orderbook_bid_ask >= 0.35
+            and micro_move_3 >= -0.75
+            and micro_vwap_gap <= 6.0
+            and (rsi_value is None or float(rsi_value) <= 86.0)
+        ):
+            size = "0.38x" if (signal_score >= 0.80 and recent_change >= 4.0) else "0.28x"
+            if orderbook_bid_ask < 0.65:
+                size = "0.22x"
+            ranging_blend.append({
+                "score": 60 + signal_score * 20 + min(max(recent_change, burst_change, change_rate), 8),
+                "profile": "ranging_momentum_leader",
+                "strategy_id": "crypto.ranging_momentum_leader",
+                "size": size,
+                "reason": "individual momentum leader",
+                "note": f"leader signal={signal_score:.2f} trend={trend_follow_score:.2f} recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}% ob={orderbook_bid_ask:.2f}x",
+            })
+        if ranging_blend:
+            best = sorted(ranging_blend, key=lambda item: float(item["score"]), reverse=True)[0]
+            notes = [
+                f"{item['profile']} score={float(item['score']):.1f} size={item['size']} reason={item['reason']}"
+                for item in sorted(ranging_blend, key=lambda item: float(item["score"]), reverse=True)[:4]
+            ]
+            return {
+                "action": "probe_longs",
+                "size": str(best["size"]),
+                "focus": f"{best['profile']}: {lead_market or 'KRW-BTC'} {best['reason']} - selected by RANGING strategy blend",
+                "symbol": lead_market,
+                "candidate_symbols": candidate_symbols,
+                "strategy_id": str(best["strategy_id"]),
+                "entry_profile": str(best["profile"]),
+                "notes": reasons + [
+                    "RANGING strategy blend: mean-reversion, local-continuation, and momentum-leader candidates compete together.",
+                    str(best["note"]),
+                    *notes,
+                ],
+            }
         local_continuation_ok = (
             (range_breakout_long or high_tight_flag_long)
             and orderbook_bid_ask >= 0.98

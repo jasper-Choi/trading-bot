@@ -1,5 +1,21 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-13 (session 34 - Strategy blend correction)
+
+### Why this change was needed
+- User correctly flagged that strategies were being evaluated sequentially, so an earlier path could block later strategies instead of complementing them.
+- The first correction targets the highest-impact area: crypto `RANGING` regime.
+
+### Change
+- `app/services/recommendation_engine.py`
+  - Added a `ranging_blend` candidate board at the top of the RANGING block.
+  - Three families now compete together:
+    - `range_scalp`: mean-reversion / Airborne / RSI / Keltner / MFI / other RANGING signals.
+    - `range_breakout` / `high_tight_flag`: local continuation inside broad flat tape.
+    - `ranging_momentum_leader`: individual coin momentum leader while broad market is RANGING.
+  - Best candidate is selected by score and returned with notes showing competing candidates.
+- This keeps defensive filters as safety rails, but stops one strategy family from suppressing another family’s edge.
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 33 - Crypto opportunity + mobile stock visibility)
 
 ### Crypto opportunity recovery
