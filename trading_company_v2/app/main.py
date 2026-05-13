@@ -3441,6 +3441,38 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   function renderStrategyStats(stats){var body=document.getElementById('strategy-stats-body');var lbl=document.getElementById('strategy-stats-label');if(!stats||!stats.length){body.innerHTML='<div class="empty-row">실적 데이터 없음 (청산 건 쌓이면 자동 표시)</div>';return;}lbl.textContent='총 '+stats.length+'개 전략';var rows=stats.map(function(s){var wr=parseFloat(s.win_rate||0);var pnl=parseFloat(s.avg_pnl_pct||0);var wrCls=wr>=60?'pos':wr<40?'neg':'';var pnlCls=pnl>0?'pos':pnl<0?'neg':'';var total=parseInt(s.total_trades||0);var wins=parseInt(s.wins||0);var losses=parseInt(s.losses||0);return '<tr>'+'<td class="sym" style="font-size:.8rem">'+esc(s.strategy_type||'--')+'</td>'+'<td style="text-align:center;font-size:.8rem">'+total+'건</td>'+'<td class="'+wrCls+'" style="font-weight:700;text-align:center">'+wr.toFixed(1)+'%</td>'+'<td class="'+pnlCls+'" style="font-weight:700;text-align:right">'+fmtPct(pnl)+'</td>'+'<td style="color:var(--muted);font-size:.75rem;text-align:center">'+wins+'W/'+losses+'L</td>'+'</tr>';}).join('');body.innerHTML='<table class="pos-table"><thead><tr><th>전략</th><th style="text-align:center">횟수</th><th style="text-align:center">승률</th><th style="text-align:right">평균손익</th><th style="text-align:center">W/L</th></tr></thead><tbody>'+rows+'</tbody></table>';}
   async function loadData(){try{var dr=await fetch('/dashboard-data'),hr=await fetch('/health'),sr=await fetch('/api/strategy-stats');var data=await dr.json(),health=await hr.json(),stratStats=await sr.json();var state=data.state||{},dash=data.dashboard||{},readiness=data.live_readiness_checklist||{},brokerH=data.broker_live_health||{},exec=(dash.execution_summary||{}),perf=(dash.performance||{}),cap=(dash.capital||{}),blockSummary=((dash.exposure||{}).entry_block_summary)||((readiness||{}).entry_block_summary)||{};var isLive=String(readiness.execution_mode||'').indexOf('live')>=0;var dot=document.getElementById('status-dot');dot.className='status-dot'+(blockSummary.blocked?' err':isLive?' ':'');var modeEl=document.getElementById('mode-tag');modeEl.textContent=String(readiness.execution_mode||'모의투자');modeEl.className='mode-tag'+(isLive?' live':'');document.getElementById('update-time').textContent=toKST(state.updated_at);if(blockSummary&&blockSummary.blocked){var ab=document.getElementById('alert-bar');ab.textContent='\\u26a0\\ufe0f '+String(blockSummary.detail||blockSummary.headline||'실행 차단');ab.className='alert-bar visible';}else{document.getElementById('alert-bar').className='alert-bar';}renderOperatorBriefing(dash.operator_briefing||{});renderPnl(perf,cap);renderStatusBar(state,readiness,blockSummary);renderSignal(dash.crypto_live_lane||null,dash.crypto_live_lane_history||[]);window.__deskDrilldown=dash.desk_drilldown||{};renderDesks(dash.desk_status||{});renderOrderBar(exec);renderPositions(dash.open_positions||[]);renderTrades(dash.closed_positions||[]);renderEquity(dash.equity_curve||[]);renderBroker(brokerH,readiness);renderAgentLog(dash.agent_log||[]);renderStrategyStats(stratStats||[]);}catch(e){var dot2=document.getElementById('status-dot');dot2.className='status-dot err';document.getElementById('alert-bar').textContent='\\u26a0\\ufe0f 데이터 로딩 실패: '+e.message;document.getElementById('alert-bar').className='alert-bar visible';}}
   async function runCycle(){var btn=document.getElementById('cycle-btn');btn.disabled=true;btn.textContent='실행 중...';try{await fetch('/cycle',{method:'POST'});await loadData();}catch(e){console.error(e);}finally{btn.disabled=false;btn.textContent='사이클 실행';}}
+  function renderStrategyStatsCompat(stats){
+    var body=document.getElementById('strategy-stats-body');
+    var lbl=document.getElementById('strategy-stats-label');
+    if(!body)return;
+    if(!stats||!stats.length){
+      body.innerHTML='<div class="empty-row">전략별 실적 데이터 없음 (청산 건이 쌓이면 자동 표시)</div>';
+      return;
+    }
+    if(lbl)lbl.textContent='총 '+stats.length+'개 전략';
+    var rows=stats.map(function(s){
+      var wr=parseFloat(s.win_rate||0);
+      var pnl=parseFloat((s.avg_pnl_pct!=null?s.avg_pnl_pct:s.avg_pnl)||0);
+      var totalPnl=parseFloat((s.total_pnl_pct!=null?s.total_pnl_pct:s.total_pnl)||0);
+      var total=parseInt((s.total_trades!=null?s.total_trades:s.n_trades)||0);
+      var wins=parseInt(s.wins||0);
+      var losses=parseInt((s.losses!=null?s.losses:Math.max(total-wins,0))||0);
+      var wrCls=wr>=60?'pos':wr<40?'neg':'';
+      var pnlCls=pnl>0?'pos':pnl<0?'neg':'';
+      var totalCls=totalPnl>0?'pos':totalPnl<0?'neg':'';
+      var desk=s.desk?'<span style="color:var(--muted);font-size:.72rem"> '+esc(s.desk)+'</span>':'';
+      return '<tr>'
+        +'<td class="sym" style="font-size:.8rem">'+esc(s.strategy_type||'--')+desk+'</td>'
+        +'<td style="text-align:center;font-size:.8rem">'+total+'건</td>'
+        +'<td class="'+wrCls+'" style="font-weight:700;text-align:center">'+wr.toFixed(1)+'%</td>'
+        +'<td class="'+pnlCls+'" style="font-weight:700;text-align:right">'+fmtPct(pnl)+'</td>'
+        +'<td class="'+totalCls+'" style="font-weight:700;text-align:right">'+fmtPct(totalPnl)+'</td>'
+        +'<td style="color:var(--muted);font-size:.75rem;text-align:center">'+wins+'W/'+losses+'L</td>'
+        +'</tr>';
+    }).join('');
+    body.innerHTML='<table class="pos-table"><thead><tr><th>전략</th><th style="text-align:center">횟수</th><th style="text-align:center">승률</th><th style="text-align:right">평균손익</th><th style="text-align:right">누적손익</th><th style="text-align:center">W/L</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }
+  renderStrategyStats=renderStrategyStatsCompat;
   async function fetchJsonSafe(path, required){
     var res=await fetch(path,{cache:'no-store',credentials:'same-origin'});
     if(!res.ok){

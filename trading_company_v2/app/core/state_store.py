@@ -454,6 +454,13 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         return 2.20, -1.00, 90
     if desk == "crypto" and "high_tight_flag" in focus:
         return 1.80, -0.90, 90
+    if desk == "crypto" and "emma_scalp" in focus:
+        # Emma-style scalp: Keltner + Supertrend + MACD confluence.
+        # Keep it quick: small target, tight stop, short max hold.
+        return 1.40, -0.45, 60
+    if desk == "crypto" and "neo_micro_scalp" in focus:
+        # Small-size micro-compound path. It should prove itself quickly.
+        return 0.90, -0.35, 45
     if desk == "crypto":
         # Trend mode: cut failed ignitions fast, let winners run with trailing.
         return 10.0, -2.0, 180
@@ -2725,6 +2732,8 @@ def _derive_strategy_type(focus: str, action: str, desk: str) -> str:
     if "open_reversal" in f:   return "open_reversal"
     if "close_drive" in f:     return "close_drive"
     if "dip_bounce" in f:      return "dip_bounce"
+    if "emma_scalp" in f:      return "emma_scalp"
+    if "neo_micro_scalp" in f: return "neo_micro_scalp"
     if "pyramid" in f:         return "pyramid"
     if "breakout" in f:        return "breakout"
     if a == "attack_opening_drive": return "opening_drive"
@@ -2759,14 +2768,22 @@ def get_strategy_stats() -> list[dict]:
     result = []
     for st, d in sorted(by_type.items(), key=lambda x: -x[1]["n"]):
         n = d["n"]
+        wins = int(d["wins"])
+        losses = max(n - wins, 0)
+        avg_pnl = round(d["pnl_sum"] / n, 2) if n else 0.0
+        total_pnl = round(d["pnl_sum"], 2)
         result.append({
             "strategy_type": st,
             "desk": d["desk"],
             "n_trades": n,
-            "wins": d["wins"],
-            "win_rate": round(d["wins"] / n * 100, 1) if n else 0.0,
-            "avg_pnl": round(d["pnl_sum"] / n, 2) if n else 0.0,
-            "total_pnl": round(d["pnl_sum"], 2),
+            "total_trades": n,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(wins / n * 100, 1) if n else 0.0,
+            "avg_pnl": avg_pnl,
+            "avg_pnl_pct": avg_pnl,
+            "total_pnl": total_pnl,
+            "total_pnl_pct": total_pnl,
         })
     return result
 

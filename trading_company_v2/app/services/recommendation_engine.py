@@ -832,6 +832,70 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # ── MACD Bullish Cross (TRENDING) ──────────────────────────────────────────
     # MACD선이 시그널선을 상향돌파 (음의 영역에서) — 중기 모멘텀 전환
+    # Emma scalp combo: Keltner channel context + Supertrend flip + MACD confirmation.
+    # This short-term path requires multi-indicator confluence plus live flow support.
+    emma_confirm_count = sum([
+        bool(keltner_lower_touch),
+        bool(supertrend_long),
+        bool(macd_bull_cross or macd_histogram_reversal),
+    ])
+    emma_scalp_ok = (
+        emma_confirm_count >= 2
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and signal_score >= 0.44
+        and orderbook_bid_ask >= 1.04
+        and (micro_entry_ok or stream_ignition or stream_score >= 0.50)
+        and (trend_entry_allowed or range_scalp_eligible or supertrend_long)
+    )
+    if emma_scalp_ok:
+        entry_size = "0.52x" if emma_confirm_count >= 3 and signal_score >= 0.56 else "0.38x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"emma_scalp: {lead_market or 'KRW-BTC'} Keltner+Supertrend+MACD scalping confluence ({emma_confirm_count}/3)",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "strategy_id": "crypto.emma_scalp",
+            "entry_profile": "emma_scalp",
+            "notes": reasons + [
+                f"emma_combo: keltner={keltner_lower_touch} supertrend={supertrend_long} macd={macd_bull_cross or macd_histogram_reversal}",
+                f"score={signal_score:.2f} micro={micro_score:.2f} stream={stream_score:.2f} ob={orderbook_bid_ask:.2f}x",
+                ignition_note,
+            ],
+        }
+
+    # Neo micro-compound scalp: no reliable public Moritz Neo rule set was found.
+    # Implement the usable principle only: small-size, fast compounding entries
+    # when stream + orderbook + chart agree.
+    neo_micro_ok = (
+        stream_ignition
+        and stream_score >= 0.62
+        and micro_score >= 0.52
+        and orderbook_bid_ask >= 1.12
+        and signal_score >= 0.50
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and (trend_entry_allowed or supertrend_long or range_breakout_long)
+    )
+    if neo_micro_ok:
+        return {
+            "action": "selective_probe",
+            "size": "0.28x",
+            "focus": f"neo_micro_scalp: {lead_market or 'KRW-BTC'} small-size stream/orderbook compounding scalp",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "strategy_id": "crypto.neo_micro_scalp",
+            "entry_profile": "neo_micro_scalp",
+            "notes": reasons + [
+                f"neo_micro: stream={stream_score:.2f} micro={micro_score:.2f} ob={orderbook_bid_ask:.2f}x signal={signal_score:.2f}",
+                "public Moritz Neo rules were not verifiable; using small-size HFT-style confluence only.",
+                ignition_note,
+            ],
+        }
+
     macd_cross_entry_ok = (
         macd_bull_cross
         and trend_entry_allowed

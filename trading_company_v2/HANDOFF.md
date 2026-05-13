@@ -1,5 +1,43 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-13 (session 32 - Strategy stats UI + Emma/Neo crypto paths)
+
+### Operations checks
+- KIS readiness:
+  - KIS token and balance checks now pass after the user replaced the App Secret and account settings.
+  - Recent `live_order_log` rows still show only pre-fix Korea paper fallback orders; no new post-fix `applied_mode=kis_live` order has fired yet.
+  - Next validation target: wait for the next Korea signal and confirm `live_order_log.applied_mode=kis_live`, `broker_live=true`.
+- ML model files on Oracle VM:
+  - `models/lgbm_model.pkl`
+  - `models/persistence_cnn.pt`
+  - user cron includes `0 12 * * 0 /home/ubuntu/retrain_models.sh`.
+
+### Dashboard/API fix
+- `app/core/state_store.py`
+  - `get_strategy_stats()` now returns both old and UI-friendly fields:
+    - `n_trades` and `total_trades`
+    - `avg_pnl` and `avg_pnl_pct`
+    - `total_pnl` and `total_pnl_pct`
+    - `losses`
+- `app/main.py`
+  - Added a compatible `renderStrategyStatsCompat()` override so `/api/strategy-stats` displays correctly on the dashboard.
+  - Table now shows strategy, desk, trade count, win rate, average PnL, total PnL, and W/L.
+
+### New crypto strategy paths
+- `app/services/recommendation_engine.py`
+  - Added `crypto.emma_scalp`.
+    - Uses Keltner lower-band context, Supertrend long, and MACD bullish/histogram reversal.
+    - Requires at least 2/3 confirmations plus orderbook and micro/stream support.
+    - Intended as a short-term scalping confluence, not a broad swing entry.
+  - Added `crypto.neo_micro_scalp`.
+    - Public Moritz Neo rule details were not verifiable from reliable sources.
+    - Implemented only the usable generic principle: small-size, fast compounding entries when stream + orderbook + chart agree.
+- `app/core/state_store.py`
+  - Added tight crypto thresholds:
+    - `emma_scalp`: target `+1.40%`, stop `-0.45%`, max `60` cycles.
+    - `neo_micro_scalp`: target `+0.90%`, stop `-0.35%`, max `45` cycles.
+  - Added strategy attribution labels for `emma_scalp` and `neo_micro_scalp`.
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 31 - KIS mock visibility/routing fix)
 
 ### Why KIS mock app did not show Korea trades
