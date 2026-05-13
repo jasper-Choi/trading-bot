@@ -129,6 +129,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
     trend_slope_pct = float(payload.get("trend_slope_pct", 0.0) or 0.0)
     trend_extension_pct = float(payload.get("trend_extension_pct", 0.0) or 0.0)
+    choch_bullish_early = bool(payload.get("choch_bullish", False))
+    choch_bearish_early = bool(payload.get("choch_bearish", False))
+    bos_bullish_early = bool(payload.get("bos_bullish", False))
+    bos_bearish_early = bool(payload.get("bos_bearish", False))
     trend_ignition_score = round(
         min(
             1.0,
@@ -235,6 +239,42 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and trend_entry_allowed
         and trend_follow_score >= 0.58
     )
+    short_pressure_visible = (
+        stream_reversal
+        or stream_move_15 <= -0.18
+        or stream_move_60 <= -0.45
+        or micro_move_3 <= -0.80
+        or rsi_bearish_divergence
+        or choch_bearish_early
+        or bos_bearish_early
+    )
+    long_flip_confirmed = (
+        (
+            stream_fresh
+            and not stream_reversal
+            and stream_score >= 0.55
+            and stream_move_5 >= 0.03
+            and stream_move_15 >= 0.08
+            and stream_buy_ratio >= 0.52
+        )
+        or (
+            micro_score >= 0.55
+            and micro_move_3 >= 0.0
+            and orderbook_bid_ask >= 1.0
+        )
+        or choch_bullish_early
+        or bos_bullish_early
+        or support_reclaim_long
+        or trend_reversal_early
+        or rsi_bullish_div
+        or macd_histogram_reversal
+    )
+    falling_knife_risk = short_pressure_visible and not long_flip_confirmed
+    transition_note = (
+        f"short_pressure={short_pressure_visible} long_flip={long_flip_confirmed} "
+        f"stream5/15/60={stream_move_5:.2f}/{stream_move_15:.2f}/{stream_move_60:.2f}% "
+        f"buy={stream_buy_ratio:.0%} micro3={micro_move_3:.2f}%"
+    )
 
     if regime == "STRESSED":
         return {
@@ -249,6 +289,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # ── BTC 급락 반등 (Sharp Dip Bounce) ─────────────────────────────────────
     # BTC 30분 -2.5% 이상 급락 + RSI≤32 → 과매도 반등 기대 (승률 63~68%)
     # 평균회귀 전략 — 추세 무관하게 작동, DEFENSE 스탠스만 차단
+    if sharp_dip_bounce and stance != "DEFENSE" and not long_flip_confirmed:
+        return {
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": "dip_bounce blocked: BTC dip has not confirmed long flip yet.",
+            "symbol": dip_bounce_symbol,
+            "candidate_symbols": [dip_bounce_symbol, "KRW-BTC"] + candidate_symbols[:2],
+            "notes": [
+                f"BTC 30min change={dip_change_30m:.2f}% / RSI={dip_rsi_btc if dip_rsi_btc is not None else '?'}",
+                transition_note,
+                "Do not catch a falling knife: wait for buy flow or bullish structure before dip entry.",
+            ],
+        }
     if sharp_dip_bounce and stance != "DEFENSE":
         _dip_rsi_str = f"{dip_rsi_btc:.0f}" if dip_rsi_btc is not None else "?"
         _is_alt = dip_bounce_symbol != "KRW-BTC"
@@ -268,17 +321,30 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or (rsi_value is not None and float(rsi_value) >= 92.0)
 
+    if falling_knife_risk and regime != "RANGING":
+        return {
+            "action": "watchlist_only",
+            "size": "0.00x",
+            "focus": f"{lead_market or 'KRW-BTC'} short pressure still active. Wait for long flip.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                transition_note,
+                "Core rule: no long entry while short pressure is visible unless a long flip is confirmed.",
+            ],
+        }
+
     # ── RANGING 시장 라우팅 ─────────────────────────────────────────────────────
     # RANGING = 추세 추종 전략 완전 차단 → 평균회귀(에어본/레인지 스캘프) 전략만 허용
     # 데이터: RANGING에서 추세 추종 승률 9%, 누적 -122% → 구조적 적자
-    _choch_bearish_early = bool(payload.get("choch_bearish", False))
     if regime == "RANGING":
         ranging_blend: list[dict[str, Any]] = []
         blend_safe = (
             not rsi_bearish_divergence
             and not hard_overheat
             and not stream_reversal
-            and not _choch_bearish_early
+            and not choch_bearish_early
+            and not falling_knife_risk
             and stance != "DEFENSE"
         )
         blend_mean_rev_signals = sum([
@@ -297,20 +363,27 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             keltner_lower_touch,
             mfi_oversold,
         ])
-        if blend_mean_rev_signals >= 1 and blend_safe and orderbook_bid_ask >= 1.05 and micro_move_3 >= -1.0:
+        if (
+            blend_mean_rev_signals >= 1
+            and blend_safe
+            and long_flip_confirmed
+            and orderbook_bid_ask >= 1.05
+            and micro_move_3 >= -0.20
+        ):
             ranging_blend.append({
                 "score": 54 + blend_mean_rev_signals * 7 + min(airborne_score * 10, 8),
                 "profile": "range_scalp",
                 "strategy_id": "crypto.range_scalp",
                 "size": "0.55x" if blend_mean_rev_signals >= 3 else "0.45x" if blend_mean_rev_signals >= 2 else "0.35x",
                 "reason": f"mean reversion blend ({blend_mean_rev_signals}/14)",
-                "note": f"mean_rev={blend_mean_rev_signals}/14 dev={airborne_deviation_pct:.2f}% vwap={vwap_deviation_pct:.1f}% rsi={rsi_value}",
+                "note": f"mean_rev={blend_mean_rev_signals}/14 dev={airborne_deviation_pct:.2f}% vwap={vwap_deviation_pct:.1f}% rsi={rsi_value} / {transition_note}",
             })
         if (
             (range_breakout_long or high_tight_flag_long)
             and blend_safe
+            and long_flip_confirmed
             and orderbook_bid_ask >= 0.98
-            and micro_move_3 >= -0.35
+            and micro_move_3 >= -0.05
             and micro_vwap_gap <= 4.8
         ):
             profile = "range_breakout" if range_breakout_long else "high_tight_flag"
@@ -321,12 +394,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 "strategy_id": f"crypto.{profile}",
                 "size": "0.50x" if range_breakout_long and high_tight_flag_long else "0.45x" if range_breakout_long else "0.38x",
                 "reason": reason,
-                "note": f"local_continuation breakout={range_breakout_long} high_tight={high_tight_flag_long} ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}%",
+                "note": f"local_continuation breakout={range_breakout_long} high_tight={high_tight_flag_long} ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% / {transition_note}",
             })
         if (
             signal_score >= 0.74
             and trend_follow_score >= 0.55
             and blend_safe
+            and long_flip_confirmed
             and (
                 recent_change >= 2.0
                 or burst_change >= 2.5
@@ -335,7 +409,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 or high_tight_flag_long
             )
             and orderbook_bid_ask >= 0.35
-            and micro_move_3 >= -0.75
+            and micro_move_3 >= 0.0
             and micro_vwap_gap <= 6.0
             and (rsi_value is None or float(rsi_value) <= 86.0)
         ):
@@ -348,7 +422,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 "strategy_id": "crypto.ranging_momentum_leader",
                 "size": size,
                 "reason": "individual momentum leader",
-                "note": f"leader signal={signal_score:.2f} trend={trend_follow_score:.2f} recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}% ob={orderbook_bid_ask:.2f}x",
+                "note": f"leader signal={signal_score:.2f} trend={trend_follow_score:.2f} recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}% ob={orderbook_bid_ask:.2f}x / {transition_note}",
             })
         if ranging_blend:
             best = sorted(ranging_blend, key=lambda item: float(item["score"]), reverse=True)[0]
@@ -378,7 +452,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             and not rsi_bearish_divergence
             and not hard_overheat
             and not stream_reversal
-            and not _choch_bearish_early
+            and not choch_bearish_early
+            and not falling_knife_risk
+            and long_flip_confirmed
             and stance != "DEFENSE"
         )
         if local_continuation_ok:
@@ -422,14 +498,16 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 or range_breakout_long
                 or high_tight_flag_long
             )
-            and orderbook_bid_ask >= 0.35
-            and micro_move_3 >= -0.75
+            and orderbook_bid_ask >= 0.65
+            and micro_move_3 >= 0.0
             and micro_vwap_gap <= 6.0
             and (rsi_value is None or float(rsi_value) <= 86.0)
             and not rsi_bearish_divergence
             and not hard_overheat
             and not stream_reversal
-            and not _choch_bearish_early
+            and not choch_bearish_early
+            and not falling_knife_risk
+            and long_flip_confirmed
             and stance != "DEFENSE"
         )
         if local_momentum_leader_ok:
@@ -448,7 +526,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                     f"leader momentum: signal={signal_score:.2f} trend={trend_follow_score:.2f} "
                     f"recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}%",
                     f"timing: ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% "
-                    f"vwap_gap={micro_vwap_gap:.2f}% rsi={rsi_value}",
+                    f"vwap_gap={micro_vwap_gap:.2f}% rsi={rsi_value} / {transition_note}",
                     "Broad market is RANGING, so size is reduced and trailing/stop are tighter.",
                 ],
             }
@@ -494,7 +572,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             and not rsi_bearish_divergence
             and not hard_overheat
             and not stream_reversal
-            and not _choch_bearish_early
+            and not choch_bearish_early
+            and not falling_knife_risk
+            and long_flip_confirmed
             and stance != "DEFENSE"
         )
         # 최소 1개 신호 + 공통 필터 충족 시 진입
@@ -1757,6 +1837,34 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     in_close_window = bool(payload.get("in_close_window", False))
     _qmeta = {"quality_score": quality_score, "avg_signal": avg_signal, "quality_threshold": 0.54}
 
+    def _stock_long_flip(candidate: dict[str, Any], min_signal: float = 0.52) -> bool:
+        """Common stock entry rule: buy only after short pressure starts flipping long."""
+        bias = str(candidate.get("signal_bias", "neutral") or "neutral").lower()
+        signal = float(candidate.get("signal_score", 0.0) or 0.0)
+        return (
+            bool(candidate.get("open_reversal", False))
+            or bool(candidate.get("last_candle_bullish", False))
+            or bool(candidate.get("close_drive", False))
+            or int(candidate.get("breakout_count", 0) or 0) >= 3
+            or (bias == "bullish" and signal >= min_signal)
+        )
+
+    def _stock_falling_knife(candidate: dict[str, Any]) -> bool:
+        """Reject gap-down/weak-bias entries that have not proved a long flip yet."""
+        bias = str(candidate.get("signal_bias", "neutral") or "neutral").lower()
+        signal = float(candidate.get("signal_score", 0.0) or 0.0)
+        gap = float(candidate.get("gap_pct", 0.0) or 0.0)
+        rsi_raw = candidate.get("rsi")
+        try:
+            rsi_float = float(rsi_raw) if rsi_raw is not None else 50.0
+        except (TypeError, ValueError):
+            rsi_float = 50.0
+        return (
+            (bias == "bearish" and not bool(candidate.get("open_reversal", False)))
+            or (gap <= -3.0 and signal < 0.55 and not bool(candidate.get("open_reversal", False)))
+            or (rsi_float <= 25.0 and not bool(candidate.get("open_reversal", False)))
+        )
+
     if not session.get("korea_open"):
         return {
             "action": "pre_market_watch",
@@ -1888,6 +1996,20 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         gf_score = float(gf.get("gap_fill_score", 0.0) or 0.0)
         gf_rsi = gf.get("rsi")
         if gf_score >= 0.60:
+            if _stock_falling_knife(gf) or not _stock_long_flip(gf, 0.52):
+                return {
+                    "action": "stand_by",
+                    "size": "0.00x",
+                    "focus": f"gap_fill blocked: {gf_name} has not confirmed short-to-long flip.",
+                    "symbol": gf_ticker,
+                    "candidate_symbols": [str(c.get("ticker", "")) for c in gap_fill_candidates],
+                    "notes": [
+                        f"gap_fill score {gf_score:.2f} / gap {gf_gap:.1f}% / rsi {gf_rsi}",
+                        f"bias={gf.get('signal_bias')} signal={float(gf.get('signal_score', 0.0) or 0.0):.2f}",
+                        "Do not catch a falling knife: gap-down entries need reversal or bullish current signal.",
+                    ],
+                    **_qmeta,
+                }
             return {
                 "action": "probe_longs",
                 "size": "0.35x" if stance == "OFFENSE" else "0.25x",
@@ -1905,7 +2027,14 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # ── Opening reversal path (KIS tick stream: cascade→exhaustion→reversal) ─
     top_reversal = gap_candidates[0].get("open_reversal", False) if gap_candidates else False
     top_reversal_score = float(gap_candidates[0].get("reversal_score", 0) or 0) if gap_candidates else 0
-    if top_reversal and top_reversal_score >= 55 and stance != "DEFENSE":
+    if (
+        top_reversal
+        and top_reversal_score >= 55
+        and gap_candidates
+        and not _stock_falling_knife(gap_candidates[0])
+        and _stock_long_flip(gap_candidates[0], 0.50)
+        and stance != "DEFENSE"
+    ):
         return {
             "action": "attack_opening_drive",
             "size": "0.40x",
@@ -1921,7 +2050,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             **_qmeta,
         }
 
-    if opening_window and active_gap_count >= 2 and quality_score >= 0.56 and avg_gap >= 1.8 and avg_volume >= 8000 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and top_signal_bias != "neutral" and stance != "DEFENSE":
+    if opening_window and active_gap_count >= 2 and quality_score >= 0.56 and avg_gap >= 1.8 and avg_volume >= 8000 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and top_signal_bias == "bullish" and top_signal >= 0.52 and stance != "DEFENSE":
         return {
             "action": "attack_opening_drive",
             "size": "0.55x" if stance == "BALANCED" else "0.75x",
@@ -1934,7 +2063,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
-    if active_gap_count >= 1 and quality_score >= 0.5 and avg_signal >= 0.48 and avg_volume >= 3500 and top_candidate_score >= 0.52:
+    if active_gap_count >= 1 and quality_score >= 0.5 and avg_signal >= 0.48 and avg_volume >= 3500 and top_candidate_score >= 0.52 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.50) and not _stock_falling_knife(gap_candidates[0]):
         return {
             "action": "selective_probe",
             "size": "0.40x",
@@ -1949,7 +2078,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             **_qmeta,
         }
     # Single strong candidate — smaller size, tighter criteria
-    if active_gap_count >= 1 and quality_score >= 0.54 and avg_signal >= 0.5 and top_candidate_score >= 0.56 and not mid_session:
+    if active_gap_count >= 1 and quality_score >= 0.54 and avg_signal >= 0.5 and top_candidate_score >= 0.56 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.52) and not _stock_falling_knife(gap_candidates[0]) and not mid_session:
         return {
             "action": "selective_probe",
             "size": "0.25x",
@@ -1962,7 +2091,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
-    if mid_session and active_gap_count >= 1 and quality_score >= 0.58 and avg_signal >= 0.52 and top_candidate_score >= 0.58:
+    if mid_session and active_gap_count >= 1 and quality_score >= 0.58 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.52) and not _stock_falling_knife(gap_candidates[0]):
         return {
             "action": "selective_probe",
             "size": "0.18x",
@@ -2010,6 +2139,20 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         pb_ma20 = pb.get("ma20")
         pb_vol_dec = bool(pb.get("vol_declining", False))
         if pb_score >= 0.60:
+            if _stock_falling_knife(pb) or not _stock_long_flip(pb, 0.52):
+                return {
+                    "action": "stand_by",
+                    "size": "0.00x",
+                    "focus": f"pullback_ma blocked: {pb_name} has not confirmed long resumption.",
+                    "symbol": pb_ticker,
+                    "candidate_symbols": [str(c.get("ticker", "")) for c in pullback_ma_candidates],
+                    "notes": [
+                        f"pullback score {pb_score:.2f} / pct_from_MA20={pb_pct_ma20:.1f}% / rsi={pb_rsi}",
+                        f"bias={pb.get('signal_bias')} signal={float(pb.get('signal_score', 0.0) or 0.0):.2f}",
+                        "MA pullback is only valid after bullish resumption; no falling-knife buys.",
+                    ],
+                    **_qmeta,
+                }
             return {
                 "action": "probe_longs",
                 "size": "0.40x" if stance == "OFFENSE" else "0.30x",

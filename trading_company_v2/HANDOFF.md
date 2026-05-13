@@ -1,5 +1,29 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-13 (session 36 - No falling knife core rule)
+
+### User-defined core rule
+- Buy only when short pressure is visible but starts flipping long.
+- Do not buy simply because price is low, oversold, gap-down, or near support.
+- After entry, ride the long move and exit immediately on short-transition signals or TP/trailing protection.
+- Applies to both crypto and stocks.
+
+### Change
+- `app/services/recommendation_engine.py`
+  - Added crypto transition state:
+    - `short_pressure_visible`
+    - `long_flip_confirmed`
+    - `falling_knife_risk`
+  - Crypto `RANGING` blend now requires `long_flip_confirmed` and rejects `falling_knife_risk`.
+  - `range_scalp` now needs actual turn confirmation; mean reversion alone is not enough.
+  - `range_breakout`, `high_tight_flag`, and `ranging_momentum_leader` require non-negative micro direction plus long-flip confirmation.
+  - `dip_bounce` is blocked until BTC dip confirms a long flip.
+  - Non-RANGING crypto entries are blocked if short pressure remains active without long-flip confirmation.
+  - Added common Korea stock guards:
+    - `_stock_long_flip()`
+    - `_stock_falling_knife()`
+  - Korea `gap_fill`, `open_reversal`, `opening_drive`, `selective_probe`, `mid-session follow-through`, and `pullback_ma` now require bullish resumption / reversal confirmation rather than buying weakness alone.
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 35 - RANGING momentum hot-path loss fix)
 
 ### Why this change was needed
