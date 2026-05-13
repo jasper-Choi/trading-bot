@@ -2521,7 +2521,12 @@ def _performance_html() -> str:  # noqa: PLR0915
     <section class="grid section">
       <div class="card full">
         <h2>코인별 성과 분석 <span style="font-weight:400;color:var(--muted);font-size:.8rem">(클릭으로 정렬)</span></h2>
-        <div class="table-wrap" id="symbol-table"></div>
+        <h2 style="margin-top:10px;font-size:.9rem;color:var(--blue)">코인</h2>
+        <div class="table-wrap" id="symbol-table-crypto"></div>
+        <h2 style="margin-top:18px;font-size:.9rem;color:var(--yellow)">한국주식</h2>
+        <div class="table-wrap" id="symbol-table-korea"></div>
+        <h2 style="margin-top:18px;font-size:.9rem;color:var(--muted)">미국주식</h2>
+        <div class="table-wrap" id="symbol-table-us"></div>
       </div>
     </section>
 
@@ -2682,8 +2687,35 @@ function renderBars(a){
 var _symData=[];
 var _symSort={col:3,asc:false}; // default: sort by total_pnl_pct desc
 function renderSymbolTable(a){
-  _symData=(a.symbol_stats||[]);
-  _drawSymbolTable();
+  var byDesk=a.symbol_stats_by_desk||{};
+  renderSymbolSubTable('symbol-table-crypto',byDesk.crypto||[]);
+  renderSymbolSubTable('symbol-table-korea',byDesk.korea||[]);
+  renderSymbolSubTable('symbol-table-us',byDesk.us||[]);
+}
+function renderSymbolSubTable(targetId,rows){
+  var target=document.getElementById(targetId);
+  if(!target)return;
+  var data=rows||[];
+  if(!data.length){target.innerHTML='<div class="empty">거래 데이터 없음</div>';return;}
+  var maxAbs=Math.max(1,...data.map(function(x){return Math.abs(n(x.total_pnl_pct))}));
+  var cols=['종목','거래','승률','누적 PnL','평균 PnL','평균 보유','최고','최악'];
+  var sorted=data.slice().sort(function(a,b){return n(b.total_pnl_pct)-n(a.total_pnl_pct);});
+  var body=sorted.map(function(x){
+    var barW=Math.min(60,Math.max(4,Math.abs(n(x.total_pnl_pct))/maxAbs*60));
+    var barCol=n(x.total_pnl_pct)>=0?'#39d98a':'#ff6b6b';
+    var label=String(x.label||'').replace('KRW-','');
+    return '<tr>'
+      +'<td><b>'+label+'</b></td>'
+      +'<td>'+n(x.trades)+'건</td>'
+      +'<td class="blue">'+n(x.win_rate).toFixed(1)+'%</td>'
+      +'<td class="'+cls(x.total_pnl_pct)+'"><span class="symbol-bar" style="width:'+barW+'px;background:'+barCol+';margin-right:6px"></span>'+pct(x.total_pnl_pct)+'</td>'
+      +'<td class="'+cls(x.avg_pnl_pct)+'">'+pct(x.avg_pnl_pct)+'</td>'
+      +'<td>'+n(x.avg_hold_min).toFixed(1)+'분</td>'
+      +'<td class="green">'+pct(x.best_pnl_pct)+'</td>'
+      +'<td class="red">'+pct(x.worst_pnl_pct)+'</td>'
+      +'</tr>';
+  });
+  target.innerHTML=table(cols,body,false);
 }
 function _drawSymbolTable(){
   if(!_symData.length){document.getElementById('symbol-table').innerHTML='<div class="empty">거래 데이터 없음</div>';return;}
@@ -3465,6 +3497,15 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
       ab2.className='alert-bar visible';
     }
   }
+  (function fixPerformanceLabels(){
+    var wrap=document.getElementById('symbol-table-crypto');
+    if(!wrap||!wrap.parentElement)return;
+    var hs=wrap.parentElement.querySelectorAll('h2');
+    if(hs[0])hs[0].innerHTML='종목별 성과 분석 <span style="font-weight:400;color:var(--muted);font-size:.8rem">(코인/주식 분리)</span>';
+    if(hs[1])hs[1].textContent='코인';
+    if(hs[2])hs[2].textContent='한국주식';
+    if(hs[3])hs[3].textContent='미국주식';
+  })();
   setInterval(function(){loadData().catch(function(){});},20000);loadData().catch(function(){});
 </script>
 </body>

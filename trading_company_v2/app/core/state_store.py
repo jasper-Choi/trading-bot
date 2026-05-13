@@ -2921,6 +2921,28 @@ def load_performance_analytics(limit: int = 500) -> dict:
             "worst_pnl_pct": round(min(pnl_values), 2) if pnl_values else 0.0,
         }
 
+    def _position_display_name(row: PaperPositionRecord) -> str:
+        symbol = str(row.symbol or "").strip()
+        if not symbol:
+            return "unknown"
+        focus = str(row.focus or "")
+        if row.desk == "crypto":
+            return symbol.replace("KRW-", "")
+        if row.desk in {"korea", "us"}:
+            marker = f"({symbol})"
+            if marker in focus:
+                name = focus.split(marker, 1)[0].strip()
+                if name:
+                    return f"{name}({symbol})"
+            if focus:
+                for sep in (" selective ", " selective_probe", " Opening ", " momentum ", " - "):
+                    if sep in focus:
+                        name = focus.split(sep, 1)[0].strip()
+                        if name and symbol not in name and len(name) <= 40:
+                            return f"{name}({symbol})"
+            return symbol
+        return symbol
+
     def _stats_by(rows: list[PaperPositionRecord], key_fn) -> list[dict]:
         grouped: dict[str, list[PaperPositionRecord]] = {}
         for row in rows:
@@ -2934,6 +2956,14 @@ def load_performance_analytics(limit: int = 500) -> dict:
                 reverse=True,
             )
         ]
+
+    def _symbol_stats_by_desk(rows: list[PaperPositionRecord]) -> dict[str, list[dict]]:
+        desks = ("crypto", "korea", "us")
+        result: dict[str, list[dict]] = {}
+        for desk in desks:
+            desk_rows = [row for row in rows if row.desk == desk]
+            result[desk] = _stats_by(desk_rows, _position_display_name)[:20]
+        return result
 
     def _max_drawdown(rows: list[PaperPositionRecord]) -> float:
         equity = 100.0
@@ -3089,7 +3119,8 @@ def load_performance_analytics(limit: int = 500) -> dict:
         "daily_performance": daily_performance,
         "entry_reason_stats": _stats_by(closed, lambda row: row.action),
         "exit_reason_stats": _stats_by(closed, lambda row: row.closed_reason),
-        "symbol_stats": _stats_by(closed, lambda row: row.symbol)[:20],
+        "symbol_stats": _stats_by(closed, _position_display_name)[:20],
+        "symbol_stats_by_desk": _symbol_stats_by_desk(closed),
         "pnl_distribution": pnl_distribution,
         "open_positions": open_positions,
         "recent_closed": recent_closed,
