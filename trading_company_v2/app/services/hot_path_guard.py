@@ -265,11 +265,14 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
             return 0.06
         return 0.04
     if entry_profile == "ranging_momentum_leader":
-        if combined >= 0.68 and stream_score >= 0.58:
-            return 0.07
-        if combined >= 0.60 and stream_score >= 0.48:
-            return 0.055
-        return 0.04
+        # This profile is allowed in broad RANGING tapes, so keep it in probe size
+        # until live results prove the edge. Two immediate peak=0 failures showed
+        # that 0.07x was too large for an unvalidated hot-path continuation scout.
+        if combined >= 0.72 and stream_score >= 0.78:
+            return 0.04
+        if combined >= 0.64 and stream_score >= 0.68:
+            return 0.03
+        return 0.025
     if combined >= 0.86 and trend >= 0.82 and stream_score >= 0.76:
         return 0.12
     if combined >= 0.78 and stream_score >= 0.70:
@@ -445,17 +448,34 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             _float(item.get("burst_change_pct", 0.0)),
             _float(item.get("change_rate", 0.0)),
         )
+        _leader_stream = summarize_stream_momentum(symbol, max_age_seconds=3.5)
+        _leader_stream_fresh = bool(_leader_stream.get("stream_fresh", False))
+        _leader_stream_reversal = bool(_leader_stream.get("stream_reversal", False))
+        _leader_stream_score = float(_leader_stream.get("stream_score", 0.0))
+        _leader_ticks_15 = int(_leader_stream.get("stream_ticks_15s", 0) or 0)
+        _leader_move_5 = _float(_leader_stream.get("stream_move_5s_pct", 0.0))
+        _leader_move_15 = _float(_leader_stream.get("stream_move_15s_pct", 0.0))
+        _leader_move_60 = _float(_leader_stream.get("stream_move_60s_pct", 0.0))
+        _leader_buy_ratio = _float(_leader_stream.get("stream_buy_ratio_15s", 0.0))
         if (
-            combined >= 0.58
-            and chart_score >= 0.74
-            and trend_score >= 0.55
+            combined >= 0.66
+            and chart_score >= 0.78
+            and trend_score >= 0.60
             and _leader_recent >= 2.0
-            and orderbook_bid_ask >= 0.35
-            and micro_move_3 >= -0.75
-            and micro_vwap_gap <= 6.0
-            and signal_freshness >= 0.45
-            and rsi_value <= 86.0
-            and (_ranging_stream_score >= 0.40 or micro_move_3 >= -0.15)
+            and orderbook_bid_ask >= 0.65
+            and micro_move_3 >= 0.0
+            and micro_vwap_gap <= 4.5
+            and signal_freshness >= 0.55
+            and rsi_value <= 82.0
+            and trend_extension_pct <= 4.0
+            and _leader_stream_fresh
+            and not _leader_stream_reversal
+            and _leader_ticks_15 >= 4
+            and _leader_stream_score >= 0.70
+            and _leader_move_5 >= 0.06
+            and 0.18 <= _leader_move_15 <= 0.45
+            and _leader_move_60 >= 0.03
+            and _leader_buy_ratio >= 0.62
             and not _strategy_is_disabled("crypto.ranging_momentum_leader")
         ):
             item["entry_profile"] = "ranging_momentum_leader"
@@ -2260,6 +2280,16 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             f"range_scalp: {symbol} hot tick entry - airborne {airborne_score_val:.2f} "
             f"dev {deviation_pct_val:+.2f}%, stream {stream_score:.2f}, move15 {move15_val:.2f}%."
         )
+    elif entry_path == "ranging_momentum_leader":
+        move5_val = _float(stream.get("stream_move_5s_pct", 0.0))
+        move60_val = _float(stream.get("stream_move_60s_pct", 0.0))
+        buy_ratio_val = _float(stream.get("stream_buy_ratio_15s", 0.0))
+        ticks15_val = int(stream.get("stream_ticks_15s", 0) or 0)
+        order_focus = (
+            f"ranging_momentum_leader: {symbol} hot tick entry - combined {combined:.2f}, "
+            f"stream {stream_score:.2f}, move5 {move5_val:.2f}%, move15 {move15_val:.2f}%, "
+            f"move60 {move60_val:.2f}%, buy {buy_ratio_val:.0%}, ticks15 {ticks15_val}."
+        )
     elif entry_path == "range_breakout":
         range_high_val = _float(candidate.get("range_high_20", 0.0))
         order_focus = (
@@ -2425,6 +2455,20 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and move_15 >= 0.22        # 15s 방향
             and move_60 >= 0.00        # -0.15 → 0.00: 60s 하락 중 진입 차단
             and buy_ratio >= 0.58      # 매수세
+        )
+    elif entry_profile == "ranging_momentum_leader":
+        # RANGING leader continuation is the easiest path to chase a local top.
+        # Require 5s/15s/60s confirmation together, and cap the 15s spike size
+        # so we enter continuation rather than the tail of a one-tick burst.
+        ignition = (
+            stream_ok
+            and ticks_15 >= 5
+            and stream_score >= 0.74
+            and move_5 >= 0.08
+            and 0.20 <= move_15 <= 0.45
+            and move_60 >= 0.04
+            and buy_ratio >= 0.64
+            and move_5 >= move_15 * 0.22
         )
     elif entry_profile == "range_impulse":
         ignition = (

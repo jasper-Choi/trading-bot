@@ -1,5 +1,28 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-13 (session 35 - RANGING momentum hot-path loss fix)
+
+### Why this change was needed
+- Immediately after enabling `ranging_momentum_leader`, two hot-path entries closed as `rapid_tick_failed_start`.
+- Both trades had `peak_pnl_pct=0.0`, meaning price never moved in favor after entry.
+- Diagnosis: the cycle strategy could correctly identify individual leaders, but the websocket hot path was still too willing to chase a short tick spike in a broad `RANGING` tape.
+
+### Change
+- `app/services/hot_path_guard.py`
+  - Reduced `ranging_momentum_leader` hot-path size from `0.055-0.07x` to `0.025-0.04x` until live edge improves.
+  - Tightened candidate eligibility:
+    - combined >= `0.66`
+    - signal >= `0.78`
+    - trend >= `0.60`
+    - orderbook bid/ask >= `0.65`
+    - micro 3m move must already be non-negative
+    - trend extension <= `4.0%`
+    - live stream must be fresh, non-reversal, with ticks15 >= `4`, stream >= `0.70`, buy ratio >= `62%`
+    - move15 must be between `0.18%` and `0.45%` to block late spike chasing.
+  - Added an explicit `ranging_momentum_leader` ignition path:
+    - ticks15 >= `5`, stream >= `0.74`, move5 >= `0.08%`, move15 `0.20-0.45%`, move60 >= `0.04%`, buy ratio >= `64%`.
+  - Added richer focus text (`move5`, `move15`, `move60`, buy ratio, ticks15) so future losses can be diagnosed directly from the dashboard/trade log.
+
 ## 0. Latest Codex Notes - 2026-05-13 (session 34 - Strategy blend correction)
 
 ### Why this change was needed
