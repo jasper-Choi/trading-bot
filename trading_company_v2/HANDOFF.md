@@ -1,9 +1,35 @@
 # Trading Company V2 Handoff
 
-Last updated: 2026-05-12 (session 28 — 6대 전략 확장: 수급/종가/호가/테마/김치프리미엄/피라미딩)
+Last updated: 2026-05-13 (session 29 — Korea stop-pressure false positive fix)
 Maintained for: Claude / Codex continuation
 
-## 0. Latest Claude Notes - 2026-05-12 (session 28 — 6대 전략 확장)
+## 0. Latest Codex Notes - 2026-05-13 (session 29 — Korea stop-pressure false positive fix)
+
+### 커밋 TBD — Oracle VM 배포 대상
+
+**[한국장 후보는 뜨지만 거래가 없는 문제 진단/수정]**
+
+실시간 Oracle VM 확인 결과, 한국장 정규장 중 티에스이 등 `attack_opening_drive`/`selective_probe` 후보가 계속 생성되고 있었음.
+품질점수 `0.85`, PM debate `bull=0.88 / bear=0.16`으로 신호는 충분했지만 모든 주문이 `status=idle`.
+
+원인:
+- 최근 한국 paper closed rows 중 `closed_reason=stop_hit`이지만 실제 `pnl_pct=+0.01%`인 본전/소폭 플러스 청산 3건 존재.
+- `ExecutionAgent._is_stop_like_exit()`가 손익을 보지 않고 `closed_reason` 이름만으로 stop-like로 분류.
+- 그 결과 한국 desk가 `stop pressure high`로 오인되어 `new entries paused`가 반복됨.
+
+수정:
+- `app/agents/execution_agent.py`
+- `_is_stop_like_exit()`에서 `pnl_pct >= -0.05%`인 flat/positive exits는 stop pressure에서 제외.
+- 실제 음수 손절만 desk/symbol stop-pressure와 후보 패널티에 반영.
+
+검증:
+- `python -m compileall app/agents/execution_agent.py`
+- Unit smoke:
+  - `stop_hit +0.01%` → stop-like `False`
+  - `stop_hit -0.01%` → stop-like `False`
+  - `stop_hit -0.10%` → stop-like `True`
+
+## 0-prev. Latest Claude Notes - 2026-05-12 (session 28 — 6대 전략 확장)
 
 ### 커밋 bb9856d — Oracle VM 배포 완료
 

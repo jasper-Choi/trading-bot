@@ -120,9 +120,14 @@ class ExecutionAgent(BaseAgent):
     @staticmethod
     def _is_stop_like_exit(item: dict) -> bool:
         reason = str(item.get("closed_reason", "") or "")
+        pnl = float(item.get("pnl_pct", 0.0) or 0.0)
+        # Some Korea paper exits are tagged as stop_hit after a price refresh while
+        # ending flat/slightly positive. Do not let those poison desk stop-pressure.
+        if pnl >= -0.05:
+            return False
         if reason in STOP_LIKE_EXIT_REASONS:
             return True
-        return reason == "stale_exit" and float(item.get("pnl_pct", 0.0) or 0.0) <= -0.5
+        return reason == "stale_exit" and pnl <= -0.5
 
     def _desk_open_notional(self, desk: str) -> float:
         return round(
