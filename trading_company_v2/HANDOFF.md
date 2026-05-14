@@ -12,6 +12,9 @@
   - Root cause for high-priced stocks: KIS sizing used `LIVE_CAPITAL_KRW=2M`; `0.10x` budget was about 200k, sometimes below one share.
 
 ### Changes
+- `app/core/state_store.py`
+  - Retired `korea.pyramid` completely. The strategy produced 2 peak-zero stop losses and erased about `-1.07%` capital from opening-drive winners.
+  - Strategy health now marks `korea.pyramid` as `disabled_candidate`.
 - `app/services/broker_router.py`
   - KIS readiness now checks `KIS_CAPITAL_KRW`, not generic `LIVE_CAPITAL_KRW`.
 - `app/services/kis_broker.py`

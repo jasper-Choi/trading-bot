@@ -903,7 +903,9 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         bucket["peak0_pct"] = round(float(bucket["peak0_count"]) / count * 100, 1)
         bucket["stop_like_pct"] = round(float(bucket["stop_like_count"]) / count * 100, 1)
         bucket["avg_size"] = round(float(bucket.pop("_size_sum", 0.0)) / count, 4)
-        is_crypto_strategy = str(bucket["strategy_id"]).startswith("crypto.")
+        strategy_id = str(bucket["strategy_id"])
+        is_crypto_strategy = strategy_id.startswith("crypto.")
+        is_retired_strategy = strategy_id in {"korea.pyramid"}
         catastrophic_peak0 = (
             is_crypto_strategy
             and count >= 2
@@ -919,7 +921,7 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         )
         bucket["health"] = (
             "disabled_candidate"
-            if catastrophic_peak0 or repeated_stop_like
+            if is_retired_strategy or catastrophic_peak0 or repeated_stop_like
             else "disabled_candidate"
             # 최극단 케이스: 7건+ 이고 peak0 100% (단 한 번도 긍정적 모멘텀 없음) → 즉시 차단
             if count >= 7 and bucket["peak0_pct"] >= 100.0
@@ -1241,7 +1243,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     # ── 피라미딩 트리거 ──────────────────────────────────────
                     # 브레이크아웃/갭업 종목이 peak +3% 이상 도달 시 0.20x 추가 진입
                     _pyramid_ok = (
-                        not getattr(position, "is_pyramided", False)
+                        False
+                        and not getattr(position, "is_pyramided", False)
                         and "open_reversal" not in pos_focus
                         and "opening_drive" not in pos_focus
                         and "close_drive" not in pos_focus
