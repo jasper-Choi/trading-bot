@@ -482,6 +482,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 오픈 리버설: 갭다운 소진 → 반전 — 빠른 진입/빠른 이탈
         # target 3.0%, stop -0.8%, max 2h
         return 3.0, -0.8, 360
+    if desk == "korea" and ("opening_drive" in focus or action == "attack_opening_drive"):
+        # Opening drive is an intraday momentum trade, not a multi-day swing.
+        # Keep the stop tight and force quick proof of follow-through.
+        return 3.5, -1.0, 360
     if desk == "korea" and "close_drive" in focus:
         # 종가 추격: 오버나이트 홀딩 허용 — 더 넓은 stop, 더 긴 보유
         # target 3.0%, stop -1.5%, max ~30h (5400 cycles @ 20s)
@@ -2750,6 +2754,7 @@ def _derive_strategy_type(focus: str, action: str, desk: str) -> str:
     if "gap_fill" in f:        return "gap_fill"
     if "pullback_ma" in f:     return "pullback_ma"
     if "open_reversal" in f:   return "open_reversal"
+    if "opening_drive" in f:   return "opening_drive"
     if "close_drive" in f:     return "close_drive"
     if "dip_bounce" in f:      return "dip_bounce"
     if "emma_scalp" in f:      return "emma_scalp"

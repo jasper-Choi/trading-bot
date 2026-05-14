@@ -287,6 +287,10 @@ class ExecutionAgent(BaseAgent):
             focus = f"breakout: {name} ({symbol}) momentum breakout candidate"
             entry_profile = "breakout"
             strategy_id = "korea.breakout"
+        elif "opening drive" in base_focus or "attack_opening_drive" in str(mapped.get("entry_profile", "")).lower():
+            focus = f"opening_drive: {name} ({symbol}) opening drive follow-through"
+            entry_profile = "attack_opening_drive"
+            strategy_id = "korea.attack_opening_drive"
         else:
             focus = f"{name} ({symbol}) selective probe while confirmation improves"
             entry_profile = str(mapped.get("entry_profile", "") or "selective_probe")
@@ -1226,6 +1230,9 @@ class ExecutionAgent(BaseAgent):
             s = str(item).strip()
             if s and s not in all_candidates:
                 all_candidates.append(s)
+
+        if desk == "korea" and action == "attack_opening_drive" and len(all_candidates) > 1:
+            all_candidates = all_candidates[:1]
 
         candidate_meta = {
             str(item.get("market", "")).strip(): item

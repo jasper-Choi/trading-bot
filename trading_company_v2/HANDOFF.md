@@ -1,5 +1,31 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-14 (session 39 - Korea opening-drive guardrail)
+
+### Why this change was needed
+- Korea market opened and the desk generated `attack_opening_drive` paper entries.
+- The opening-drive plan could expand `candidate_symbols` into multiple simultaneous Korea orders.
+- One opened basket member had `peak_pnl_pct=0.0` and hit a large immediate loss, which violates the user rule: do not catch falling knives; enter only after short pressure flips long.
+
+### Changes
+- `app/services/recommendation_engine.py`
+  - Tightened opening-drive requirements:
+    - `quality_score >= 0.62`, `avg_signal >= 0.62`, `top_candidate_score >= 0.66`, `top_signal >= 0.62`.
+    - `top_burst` must be positive but not overextended (`0.35%..7.5%`).
+    - `top_gap <= 8.0%`.
+    - Requires `_stock_long_flip(..., 0.58)` and rejects `_stock_falling_knife()`.
+  - Opening-drive now emits only the top ticker in `candidate_symbols`.
+- `app/agents/execution_agent.py`
+  - Korea `attack_opening_drive` is forced to a single top candidate even if a plan carries multiple symbols.
+  - Candidate-specific focus/strategy attribution now labels opening-drive rows as `korea.attack_opening_drive`.
+- `app/core/state_store.py`
+  - Added explicit Korea opening-drive thresholds: target `+3.5%`, stop `-1.0%`, max hold about `2h`.
+  - Strategy type derivation now recognizes `opening_drive`.
+
+### Current rule
+- Korea opening drive is no longer a basket entry. It is a single-leader, long-flip-confirmed intraday trade.
+- If the leader is already overextended or has not flipped from short pressure to long pressure, the bot must wait.
+
 ## 0. Latest Codex Notes - 2026-05-14 (session 37 - Peak-zero loss streak quarantine)
 
 ### Why this change was needed

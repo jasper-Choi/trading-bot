@@ -2054,16 +2054,33 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             **_qmeta,
         }
 
-    if opening_window and active_gap_count >= 2 and quality_score >= 0.56 and avg_gap >= 1.8 and avg_volume >= 8000 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and top_signal_bias == "bullish" and top_signal >= 0.52 and stance != "DEFENSE":
+    if (
+        opening_window
+        and active_gap_count >= 2
+        and quality_score >= 0.62
+        and avg_gap >= 1.8
+        and avg_volume >= 8000
+        and avg_signal >= 0.62
+        and top_candidate_score >= 0.66
+        and top_signal_bias == "bullish"
+        and top_signal >= 0.62
+        and 0.35 <= top_burst <= 7.5
+        and top_gap <= 8.0
+        and gap_candidates
+        and _stock_long_flip(gap_candidates[0], 0.58)
+        and not _stock_falling_knife(gap_candidates[0])
+        and stance != "DEFENSE"
+    ):
         return {
             "action": "attack_opening_drive",
             "size": "0.65x" if stance == "BALANCED" else "0.85x",
             "focus": f"Opening drive follow-through on {top_name}.",
             "symbol": top_ticker,
-            "candidate_symbols": candidate_symbols,
+            "candidate_symbols": [top_ticker],
             "notes": [
                 f"active gaps {active_gap_count}",
-                f"quality {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                f"quality {quality_score:.2f} / top candidate {top_candidate_score:.2f} / top burst {top_burst:.2f}% / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                "Opening drive now requires short-to-long flip confirmation and single-leader execution.",
             ],
             **_qmeta,
         }
