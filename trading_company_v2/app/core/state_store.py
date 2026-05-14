@@ -1243,8 +1243,10 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     _pyramid_ok = (
                         not getattr(position, "is_pyramided", False)
                         and "open_reversal" not in pos_focus
+                        and "opening_drive" not in pos_focus
                         and "close_drive" not in pos_focus
                         and "pyramid" not in pos_focus
+                        and position.action != "attack_opening_drive"
                         and peak_pnl >= 3.0
                         and position.pnl_pct >= 2.0
                     )

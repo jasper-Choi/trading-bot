@@ -21,10 +21,12 @@
 - `app/core/state_store.py`
   - Added explicit Korea opening-drive thresholds: target `+3.5%`, stop `-1.0%`, max hold about `2h`.
   - Strategy type derivation now recognizes `opening_drive`.
+  - Disabled pyramid follow-on entries for opening-drive positions. The first leader trade may win, but late add-ons were giving back the profit.
 
 ### Current rule
 - Korea opening drive is no longer a basket entry. It is a single-leader, long-flip-confirmed intraday trade.
 - If the leader is already overextended or has not flipped from short pressure to long pressure, the bot must wait.
+- Opening-drive profit should be protected by trailing/exit logic, not by adding another late pyramid position.
 
 ## 0. Latest Codex Notes - 2026-05-14 (session 37 - Peak-zero loss streak quarantine)
 
