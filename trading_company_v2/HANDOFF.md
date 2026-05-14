@@ -20,6 +20,10 @@
     - recent same-symbol cooldown,
     - repeated-loss and symbol-edge calculations.
   - Korea desk now uses eligible current-strategy history for offense scoring instead of polluted daily totals.
+  - The same retired-trade filter also excludes disabled crypto strategies:
+    - `crypto.candidate_rotation`
+    - `crypto.ranging_momentum_leader`
+    - `crypto.ema_bounce`
 
 ### Verification
 - Replayed the exact problematic Korea set:

@@ -120,6 +120,9 @@ class ExecutionAgent(BaseAgent):
     })
 
     _RETIRED_STRATEGY_IDS: frozenset[str] = frozenset({
+        "crypto.candidate_rotation",
+        "crypto.ranging_momentum_leader",
+        "crypto.ema_bounce",
         "korea.pyramid",
     })
 
