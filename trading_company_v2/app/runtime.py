@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import threading
 import time
+import os
 from datetime import datetime
+from pathlib import Path
 
-from app.config import settings
+from app.config import DATA_DIR, settings
 from app.core.state_store import rapid_guard_crypto_positions
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
@@ -24,6 +26,34 @@ _tick_guard_lock = threading.Lock()
 _tick_guard_symbols: set[str] = set()
 _tick_guard_symbols_loaded_at = 0.0
 _tick_guard_last_by_symbol: dict[str, float] = {}
+_runtime_lock_handle = None
+
+
+def _acquire_runtime_singleton_lock() -> bool:
+    """Prevent stale/manual runtime processes from trading beside systemd."""
+    global _runtime_lock_handle
+    lock_path = Path(DATA_DIR) / "trading_runtime.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, OSError):
+        handle.close()
+        return False
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()))
+    handle.flush()
+    _runtime_lock_handle = handle
+    return True
 
 
 def _active_crypto_guard_symbols_cached() -> set[str]:
@@ -170,6 +200,9 @@ def _sleep_with_rapid_guards(interval_seconds: int) -> None:
 
 
 def run_company_loop() -> None:
+    if not _acquire_runtime_singleton_lock():
+        print("[runtime] another trading runtime is already active; exiting duplicate process")
+        return
     orchestrator = CompanyOrchestrator()
     if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
         reset_hot_path_metrics()
