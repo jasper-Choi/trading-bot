@@ -48,6 +48,7 @@ def place_order(order: PaperOrder) -> KisOrderResult:
 
     payload = _build_order_payload(order)
     if payload is None:
+        debug = _order_shape_debug(order)
         return KisOrderResult(
             ok=False,
             request_mode="paper_fallback",
@@ -56,6 +57,8 @@ def place_order(order: PaperOrder) -> KisOrderResult:
                 "symbol": order.symbol,
                 "action": order.action,
                 "reason": "unsupported_order_shape",
+                "message": debug.get("message", ""),
+                **debug,
             },
         )
 
@@ -102,7 +105,9 @@ def place_order(order: PaperOrder) -> KisOrderResult:
                 "symbol": order.symbol,
                 "action": order.action,
                 "reason": "request_exception",
-                "message": str(exc),
+                "message": _request_exception_message(exc),
+                "reference_price": order.reference_price,
+                "notional_pct": order.notional_pct,
             },
         )
     except RuntimeError as exc:
@@ -288,10 +293,16 @@ def _build_order_payload(order: PaperOrder) -> dict[str, str] | None:
         return None
     cano, product_code = _account_parts()
     if _is_buy_action(order.action):
-        if order.reference_price <= 0 or order.notional_pct <= 0:
+        reference_price = _order_reference_price(order)
+        notional_pct = _order_notional_pct(order)
+        if reference_price <= 0 or notional_pct <= 0:
             return None
-        live_budget_krw = float(settings.live_capital_krw or 0) * float(order.notional_pct or 0.0)
-        qty = math.floor(live_budget_krw / float(order.reference_price or 0.0)) if order.reference_price > 0 else 0
+        live_budget_krw = float(settings.kis_capital_krw or 0) * float(notional_pct or 0.0)
+        qty = math.floor(live_budget_krw / float(reference_price or 0.0)) if reference_price > 0 else 0
+        if qty <= 0 and live_budget_krw >= reference_price * 0.70:
+            # Domestic stocks have a one-share minimum. If the sizing budget is
+            # close to one share, round up so KIS can actually receive the order.
+            qty = 1
         if qty <= 0:
             return None
         return {
@@ -315,6 +326,77 @@ def _build_order_payload(order: PaperOrder) -> dict[str, str] | None:
             "ORD_UNPR": "0",
         }
     return None
+
+
+def _order_reference_price(order: PaperOrder) -> float:
+    try:
+        price = float(order.reference_price or 0.0)
+    except (TypeError, ValueError):
+        price = 0.0
+    if price > 0:
+        return price
+    if order.rationale and isinstance(order.rationale[0], dict):
+        try:
+            return float(order.rationale[0].get("reference_price", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
+def _order_notional_pct(order: PaperOrder) -> float:
+    try:
+        notional = float(order.notional_pct or 0.0)
+    except (TypeError, ValueError):
+        notional = 0.0
+    if notional > 0:
+        return notional
+    size = str(order.size or "").strip().lower().replace("x", "")
+    try:
+        notional = float(size)
+    except (TypeError, ValueError):
+        notional = 0.0
+    if notional > 0:
+        return notional
+    if order.rationale and isinstance(order.rationale[0], dict):
+        try:
+            return float(order.rationale[0].get("notional_pct", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+    return 0.0
+
+
+def _order_shape_debug(order: PaperOrder) -> dict[str, Any]:
+    reference_price = _order_reference_price(order)
+    notional_pct = _order_notional_pct(order)
+    budget = float(settings.kis_capital_krw or 0) * float(notional_pct or 0.0)
+    qty = math.floor(budget / reference_price) if reference_price > 0 else 0
+    if not str(order.symbol or "").strip():
+        message = "missing symbol"
+    elif reference_price <= 0:
+        message = "missing reference price"
+    elif notional_pct <= 0:
+        message = "missing notional percentage"
+    elif qty <= 0:
+        message = f"budget {budget:.0f} KRW is below one-share price {reference_price:.0f} KRW"
+    else:
+        message = "unsupported action or unavailable sell quantity"
+    return {
+        "message": message,
+        "reference_price": reference_price,
+        "notional_pct": notional_pct,
+        "kis_capital_krw": settings.kis_capital_krw,
+        "estimated_budget_krw": round(budget, 2),
+        "estimated_qty": qty,
+    }
+
+
+def _request_exception_message(exc: RequestException) -> str:
+    response = getattr(exc, "response", None)
+    if response is not None:
+        text = str(getattr(response, "text", "") or "")[:500]
+        if text:
+            return f"{exc}; body={text}"
+    return str(exc)
 
 
 def _get_available_stock_quantity(symbol: str) -> int:

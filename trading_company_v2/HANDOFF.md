@@ -1,5 +1,29 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-14 (session 40 - KIS routing and loss spike diagnosis)
+
+### Why this change was needed
+- User saw the day PnL suddenly move beyond `-1%` during a losing streak.
+- Oracle analysis showed the sudden drawdown came from `korea.pyramid` follow-on entries created before the opening-drive pyramid block:
+  - `korea.pyramid`: 2 trades, 0 wins, capital PnL about `-1.07%`.
+  - Opening-drive base trades were mixed; the late add-ons gave back the earlier winners.
+- KIS app did not show recent orders because broker routing fell back to paper:
+  - Several KIS attempts failed with `unsupported_order_shape`.
+  - Root cause for high-priced stocks: KIS sizing used `LIVE_CAPITAL_KRW=2M`; `0.10x` budget was about 200k, sometimes below one share.
+
+### Changes
+- `app/services/broker_router.py`
+  - KIS readiness now checks `KIS_CAPITAL_KRW`, not generic `LIVE_CAPITAL_KRW`.
+- `app/services/kis_broker.py`
+  - KIS order sizing now uses `KIS_CAPITAL_KRW`.
+  - Falls back to reference price and notional from order rationale when top-level fields are missing.
+  - Rounds up to one share only when the sizing budget is at least 70% of one share.
+  - `unsupported_order_shape` logs now include reference price, notional, KIS capital, estimated budget, estimated quantity, and a clear message.
+  - HTTP request failures now include the KIS response body excerpt for diagnosis.
+
+### Ops note
+- Set Oracle `.env` `KIS_CAPITAL_KRW=10000000` if the KIS mock account is intended to mirror the 10M paper/effective capital.
+
 ## 0. Latest Codex Notes - 2026-05-14 (session 39 - Korea opening-drive guardrail)
 
 ### Why this change was needed

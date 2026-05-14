@@ -29,7 +29,7 @@ def _kis_ready() -> bool:
         and settings.kis_app_secret
         and settings.kis_account_no
         and settings.kis_product_code
-        and settings.live_capital_krw > 0
+        and settings.kis_capital_krw > 0
     )
 
 
@@ -151,8 +151,8 @@ def _route_kis_mode(active_orders: list[PaperOrder], *, requested_mode: str, war
     if missing:
         warnings.append(f"KIS live requested but credentials are missing: {', '.join(missing)}; paper fallback applied")
         return _paper_fallback(requested_mode, active_orders, warnings)
-    if settings.live_capital_krw <= 0:
-        warnings.append("KIS live requested but LIVE_CAPITAL_KRW is not configured; paper fallback applied")
+    if settings.kis_capital_krw <= 0:
+        warnings.append("KIS live requested but KIS_CAPITAL_KRW is not configured; paper fallback applied")
         return _paper_fallback(requested_mode, active_orders, warnings)
     if not settings.kis_allow_live:
         warnings.append("KIS credentials are present, but KIS_ALLOW_LIVE is false; paper fallback applied")
