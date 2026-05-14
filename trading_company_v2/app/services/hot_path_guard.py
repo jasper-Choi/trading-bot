@@ -279,6 +279,10 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.64 and stream_score >= 0.68:
             return 0.03
         return 0.025
+    if entry_profile == "ranging_strength_follow":
+        if combined >= 0.76 and stream_score >= 0.68:
+            return 0.045
+        return 0.035
     if combined >= 0.86 and trend >= 0.82 and stream_score >= 0.76:
         return 0.12
     if combined >= 0.78 and stream_score >= 0.70:
@@ -485,6 +489,40 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and not _strategy_is_disabled("crypto.ranging_momentum_leader")
         ):
             item["entry_profile"] = "ranging_momentum_leader"
+            return True
+
+        _strength_stream = summarize_stream_momentum(symbol, max_age_seconds=5.0)
+        _strength_stream_fresh = bool(_strength_stream.get("stream_fresh", False))
+        _strength_stream_reversal = bool(_strength_stream.get("stream_reversal", False))
+        _strength_stream_score = float(_strength_stream.get("stream_score", 0.0))
+        _strength_ticks_15 = int(_strength_stream.get("stream_ticks_15s", 0) or 0)
+        _strength_move_5 = _float(_strength_stream.get("stream_move_5s_pct", 0.0))
+        _strength_move_15 = _float(_strength_stream.get("stream_move_15s_pct", 0.0))
+        _strength_move_60 = _float(_strength_stream.get("stream_move_60s_pct", 0.0))
+        _strength_buy_ratio = _float(_strength_stream.get("stream_buy_ratio_15s", 0.0))
+        _strength_recent = max(recent_change, burst_change, change_rate)
+        if (
+            combined >= 0.62
+            and chart_score >= 0.70
+            and trend_score >= 0.48
+            and _strength_recent >= 1.2
+            and orderbook_bid_ask >= 0.70
+            and micro_move_3 >= -0.10
+            and micro_vwap_gap <= 2.4
+            and signal_freshness >= 0.55
+            and rsi_value <= 82.0
+            and trend_extension_pct <= 3.2
+            and _strength_stream_fresh
+            and not _strength_stream_reversal
+            and _strength_ticks_15 >= 3
+            and _strength_stream_score >= 0.58
+            and _strength_move_5 >= 0.03
+            and 0.08 <= _strength_move_15 <= 0.55
+            and _strength_move_60 >= -0.05
+            and _strength_buy_ratio >= 0.55
+            and not _strategy_is_disabled("crypto.ranging_strength_follow")
+        ):
+            item["entry_profile"] = "ranging_strength_follow"
             return True
 
         # 나머지 모든 RANGING 전략 차단
@@ -2296,6 +2334,11 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             f"stream {stream_score:.2f}, move5 {move5_val:.2f}%, move15 {move15_val:.2f}%, "
             f"move60 {move60_val:.2f}%, buy {buy_ratio_val:.0%}, ticks15 {ticks15_val}."
         )
+    elif entry_path == "ranging_strength_follow":
+        order_focus = (
+            f"ranging_strength_follow: {symbol} hot tick entry - combined {combined:.2f}, "
+            f"stream {stream_score:.2f}, move15 {move15_val:.2f}%."
+        )
     elif entry_path == "range_breakout":
         range_high_val = _float(candidate.get("range_high_20", 0.0))
         order_focus = (
@@ -2475,6 +2518,16 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and move_60 >= 0.04
             and buy_ratio >= 0.64
             and move_5 >= move_15 * 0.22
+        )
+    elif entry_profile == "ranging_strength_follow":
+        ignition = (
+            stream_ok
+            and ticks_15 >= 3
+            and stream_score >= 0.58
+            and move_5 >= 0.03
+            and 0.08 <= move_15 <= 0.55
+            and move_60 >= -0.05
+            and buy_ratio >= 0.55
         )
     elif entry_profile == "range_impulse":
         ignition = (

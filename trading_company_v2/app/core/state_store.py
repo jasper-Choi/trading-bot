@@ -315,6 +315,8 @@ def infer_strategy_id(action: str = "", focus: str = "", meta: dict | None = Non
     text = f"{entry_profile} {action} {focus}".lower()
     if "range_scalp" in text:
         return "crypto.range_scalp"
+    if "ranging_strength_follow" in text:
+        return "crypto.ranging_strength_follow"
     if "range_breakout" in text:
         return "crypto.range_breakout"
     if "high_tight_flag" in text:
@@ -458,6 +460,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # Broad tape is flat, but the symbol is an individual momentum leader.
         # Use a reachable target and a tighter stop than normal trend mode.
         return 2.00, -0.70, 90
+    if desk == "crypto" and "ranging_strength_follow" in focus:
+        # Broad tape is flat, but a single symbol has flipped long with controlled strength.
+        # Keep target/stop tighter than trend mode until live expectancy is proven.
+        return 1.60, -0.55, 75
     if desk == "crypto" and "emma_scalp" in focus:
         # Emma-style scalp: Keltner + Supertrend + MACD confluence.
         # Keep it quick: small target, tight stop, short max hold.
@@ -2764,6 +2770,7 @@ def _derive_strategy_type(focus: str, action: str, desk: str) -> str:
     if "dip_bounce" in f:      return "dip_bounce"
     if "emma_scalp" in f:      return "emma_scalp"
     if "neo_micro_scalp" in f: return "neo_micro_scalp"
+    if "ranging_strength_follow" in f: return "ranging_strength_follow"
     if "ranging_momentum_leader" in f: return "ranging_momentum_leader"
     if "pyramid" in f:         return "pyramid"
     if "breakout" in f:        return "breakout"

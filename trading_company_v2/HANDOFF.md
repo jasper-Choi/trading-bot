@@ -1,5 +1,42 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-15 (session 42 - unblock controlled RANGING strength)
+
+### Why this change was needed
+- User reported that after the prior guardrail work, there appeared to be no new trades.
+- Oracle VM check showed the service was healthy and cycling every ~45s, but crypto stayed in `RANGING`.
+- The active crypto plan kept saying:
+  - `RANGING — trend-following blocked. Waiting for mean-reversion signal`.
+- This correctly blocked old failed RANGING trend-chase paths, but it also blocked individual coins that were already showing controlled strength, such as `KRW-HYPER score 0.75`.
+
+### Changes
+- Added a new, separate crypto strategy:
+  - `crypto.ranging_strength_follow`
+- This does **not** reactivate the retired `crypto.ranging_momentum_leader`.
+- It allows a small RANGING entry only when:
+  - combined/signal score is strong enough,
+  - long flip is confirmed,
+  - short/falling-knife pressure is absent,
+  - RSI is not extreme,
+  - price is not overextended from EMA/VWAP,
+  - micro/stream/orderbook or change-rate confirms controlled strength.
+- Added cycle-path support in `app/services/recommendation_engine.py`.
+- Added websocket hot-path support in `app/services/hot_path_guard.py`.
+- Added strategy attribution in:
+  - `app/agents/execution_agent.py`
+  - `app/core/state_store.py`
+- Added tighter position thresholds:
+  - target `+1.6%`
+  - stop `-0.55%`
+  - max hold about `10 min`
+
+### Verification
+- Replayed a HYPER-like RANGING payload:
+  - `signal=0.75`, `change=4%`, `RSI=80`, controlled EMA/VWAP deviation, long flip confirmed.
+- Result changed from `watchlist_only` to:
+  - `probe_longs 0.18x`
+  - `strategy_id=crypto.ranging_strength_follow`
+
 ## 0. Latest Codex Notes - 2026-05-14 (session 41 - retired strategy loss filter)
 
 ### Why this change was needed

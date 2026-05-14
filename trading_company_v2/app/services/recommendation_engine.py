@@ -425,6 +425,39 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 "reason": "individual momentum leader",
                 "note": f"leader signal={signal_score:.2f} trend={trend_follow_score:.2f} recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}% ob={orderbook_bid_ask:.2f}x / {transition_note}",
             })
+        strength_follow_ok = (
+            signal_score >= 0.70
+            and trend_follow_score >= 0.48
+            and blend_safe
+            and long_flip_confirmed
+            and (
+                stream_score >= 0.55
+                or micro_score >= 0.55
+                or orderbook_score >= 0.45
+                or range_breakout_long
+                or high_tight_flag_long
+                or change_rate >= 3.0
+            )
+            and micro_move_3 >= -0.10
+            and micro_vwap_gap <= 2.4
+            and orderbook_bid_ask >= 0.75
+            and -0.20 <= airborne_deviation_pct <= 2.2
+            and (rsi_value is None or float(rsi_value) <= 82.0)
+        )
+        if strength_follow_ok:
+            entry_size = "0.24x" if signal_score >= 0.76 and change_rate >= 3.0 else "0.18x"
+            ranging_blend.append({
+                "score": 58 + signal_score * 18 + min(max(change_rate, recent_change, burst_change), 6),
+                "profile": "ranging_strength_follow",
+                "strategy_id": "crypto.ranging_strength_follow",
+                "size": entry_size,
+                "reason": "individual strength follow",
+                "note": (
+                    f"strength_follow signal={signal_score:.2f} trend={trend_follow_score:.2f} "
+                    f"change={change_rate:.2f}% dev={airborne_deviation_pct:.2f}% "
+                    f"vwap={vwap_deviation_pct:.1f}% rsi={rsi_value} ob={orderbook_bid_ask:.2f}x / {transition_note}"
+                ),
+            })
         if ranging_blend:
             best = sorted(ranging_blend, key=lambda item: float(item["score"]), reverse=True)[0]
             notes = [
@@ -531,6 +564,49 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                     f"timing: ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% "
                     f"vwap_gap={micro_vwap_gap:.2f}% rsi={rsi_value} / {transition_note}",
                     "Broad market is RANGING, so size is reduced and trailing/stop are tighter.",
+                ],
+            }
+
+        local_strength_follow_ok = (
+            signal_score >= 0.70
+            and trend_follow_score >= 0.48
+            and orderbook_bid_ask >= 0.75
+            and micro_move_3 >= -0.10
+            and micro_vwap_gap <= 2.4
+            and -0.20 <= airborne_deviation_pct <= 2.2
+            and (rsi_value is None or float(rsi_value) <= 82.0)
+            and (
+                stream_score >= 0.55
+                or micro_score >= 0.55
+                or orderbook_score >= 0.45
+                or range_breakout_long
+                or high_tight_flag_long
+                or change_rate >= 3.0
+            )
+            and not rsi_bearish_divergence
+            and not hard_overheat
+            and not stream_reversal
+            and not choch_bearish_early
+            and not falling_knife_risk
+            and long_flip_confirmed
+            and stance != "DEFENSE"
+        )
+        if local_strength_follow_ok:
+            entry_size = "0.24x" if signal_score >= 0.76 and change_rate >= 3.0 else "0.18x"
+            return {
+                "action": "probe_longs",
+                "size": entry_size,
+                "focus": f"ranging_strength_follow: {lead_market or 'KRW-BTC'} individual strength in RANGING",
+                "symbol": lead_market,
+                "candidate_symbols": candidate_symbols,
+                "strategy_id": "crypto.ranging_strength_follow",
+                "entry_profile": "ranging_strength_follow",
+                "notes": reasons + [
+                    f"strength follow: signal={signal_score:.2f} trend={trend_follow_score:.2f} "
+                    f"change={change_rate:.2f}% dev={airborne_deviation_pct:.2f}% vwap={vwap_deviation_pct:.1f}% rsi={rsi_value}",
+                    f"timing: ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% "
+                    f"micro={micro_score:.2f} stream={stream_score:.2f} / {transition_note}",
+                    "RANGING broad tape is not enough to block a coin that already flipped long and is showing controlled strength.",
                 ],
             }
 
