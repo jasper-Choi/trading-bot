@@ -1,5 +1,39 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-15 (session 43 - smart money flow from user chart references)
+
+### Why this change was needed
+- User provided trader screenshots showing:
+  - MACD-like long/short entry waves,
+  - "capital inflow / smart money" zones,
+  - box/range breakout tracking,
+  - hand-drawn descending trendline/channel breakout projections.
+- The goal was to convert these visual chart-reading ideas into objective bot signals without adding another pure defensive gate.
+
+### Changes
+- Added `smart_money_flow` crypto strategy:
+  - `capital_flow_long`: MACD line above signal + histogram expansion + volume ratio + price/EMA confirmation.
+  - `auto_trendline_breakout_long`: automatic descending swing-high trendline projection and breakout detection.
+  - `flow_box_breakout_long`: box/range high breakout with volume-backed flow confirmation.
+  - `smart_money_flow_long`: capital flow plus at least one structural confirmation.
+- Propagated the new fields through:
+  - `app/services/signal_engine.py`
+  - `app/agents/crypto_desk_agent.py`
+  - `app/services/recommendation_engine.py`
+  - `app/services/hot_path_guard.py`
+- Added cycle-path and websocket hot-path entries for `crypto.smart_money_flow`.
+- Added strategy attribution and position thresholds:
+  - target `+2.4%`
+  - stop `-0.80%`
+  - max hold about `16 min`
+
+### Verification
+- `python -m compileall app` passed.
+- Replayed a RANGING payload with capital flow + auto trendline breakout:
+  - result: `probe_longs`
+  - `strategy_id=crypto.smart_money_flow`
+  - `entry_profile=smart_money_flow`
+
 ## 0. Latest Codex Notes - 2026-05-15 (session 42 - unblock controlled RANGING strength)
 
 ### Why this change was needed

@@ -124,6 +124,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     rsi_bullish_div = bool(payload.get("rsi_bullish_div", False))
     multi_ranging_combo = bool(payload.get("multi_ranging_combo", False))
     momentum_breakout_cont = bool(payload.get("momentum_breakout_cont", False))
+    capital_flow_long = bool(payload.get("capital_flow_long", False))
+    capital_flow_score = float(payload.get("capital_flow_score", 0.0) or 0.0)
+    capital_flow_volume_ratio = float(payload.get("capital_flow_volume_ratio", 0.0) or 0.0)
+    auto_trendline_breakout_long = bool(payload.get("auto_trendline_breakout_long", False))
+    trendline_break_price = float(payload.get("trendline_break_price", 0.0) or 0.0)
+    trendline_slope_pct = float(payload.get("trendline_slope_pct", 0.0) or 0.0)
+    flow_box_breakout_long = bool(payload.get("flow_box_breakout_long", False))
+    smart_money_flow_long = bool(payload.get("smart_money_flow_long", False))
     trend_follow_score = float(payload.get("trend_follow_score", 0.0) or 0.0)
     trend_alignment = str(payload.get("trend_alignment", "unknown") or "unknown")
     trend_entry_allowed = bool(payload.get("trend_entry_allowed", False))
@@ -424,6 +432,31 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 "size": size,
                 "reason": "individual momentum leader",
                 "note": f"leader signal={signal_score:.2f} trend={trend_follow_score:.2f} recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}% ob={orderbook_bid_ask:.2f}x / {transition_note}",
+            })
+        smart_money_ok = (
+            (smart_money_flow_long or (capital_flow_long and (auto_trendline_breakout_long or flow_box_breakout_long)))
+            and blend_safe
+            and long_flip_confirmed
+            and signal_score >= 0.58
+            and capital_flow_score >= 0.55
+            and orderbook_bid_ask >= 0.82
+            and micro_move_3 >= -0.10
+            and micro_vwap_gap <= 3.8
+            and (rsi_value is None or float(rsi_value) <= 82.0)
+        )
+        if smart_money_ok:
+            entry_size = "0.32x" if smart_money_flow_long and signal_score >= 0.68 else "0.24x"
+            ranging_blend.append({
+                "score": 66 + signal_score * 16 + capital_flow_score * 12 + (5 if auto_trendline_breakout_long else 0),
+                "profile": "smart_money_flow",
+                "strategy_id": "crypto.smart_money_flow",
+                "size": entry_size,
+                "reason": "capital flow + box/trendline break",
+                "note": (
+                    f"smart_money flow={capital_flow_score:.2f} vol={capital_flow_volume_ratio:.2f}x "
+                    f"trendline={auto_trendline_breakout_long} box={flow_box_breakout_long} "
+                    f"break={trendline_break_price:.4f} slope={trendline_slope_pct:.3f}% / {transition_note}"
+                ),
             })
         strength_follow_ok = (
             signal_score >= 0.70
@@ -948,8 +981,22 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and launch_confirmed
         and not rsi_bearish_divergence
     )
+    smart_money_flow_ok = (
+        (smart_money_flow_long or flow_box_breakout_long or (capital_flow_long and auto_trendline_breakout_long))
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and stance != "DEFENSE"
+        and not hard_overheat
+        and not rsi_bearish_divergence
+        and long_flip_confirmed
+        and signal_score >= 0.58
+        and capital_flow_score >= 0.55
+        and orderbook_bid_ask >= 0.82
+        and micro_move_3 >= -0.10
+        and micro_vwap_gap <= 3.8
+        and (rsi_value is None or float(rsi_value) <= 82.0)
+    )
     # Volume gate: pullback/trend paths bypass only after launch confirmation.
-    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and not trend_pullback_ok and not combined_score_ok and stance != "DEFENSE":
+    if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and not trend_pullback_ok and not combined_score_ok and not smart_money_flow_ok and stance != "DEFENSE":
         return {
             "action": "watchlist_only",
             "size": "0.00x",
@@ -959,6 +1006,26 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [
                 f"volume gate: 15m vol {vol_ratio:.1f}x / 1m vol {micro_vol_ratio:.1f}x — need 1.4x/1.5x",
                 ignition_note, support_note,
+            ],
+        }
+
+    if smart_money_flow_ok:
+        entry_size = "0.58x" if smart_money_flow_long and signal_score >= 0.68 else "0.44x"
+        if soft_overheat:
+            entry_size = "0.28x"
+        return {
+            "action": "probe_longs",
+            "size": entry_size,
+            "focus": f"smart_money_flow: {lead_market or 'KRW-BTC'} capital flow + trendline/box break.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "strategy_id": "crypto.smart_money_flow",
+            "entry_profile": "smart_money_flow",
+            "notes": reasons + [
+                f"capital_flow={capital_flow_score:.2f} vol={capital_flow_volume_ratio:.2f}x "
+                f"trendline={auto_trendline_breakout_long} box={flow_box_breakout_long}",
+                f"break_price={trendline_break_price:.4f} slope={trendline_slope_pct:.3f}% / {transition_note}",
+                ignition_note,
             ],
         }
 

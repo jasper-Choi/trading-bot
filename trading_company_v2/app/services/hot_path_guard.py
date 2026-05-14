@@ -283,6 +283,10 @@ def _hot_entry_size(candidate: dict[str, Any], stream: dict[str, Any]) -> float:
         if combined >= 0.76 and stream_score >= 0.68:
             return 0.045
         return 0.035
+    if entry_profile == "smart_money_flow":
+        if combined >= 0.70 and stream_score >= 0.66:
+            return 0.050
+        return 0.038
     if combined >= 0.86 and trend >= 0.82 and stream_score >= 0.76:
         return 0.12
     if combined >= 0.78 and stream_score >= 0.70:
@@ -501,6 +505,38 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         _strength_move_60 = _float(_strength_stream.get("stream_move_60s_pct", 0.0))
         _strength_buy_ratio = _float(_strength_stream.get("stream_buy_ratio_15s", 0.0))
         _strength_recent = max(recent_change, burst_change, change_rate)
+        _smart_money_signal = (
+            bool(item.get("smart_money_flow_long", False))
+            or (
+                bool(item.get("capital_flow_long", False))
+                and (
+                    bool(item.get("auto_trendline_breakout_long", False))
+                    or bool(item.get("flow_box_breakout_long", False))
+                )
+            )
+        )
+        if (
+            _smart_money_signal
+            and combined >= 0.58
+            and _float(item.get("capital_flow_score", 0.0)) >= 0.55
+            and orderbook_bid_ask >= 0.78
+            and micro_move_3 >= -0.10
+            and micro_vwap_gap <= 3.8
+            and signal_freshness >= 0.55
+            and rsi_value <= 82.0
+            and trend_extension_pct <= 4.2
+            and _strength_stream_fresh
+            and not _strength_stream_reversal
+            and _strength_ticks_15 >= 3
+            and _strength_stream_score >= 0.58
+            and _strength_move_5 >= 0.03
+            and 0.08 <= _strength_move_15 <= 0.70
+            and _strength_move_60 >= -0.05
+            and _strength_buy_ratio >= 0.55
+            and not _strategy_is_disabled("crypto.smart_money_flow")
+        ):
+            item["entry_profile"] = "smart_money_flow"
+            return True
         if (
             combined >= 0.62
             and chart_score >= 0.70
@@ -2339,6 +2375,16 @@ def _open_hot_entry(symbol: str, price: float, candidate: dict[str, Any], stream
             f"ranging_strength_follow: {symbol} hot tick entry - combined {combined:.2f}, "
             f"stream {stream_score:.2f}, move15 {move15_val:.2f}%."
         )
+    elif entry_path == "smart_money_flow":
+        flow_score = _float(candidate.get("capital_flow_score", 0.0))
+        flow_vol = _float(candidate.get("capital_flow_volume_ratio", 0.0))
+        trendline_ok = bool(candidate.get("auto_trendline_breakout_long", False))
+        box_ok = bool(candidate.get("flow_box_breakout_long", False))
+        order_focus = (
+            f"smart_money_flow: {symbol} hot tick entry - flow {flow_score:.2f}, "
+            f"vol {flow_vol:.2f}x, trendline {trendline_ok}, box {box_ok}, "
+            f"stream {stream_score:.2f}, move15 {move15_val:.2f}%."
+        )
     elif entry_path == "range_breakout":
         range_high_val = _float(candidate.get("range_high_20", 0.0))
         order_focus = (
@@ -2528,6 +2574,16 @@ def hot_process_crypto_tick(symbol: str, price: float) -> dict[str, Any]:
             and 0.08 <= move_15 <= 0.55
             and move_60 >= -0.05
             and buy_ratio >= 0.55
+        )
+    elif entry_profile == "smart_money_flow":
+        ignition = (
+            stream_ok
+            and ticks_15 >= 3
+            and stream_score >= 0.60
+            and move_5 >= 0.04
+            and 0.10 <= move_15 <= 0.75
+            and move_60 >= -0.05
+            and buy_ratio >= 0.56
         )
     elif entry_profile == "range_impulse":
         ignition = (

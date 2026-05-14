@@ -1830,6 +1830,90 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
     # --- Range Scalp 종합 적격 판정 ---
     # 조건: 에어본 롱 신호 + RSI 과매도 구간 + 하락 구조 아님 + 낙폭 과다 아님
     # RANGING 시장에서 사용하는 평균회귀 전략
+    # --- Smart Money Flow / Auto Trendline Breakout ---
+    # Model the reference screenshots as capital-flow wave + box/trendline break.
+    _cap_vol_ratio = volume_climax_ratio
+    _hist_rising = (
+        _hist_prev is not None and _hist_prev2 is not None
+        and _hist_curr > _hist_prev > _hist_prev2
+    )
+    _macd_flow_positive = (
+        _macd_curr is not None and _sig_curr is not None
+        and _macd_curr > _sig_curr
+        and (_hist_curr > 0 or _hist_rising)
+    )
+    _flow_price_ok = (
+        (last_close >= ema10[-1]) if ema10[-1] else True
+    ) or ((ema10[-1] > ema30[-1]) if ema10[-1] and ema30[-1] else False)
+    capital_flow_score = min(
+        1.0,
+        (0.30 if _macd_flow_positive else 0.0)
+        + (0.20 if _hist_rising else 0.0)
+        + min(max((_cap_vol_ratio - 1.0) / 2.0, 0.0), 0.25)
+        + (0.15 if _flow_price_ok else 0.0)
+        + (0.10 if range_breakout_long or high_tight_flag_long else 0.0),
+    )
+    capital_flow_long = (
+        capital_flow_score >= 0.55
+        and _cap_vol_ratio >= 1.20
+        and last_rsi is not None and 45.0 <= last_rsi <= 82.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+
+    _swing_highs: list[tuple[int, float]] = []
+    if len(highs) >= 18:
+        _start = max(2, len(highs) - 55)
+        _end = len(highs) - 2
+        for _idx in range(_start, _end):
+            _left = highs[_idx - 2:_idx]
+            _right = highs[_idx + 1:_idx + 3]
+            if _left and _right and highs[_idx] >= max([*_left, *_right]):
+                _swing_highs.append((_idx, highs[_idx]))
+    trendline_break_price = 0.0
+    trendline_slope_pct = 0.0
+    auto_trendline_breakout_long = False
+    if len(_swing_highs) >= 2:
+        _h1_idx, _h1 = _swing_highs[-2]
+        _h2_idx, _h2 = _swing_highs[-1]
+        if _h2_idx > _h1_idx and _h2 < _h1:
+            _slope = (_h2 - _h1) / max((_h2_idx - _h1_idx), 1)
+            _project_now = _h2 + _slope * ((len(closes) - 1) - _h2_idx)
+            _project_prev = _h2 + _slope * ((len(closes) - 2) - _h2_idx)
+            trendline_break_price = _project_now
+            trendline_slope_pct = (_slope / max(_h2, 1e-9)) * 100
+            auto_trendline_breakout_long = (
+                _slope < 0
+                and _project_now > 0
+                and closes[-1] >= _project_now * 1.001
+                and closes[-2] <= _project_prev * 1.010
+                and (_cap_vol_ratio >= 1.05 or _hist_rising or _macd_flow_positive)
+                and last_rsi is not None and last_rsi <= 82.0
+                and trend_alignment not in {"downtrend", "late_extension"}
+                and not choch_bearish
+                and not bool(bk.get("rsi_bearish_divergence", False))
+            )
+
+    flow_box_breakout_long = (
+        (range_breakout_long or (last_close >= _range_high_20 * 1.001 if _range_high_20 > 0 else False))
+        and 0.8 <= range_width_pct <= 9.0
+        and (_cap_vol_ratio >= 1.30 or capital_flow_long)
+        and last_rsi is not None and 50.0 <= last_rsi <= 82.0
+        and trend_alignment not in {"downtrend", "late_extension"}
+        and not choch_bearish
+        and not bool(bk.get("rsi_bearish_divergence", False))
+    )
+    smart_money_flow_long = (
+        capital_flow_long
+        and (
+            auto_trendline_breakout_long
+            or flow_box_breakout_long
+            or range_breakout_long
+            or high_tight_flag_long
+        )
+    )
+
     rsi_oversold_range = last_rsi is not None and last_rsi <= 48.0
     rsi_not_crashed = last_rsi is not None and last_rsi >= 22.0  # 완전 붕괴는 제외
     slope_flat = abs(float(trend.get("trend_slope_pct", 0.0) or 0.0)) < 0.60
@@ -1978,6 +2062,14 @@ def summarize_crypto_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "rsi_bullish_div": rsi_bullish_div,
         "multi_ranging_combo": multi_ranging_combo,
         "momentum_breakout_cont": momentum_breakout_cont,
+        "capital_flow_long": capital_flow_long,
+        "capital_flow_score": round(capital_flow_score, 3),
+        "capital_flow_volume_ratio": round(_cap_vol_ratio, 2),
+        "auto_trendline_breakout_long": auto_trendline_breakout_long,
+        "trendline_break_price": round(trendline_break_price, 8),
+        "trendline_slope_pct": round(trendline_slope_pct, 4),
+        "flow_box_breakout_long": flow_box_breakout_long,
+        "smart_money_flow_long": smart_money_flow_long,
     }
 
 

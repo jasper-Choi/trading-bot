@@ -315,6 +315,8 @@ def infer_strategy_id(action: str = "", focus: str = "", meta: dict | None = Non
     text = f"{entry_profile} {action} {focus}".lower()
     if "range_scalp" in text:
         return "crypto.range_scalp"
+    if "smart_money_flow" in text:
+        return "crypto.smart_money_flow"
     if "ranging_strength_follow" in text:
         return "crypto.ranging_strength_follow"
     if "range_breakout" in text:
@@ -464,6 +466,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # Broad tape is flat, but a single symbol has flipped long with controlled strength.
         # Keep target/stop tighter than trend mode until live expectancy is proven.
         return 1.60, -0.55, 75
+    if desk == "crypto" and "smart_money_flow" in focus:
+        # Capital-flow + trendline/box breakout: let winners breathe more than
+        # range scalps, but cap downside until live expectancy is proven.
+        return 2.40, -0.80, 120
     if desk == "crypto" and "emma_scalp" in focus:
         # Emma-style scalp: Keltner + Supertrend + MACD confluence.
         # Keep it quick: small target, tight stop, short max hold.
@@ -2770,6 +2776,7 @@ def _derive_strategy_type(focus: str, action: str, desk: str) -> str:
     if "dip_bounce" in f:      return "dip_bounce"
     if "emma_scalp" in f:      return "emma_scalp"
     if "neo_micro_scalp" in f: return "neo_micro_scalp"
+    if "smart_money_flow" in f: return "smart_money_flow"
     if "ranging_strength_follow" in f: return "ranging_strength_follow"
     if "ranging_momentum_leader" in f: return "ranging_momentum_leader"
     if "pyramid" in f:         return "pyramid"
