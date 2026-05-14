@@ -113,7 +113,23 @@ class ExecutionAgent(BaseAgent):
         # 2026-05-14: quarantined after live paper peak=0 loss streak.
         "crypto.ranging_momentum_leader",
         "crypto.ema_bounce",
+        # 2026-05-14: Korea pyramid add-ons created outsized losses after the
+        # base opening-drive entries were already valid. Keep the strategy off
+        # and do not let its retired trades poison current entry quality.
+        "korea.pyramid",
     })
+
+    _RETIRED_STRATEGY_IDS: frozenset[str] = frozenset({
+        "korea.pyramid",
+    })
+
+    def _is_retired_strategy_trade(self, item: dict) -> bool:
+        strategy_id = str(item.get("strategy_id", "") or "")
+        entry_profile = str(item.get("entry_profile", "") or "").lower()
+        focus = str(item.get("focus", "") or "").lower()
+        if strategy_id in self._RETIRED_STRATEGY_IDS:
+            return True
+        return item.get("desk") == "korea" and ("pyramid" in entry_profile or "pyramid:" in focus)
 
     def _strategy_disabled(self, strategy_id: str) -> dict | None:
         if strategy_id in self._PERMANENTLY_DISABLED:
@@ -314,7 +330,7 @@ class ExecutionAgent(BaseAgent):
     def _recent_loss_cooldown(self, desk: str, symbol: str) -> bool:
         if not symbol:
             return False
-        recent = self.closed_positions[:4]
+        recent = [item for item in self.closed_positions if not self._is_retired_strategy_trade(item)][:4]
         for item in recent:
             if item.get("desk") != desk or item.get("symbol") != symbol:
                 continue
@@ -328,7 +344,14 @@ class ExecutionAgent(BaseAgent):
         return False
 
     def _desk_recent_trades(self, desk: str, limit: int = 6) -> list[dict]:
-        return [item for item in self.closed_positions[:limit] if item.get("desk") == desk]
+        recent: list[dict] = []
+        for item in self.closed_positions:
+            if item.get("desk") != desk or self._is_retired_strategy_trade(item):
+                continue
+            recent.append(item)
+            if len(recent) >= limit:
+                break
+        return recent
 
     def _desk_recovery_ready(self, desk: str) -> bool:
         recent = self._desk_recent_trades(desk, limit=4)
@@ -348,7 +371,8 @@ class ExecutionAgent(BaseAgent):
             return False
         losses = 0
         pnl_total = 0.0
-        for item in self.closed_positions[:8]:
+        recent = [item for item in self.closed_positions if not self._is_retired_strategy_trade(item)]
+        for item in recent[:8]:
             if item.get("desk") != desk or item.get("symbol") != symbol:
                 continue
             pnl = float(item.get("pnl_pct", 0.0) or 0.0)
@@ -367,7 +391,7 @@ class ExecutionAgent(BaseAgent):
         recent = [
             item
             for item in self.closed_positions[:12]
-            if item.get("desk") == desk and item.get("symbol") == symbol
+            if item.get("desk") == desk and item.get("symbol") == symbol and not self._is_retired_strategy_trade(item)
         ]
         if len(recent) < 3:
             return False
@@ -434,6 +458,16 @@ class ExecutionAgent(BaseAgent):
         closed_positions = int(desk_stats.get("closed_positions", 0) or 0)
         open_notional = float(desk_stats.get("open_notional_pct", 0.0) or 0.0)
 
+        eligible_recent = self._desk_recent_trades(desk, limit=12)
+        if eligible_recent:
+            closed_positions = len(eligible_recent)
+            wins = sum(1 for item in eligible_recent if float(item.get("pnl_pct", 0.0) or 0.0) > 0)
+            realized = sum(
+                float(item.get("capital_pnl_pct", item.get("pnl_pct", 0.0)) or 0.0)
+                for item in eligible_recent
+            )
+            win_rate = (wins / closed_positions) * 100.0 if closed_positions else 0.0
+
         # No history → fresh start, allow entries at base size
         if closed_positions == 0:
             score = round(50.0 + (desk_multiplier - 1.0) * 50.0, 1)
@@ -478,7 +512,7 @@ class ExecutionAgent(BaseAgent):
         recent = [
             item
             for item in self.closed_positions[:8]
-            if item.get("desk") == desk and item.get("symbol") == symbol
+            if item.get("desk") == desk and item.get("symbol") == symbol and not self._is_retired_strategy_trade(item)
         ]
         if len(recent) < 2:
             return "none"
@@ -501,7 +535,7 @@ class ExecutionAgent(BaseAgent):
         symbol_history = [
             item
             for item in self.closed_positions[:12]
-            if item.get("desk") == desk and item.get("symbol") == symbol
+            if item.get("desk") == desk and item.get("symbol") == symbol and not self._is_retired_strategy_trade(item)
         ]
         if not symbol_history:
             return (0.0, "fresh candidate")
@@ -537,7 +571,7 @@ class ExecutionAgent(BaseAgent):
         symbol_history = [
             item
             for item in self.closed_positions[:14]
-            if item.get("desk") == desk and item.get("symbol") == symbol
+            if item.get("desk") == desk and item.get("symbol") == symbol and not self._is_retired_strategy_trade(item)
         ]
         if not symbol_history:
             return {"score": 0.0, "tone": "neutral", "size_multiplier": 1.0, "entry_allowed": True}

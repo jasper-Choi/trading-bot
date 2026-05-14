@@ -1,5 +1,37 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-14 (session 41 - retired strategy loss filter)
+
+### Why this change was needed
+- User asked whether the bot is now blocking entries too much.
+- Oracle analysis showed the answer was partly yes:
+  - New entries were allowed globally, but Korea desk entries were still being paused by `desk loss pressure`.
+  - The pressure came mostly from retired `korea.pyramid` follow-on losses, not from the currently allowed opening-drive/base strategies.
+- This made the system treat a removed bad strategy as if the current strategy stack was still failing.
+
+### Changes
+- `app/agents/execution_agent.py`
+  - Added `korea.pyramid` to the permanently disabled strategy list.
+  - Added retired-strategy filtering for:
+    - desk recent trades,
+    - desk loss pressure,
+    - desk stop pressure,
+    - desk offense score,
+    - recent same-symbol cooldown,
+    - repeated-loss and symbol-edge calculations.
+  - Korea desk now uses eligible current-strategy history for offense scoring instead of polluted daily totals.
+
+### Verification
+- Replayed the exact problematic Korea set:
+  - `032500` base win, `218410` base win, `141080` base stop,
+  - plus retired `032500/218410 korea.pyramid` losses.
+- After filtering:
+  - `loss_pressure=False`
+  - `offense=balanced`
+  - `032500/218410 cooldown=False`
+  - `141080 cooldown=True`
+- Result: broad Korea entry freeze is lifted, while the actually failed symbol still remains protected.
+
 ## 0. Latest Codex Notes - 2026-05-14 (session 40 - KIS routing and loss spike diagnosis)
 
 ### Why this change was needed
