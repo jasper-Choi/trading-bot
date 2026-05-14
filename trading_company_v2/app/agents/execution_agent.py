@@ -1231,7 +1231,8 @@ class ExecutionAgent(BaseAgent):
             if s and s not in all_candidates:
                 all_candidates.append(s)
 
-        if desk == "korea" and action == "attack_opening_drive" and len(all_candidates) > 1:
+        opening_drive_focus = desk == "korea" and "opening drive" in str(plan.get("focus", "") or "").lower()
+        if desk == "korea" and (action == "attack_opening_drive" or opening_drive_focus) and len(all_candidates) > 1:
             all_candidates = all_candidates[:1]
 
         candidate_meta = {

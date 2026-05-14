@@ -17,6 +17,7 @@
   - Opening-drive now emits only the top ticker in `candidate_symbols`.
 - `app/agents/execution_agent.py`
   - Korea `attack_opening_drive` is forced to a single top candidate even if a plan carries multiple symbols.
+  - Korea plans whose focus is opening-drive are also forced to a single top candidate even if risk logic later downgrades action to `selective_probe`.
   - Candidate-specific focus/strategy attribution now labels opening-drive rows as `korea.attack_opening_drive`.
 - `app/core/state_store.py`
   - Added explicit Korea opening-drive thresholds: target `+3.5%`, stop `-1.0%`, max hold about `2h`.
