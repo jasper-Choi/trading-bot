@@ -68,6 +68,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     vol_contracted_on_pullback = bool(payload.get("vol_contracted_on_pullback", False))
     # 에어본 / range scalp 필드
     airborne_long = bool(payload.get("airborne_long", False))
+    airborne_short = bool(payload.get("airborne_short", False))   # 가격이 EMA 위로 과이격 = 숏 신호 (롱 블록)
     airborne_score = float(payload.get("airborne_score", 0.0) or 0.0)
     airborne_deviation_pct = float(payload.get("airborne_deviation_pct", 0.0) or 0.0)
     airborne_deviation_sigma = float(payload.get("airborne_deviation_sigma", 0.0) or 0.0)
@@ -168,8 +169,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             + min(max(stream_score, 0.0), 1.0) * 0.06
             + (0.04 if ema_stack_bullish else 0.0)          # EMA 정배열 보너스
             + min(max(breakout_score, 0.0), 1.0) * 0.05    # 돌파 품질 점수
-            + (0.03 if rsi_reset_confirmed else 0.0)        # RSI 눌림 후 재점화 보너스
+            + (0.03 if rsi_reset_confirmed else 0.0)         # RSI 눌림 후 재점화 보너스
             + (0.02 if price_above_trend_ema else -0.03)    # EMA21 위: +0.02 / 아래: -0.03
+            + max(0.0, (bb_pct_b - 0.5)) * 0.04            # BB 밴드 중앙~상단 위치: 최대 +0.02 (0.5→1.0 선형)
+
         ),
         3,
     )
@@ -196,12 +199,15 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # 김치프리미엄 역프리미엄(-2% 이하) 시 ignition threshold 소폭 상향 (국내 수요 약함)
     _ignition_threshold = 0.56 if not kimchi_warn else 0.62
     ignition_ready = trend_ignition_score >= _ignition_threshold and flow_support and trend_entry_allowed
+    _kz_label = f" [킬존:{kill_zone_name}]" if kill_zone_name else ""
     ignition_note = (
         f"trend_ignition={trend_ignition_score:.2f} / chart={trend_follow_score:.2f} {trend_alignment} "
         f"/ micro={micro_score:.2f} "
         f"/ flow={orderbook_score:.2f} ({orderbook_bid_ask:.2f}x) / stream={stream_score:.2f} "
-        f"({stream_move_15:.2f}%/15s) / breakout={breakout_count}/4"
+        f"({stream_move_15:.2f}%/15s) / breakout={breakout_count}/4 score={breakout_score:.2f}"
+        f" / ema_stack={ema_stack_bullish} bb_pct_b={bb_pct_b:.2f} adx={adx_val:.0f}"
         f" / kimchi={kimchi_premium_pct:+.1f}%{'↑' if kimchi_boost else '↓' if kimchi_warn else ''}"
+        f"{_kz_label}"
     )
     trend_note = (
         f"chart trend gate: {trend_alignment} score={trend_follow_score:.2f} "
@@ -278,8 +284,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         or rsi_bearish_divergence
         or choch_bearish_early
         or bos_bearish_early
-        or bsl_sweep_confirmed   # BSL 스윕 = 고점 유동성 소화 후 하락 가능성 → 롱 압력 약화
-        or (at_bb_upper and not ema_stack_bullish)  # BB 상단 + EMA 정배열 없으면 저항권 → 약화
+        or bsl_sweep_confirmed               # BSL 스윕 = 고점 유동성 소화 후 하락 가능성
+        or (at_bb_upper and not ema_stack_bullish)  # BB 상단 + EMA 정배열 없으면 저항권
+        or airborne_short                    # EMA 위로 과이격 = 평균회귀 하락 압력
     )
     long_flip_confirmed = (
         (
@@ -852,7 +859,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
         airborne_note = (
             f"airborne dev={airborne_deviation_pct:.2f}% sigma={airborne_deviation_sigma:.1f}x "
-            f"score={airborne_score:.2f} bb_lower={at_bb_lower}"
+            f"score={airborne_score:.2f} bb_lower={at_bb_lower} bb_pct_b={bb_pct_b:.2f}"
         )
         ranging_signal_note = (
             f"ranging signals({mean_rev_count}/15): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
@@ -861,15 +868,17 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             f"vol_climax={sig_vol_climax}({volume_climax_ratio:.1f}x) support_reclaim={sig_support_reclaim} "
             f"wr={sig_williams_r}({williams_r_val:.0f}) cci={sig_cci}({cci_val:.0f}) "
             f"keltner={sig_keltner} mfi={sig_mfi}({mfi_val:.0f}) "
-            f"세력신호(div)={sig_rsi_div} "
+            f"세력신호(div)={sig_rsi_div} bb_pct_b={bb_pct_b:.2f} airborne_short={airborne_short} "
             f"local_breakout={range_breakout_long} high_tight={high_tight_flag_long}"
         )
 
         if range_scalp_ok:
-            # 신호 수 + 신호 강도에 따른 사이즈 결정
-            if mean_rev_count >= 3 or (mean_rev_count >= 2 and (at_bb_lower or airborne_deviation_sigma >= 2.0)):
+            # 신호 수 + BB 밴드 위치 + 신호 강도에 따른 사이즈 결정
+            # bb_pct_b < 0.25 = 하단 25% 이내 = 최상의 평균회귀 진입 구간 → 사이즈 확대
+            _deep_bb_lower = bb_pct_b < 0.25
+            if mean_rev_count >= 3 or (mean_rev_count >= 2 and (at_bb_lower or _deep_bb_lower or airborne_deviation_sigma >= 2.0)):
                 entry_size = "0.55x"
-            elif mean_rev_count >= 2 or (airborne_deviation_sigma >= 1.5 and sig_airborne):
+            elif mean_rev_count >= 2 or (airborne_deviation_sigma >= 1.5 and sig_airborne) or _deep_bb_lower:
                 entry_size = "0.45x"
             else:
                 entry_size = "0.35x"
@@ -1080,6 +1089,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     price_in_bull_fvg = bool(payload.get("price_in_bull_fvg", False))
     ict_bullish_count = int(payload.get("ict_bullish_count", 0) or 0)
     ict_structure = str(payload.get("ict_structure", "undecided") or "undecided")
+    kill_zone_name = payload.get("kill_zone_name")  # "london" / "ny" / None — 킬존 이름 로깅용
 
     # ICT CHoCH bearish: 추세 반전 하락 — 신규 진입 차단
     if choch_bearish and signal_score < 0.58:

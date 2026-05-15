@@ -334,6 +334,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     at_bb_upper = bool(item.get("at_bb_upper", False))
     price_above_trend_ema = bool(item.get("price_above_trend_ema", True))  # 기본값 True (캐시 미스 시 차단 방지)
     rsi_reset_confirmed = bool(item.get("rsi_reset_confirmed", False))
+    airborne_short = bool(item.get("airborne_short", False))  # EMA 위로 과이격 = 평균회귀 하락 압력
 
     # BSL 스윕(고점 유동성 소화 후 하락) + combined < 0.72 → 롱 진입 전체 차단
     if bsl_sweep_confirmed and combined < 0.72:
@@ -345,6 +346,10 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
 
     # EMA21 아래에서 combined < 0.68 → 기본 상승 구조 미충족 차단
     if not price_above_trend_ema and combined < 0.68:
+        return False
+
+    # EMA 위로 과이격(airborne_short) + combined < 0.74 → 과열 평균회귀 위험 차단
+    if airborne_short and combined < 0.74:
         return False
 
     # ── RANGING regime: block all trend-following, only range_scalp allowed ──
