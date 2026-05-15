@@ -1107,6 +1107,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + [f"ict_structure: {ict_structure} / signal {signal_score:.2f}"],
         }
 
+    # ICT bearish_break 구조: 하락 추세 브레이크 — 신호 약하면 신규 진입 차단
+    if ict_structure == "bearish_break" and signal_score < 0.65:
+        return {
+            "action": "capital_preservation",
+            "size": "0.00x",
+            "focus": "ICT bearish structure break — market in downtrend. Waiting for reclaim.",
+            "symbol": lead_market,
+            "candidate_symbols": candidate_symbols,
+            "notes": reasons + [
+                f"ict_structure: {ict_structure} / signal {signal_score:.2f} — bearish_break 구조에서 signal 0.65 미만 차단",
+            ],
+        }
+
     # ICT 컨플루언스 진입: breakout_partial 없어도 ICT 3개 이상이면 허용
     # ict_score >= 0.08: 킬존 진입 이상의 컨플루언스 (SSL스윕+킬존+FVG 중 일부 활성)
     ict_entry_ok = (

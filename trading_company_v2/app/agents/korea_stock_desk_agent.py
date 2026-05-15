@@ -130,9 +130,15 @@ class KoreaStockDeskAgent(BaseAgent):
             last_volume = float(candles[-1].get("volume") or 0.0)
             last_close = float(candles[-1].get("close") or 0.0)
             rsi_value = bk.get("last_rsi")
+            _b_burst = float(signal.get("burst_change_pct", 0.0) or 0.0)
+            _b_ema_gap = float(signal.get("ema_gap_pct", 0.0) or 0.0)
             overheat_penalty = 0.0
             if rsi_value is not None and float(rsi_value) >= 78.0:
                 overheat_penalty += 0.12
+            if _b_burst >= 12.0:               # Path A와 동일한 급등 과열 체크
+                overheat_penalty += 0.08
+            if _b_ema_gap >= 12.0:             # EMA 이격 과열 체크 (Path B/F 누락 버그 수정)
+                overheat_penalty += 0.06
 
             # ── Path B: 브레이크아웃 후보 ───────────────────────────────────
             if confirmed_count >= 2:
