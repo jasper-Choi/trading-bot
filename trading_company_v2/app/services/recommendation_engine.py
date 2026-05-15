@@ -354,6 +354,37 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # RANGING = 추세 추종 전략 완전 차단 → 평균회귀(에어본/레인지 스캘프) 전략만 허용
     # 데이터: RANGING에서 추세 추종 승률 9%, 누적 -122% → 구조적 적자
     if regime == "RANGING":
+        # ── 세력 신호 우선 진입 (RSI 불리시 다이버전스) ──────────────────────────
+        # 가격 신저가 + RSI 고저가 = 스마트머니 매집 패턴
+        # RANGING 블록이 일찍 return해버려 라인~1896의 rsi_div_ok 경로에 도달하지 못하는
+        # 구조적 버그를 수정: RANGING 진입부에서 먼저 체크
+        _ranging_div_ok = (
+            rsi_bullish_div
+            and not rsi_bearish_divergence
+            and not hard_overheat
+            and not falling_knife_risk
+            and stance != "DEFENSE"
+            and signal_score >= 0.42
+            and orderbook_bid_ask >= 1.02
+            and long_flip_confirmed
+        )
+        if _ranging_div_ok:
+            _div_size = "0.50x" if signal_score >= 0.58 else "0.40x"
+            return {
+                "action": "probe_longs",
+                "size": _div_size,
+                "focus": f"세력신호(divergence): {lead_market or 'KRW-BTC'} 가격신저 RSI고저 → 스마트머니 매집",
+                "symbol": lead_market,
+                "candidate_symbols": candidate_symbols,
+                "strategy_id": "crypto.rsi_bullish_divergence",
+                "entry_profile": "rsi_bullish_divergence",
+                "notes": reasons + [
+                    "세력 신호: price lower-low + RSI higher-low = 스마트머니 축적",
+                    f"signal={signal_score:.2f} ob={orderbook_bid_ask:.2f}x {trend_alignment}",
+                    transition_note,
+                ],
+            }
+
         ranging_blend: list[dict[str, Any]] = []
         blend_safe = (
             not rsi_bearish_divergence
@@ -378,6 +409,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             cci_oversold_bounce,
             keltner_lower_touch,
             mfi_oversold,
+            rsi_bullish_div,           # 세력 신호: 가격신저 RSI고저 = 스마트머니 매집
         ])
         # 강한 과매도 확인 신호: RSI extreme / Williams %R / CCI / MFI 중 1개 이상 필수
         blend_hard_oversold = (
@@ -386,6 +418,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             or sig_cci                 # CCI < -100
             or sig_mfi                 # MFI ≤ 20
             or sig_keltner             # 켈트너 채널 하단 터치
+            or rsi_bullish_div         # 세력 신호 단독으로도 strong signal 인정
         )
         if (
             blend_mean_rev_signals >= 2          # ↓ 4→2: 단 2개 신호로 완화 (단, 아래 hard_oversold 필수)
@@ -765,11 +798,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         sig_keltner = keltner_lower_touch
         # 신호 14: MFI 과매도
         sig_mfi = mfi_oversold
+        # 신호 15: RSI 불리시 다이버전스 (세력 신호) — 가격신저 + RSI고저 = 스마트머니 매집
+        sig_rsi_div = rsi_bullish_div
 
         mean_rev_count = sum([
             sig_airborne, sig_bb_squeeze, sig_vwap_dev, sig_rsi_extreme, sig_rsi_rev,
             sig_stoch_cross, sig_macd_rev, sig_candle_rev, sig_vol_climax, sig_support_reclaim,
             sig_williams_r, sig_cci, sig_keltner, sig_mfi,
+            sig_rsi_div,   # 세력 신호
         ])
 
         # 공통 필터: 급락 중 아님 + 베어리쉬 구조 아님 + 과열 아님
@@ -788,6 +824,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         # soft signal 1개 단독 진입 차단, 진짜 과매도 구간만 허용
         _hard_oversold_flag = (
             sig_rsi_extreme or sig_williams_r or sig_cci or sig_mfi or sig_keltner
+            or sig_rsi_div   # 세력 신호도 strong confirmation으로 인정
         )
         range_scalp_ok = (
             mean_rev_count >= 2
@@ -801,12 +838,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             f"score={airborne_score:.2f} bb_lower={at_bb_lower}"
         )
         ranging_signal_note = (
-            f"ranging signals({mean_rev_count}/14): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
+            f"ranging signals({mean_rev_count}/15): airborne={sig_airborne} bb_sq={sig_bb_squeeze} "
             f"vwap={sig_vwap_dev}({vwap_deviation_pct:.1f}%) rsi_ext={sig_rsi_extreme} rsi_rev={sig_rsi_rev} "
             f"stoch={sig_stoch_cross}(k={stoch_k:.0f}) macd_rev={sig_macd_rev} candle={sig_candle_rev} "
             f"vol_climax={sig_vol_climax}({volume_climax_ratio:.1f}x) support_reclaim={sig_support_reclaim} "
             f"wr={sig_williams_r}({williams_r_val:.0f}) cci={sig_cci}({cci_val:.0f}) "
             f"keltner={sig_keltner} mfi={sig_mfi}({mfi_val:.0f}) "
+            f"세력신호(div)={sig_rsi_div} "
             f"local_breakout={range_breakout_long} high_tight={high_tight_flag_long}"
         )
 
