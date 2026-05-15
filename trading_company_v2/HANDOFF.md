@@ -1,5 +1,35 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-15 (session 46 - controlled cycle entry override)
+
+### Why this change was needed
+- After scanner-wide selection, live plan could select candidates like `KRW-POLYX` as `crypto.smart_money_flow`.
+- Execution still converted crypto cycle entries into watch-only:
+  - `RANGING impulse candidates armed for tick confirmation.`
+- This preserved safety, but it also caused strong structure-confirmed RANGING candidates to wait for websocket ignition only.
+
+### Changes
+- Updated `app/agents/execution_agent.py`:
+  - Added `_crypto_cycle_entry_override_ok()`.
+  - Allows a small cycle-level entry only for:
+    - `crypto.smart_money_flow`,
+    - `crypto.ranging_strength_follow`.
+  - Still blocks if RSI/extension/recent move are too hot, bearish structure appears, stream reversal appears, or the symbol recently failed.
+  - Smart-money override requires:
+    - capital flow + box/trendline structure,
+    - combined score,
+    - flow score,
+    - supportive orderbook,
+    - positive micro timing.
+  - Ranging-strength override requires:
+    - high combined/signal,
+    - supportive orderbook,
+    - positive micro timing,
+    - controlled extension/RSI.
+
+### Verification
+- `python -m compileall app` passed.
+
 ## 0. Latest Codex Notes - 2026-05-15 (session 45 - scanner-wide smart money selection)
 
 ### Why this change was needed

@@ -945,6 +945,100 @@ class ExecutionAgent(BaseAgent):
                 return item
         return None
 
+    def _crypto_cycle_entry_override_ok(self, meta: dict, plan: dict) -> tuple[bool, str]:
+        """Allow only high-structure RANGING entries to bypass hot-path-only mode."""
+        if self.regime != "RANGING" or not meta:
+            return False, "not a ranging override"
+        strategy_id = str(plan.get("strategy_id", "") or "")
+        profile = str(plan.get("entry_profile", "") or "")
+        focus = str(plan.get("focus", "") or "").lower()
+        symbol = str(meta.get("market", "") or "")
+        combined = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
+        signal = float(meta.get("signal_score", combined) or combined)
+        micro = float(meta.get("micro_score", 0.0) or 0.0)
+        micro_move_3 = float(meta.get("micro_move_3_pct", 0.0) or 0.0)
+        micro_vwap_gap = float(meta.get("micro_vwap_gap_pct", 0.0) or 0.0)
+        orderbook_bid_ask = float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
+        orderbook_score = float(meta.get("orderbook_score", 0.0) or 0.0)
+        rsi_value = meta.get("rsi")
+        try:
+            rsi_float = float(rsi_value) if rsi_value is not None else 50.0
+        except (TypeError, ValueError):
+            rsi_float = 50.0
+        recent_change = float(meta.get("recent_change_pct", 0.0) or 0.0)
+        burst_change = float(meta.get("burst_change_pct", 0.0) or 0.0)
+        trend_extension = float(meta.get("trend_extension_pct", 0.0) or 0.0)
+        trend_alignment = str(meta.get("trend_alignment", "") or "")
+        stream_reversal = bool(meta.get("stream_reversal", False))
+        rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
+        bearish_structure = bool(meta.get("choch_bearish", False)) or bool(meta.get("bos_bearish", False))
+        too_late = (
+            rsi_float >= 82.0
+            or trend_extension >= 4.2
+            or recent_change >= 10.0
+            or burst_change >= 9.0
+            or micro_vwap_gap >= 4.0
+            or trend_alignment in {"downtrend", "late_extension"}
+        )
+        if stream_reversal or rsi_bearish_div or bearish_structure or too_late:
+            return False, (
+                f"late/bearish risk rsi={rsi_float:.0f} ext={trend_extension:.2f}% "
+                f"recent={recent_change:.2f}% burst={burst_change:.2f}%"
+            )
+        recent_failure = self._recent_crypto_symbol_failure(symbol)
+        if recent_failure:
+            return False, "recent failed symbol still cooling down"
+
+        smart_route = (
+            strategy_id == "crypto.smart_money_flow"
+            or profile == "smart_money_flow"
+            or "smart_money_flow" in focus
+        )
+        strength_route = (
+            strategy_id == "crypto.ranging_strength_follow"
+            or profile == "ranging_strength_follow"
+            or "ranging_strength_follow" in focus
+        )
+        smart_signal = bool(meta.get("smart_money_flow_long", False)) or (
+            bool(meta.get("capital_flow_long", False))
+            and (bool(meta.get("flow_box_breakout_long", False)) or bool(meta.get("auto_trendline_breakout_long", False)))
+        )
+        capital_flow_score = float(meta.get("capital_flow_score", 0.0) or 0.0)
+        smart_ok = (
+            smart_route
+            and smart_signal
+            and combined >= 0.62
+            and capital_flow_score >= 0.65
+            and (orderbook_bid_ask >= 1.05 or orderbook_score >= 0.55)
+            and micro >= 0.50
+            and micro_move_3 >= 0.0
+        )
+        if smart_ok:
+            return True, (
+                f"smart_money cycle ok combined={combined:.2f} flow={capital_flow_score:.2f} "
+                f"ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}%"
+            )
+
+        strength_ok = (
+            strength_route
+            and combined >= 0.78
+            and signal >= 0.70
+            and (orderbook_bid_ask >= 1.20 or orderbook_score >= 0.60)
+            and micro >= 0.55
+            and micro_move_3 >= 0.0
+            and trend_extension <= 3.2
+            and rsi_float <= 78.0
+        )
+        if strength_ok:
+            return True, (
+                f"strength cycle ok combined={combined:.2f} signal={signal:.2f} "
+                f"ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}%"
+            )
+        return False, (
+            f"cycle override failed route={strategy_id or profile} combined={combined:.2f} "
+            f"flow={capital_flow_score:.2f} ob={orderbook_bid_ask:.2f}x micro={micro:.2f}"
+        )
+
     def _crypto_candidate_entry_ok(self, meta: dict) -> tuple[bool, str]:
         if not meta:
             return False, "missing candidate-specific signal"
@@ -1289,6 +1383,11 @@ class ExecutionAgent(BaseAgent):
                 range_armed_notes = []
                 for candidate in all_candidates:
                     meta = candidate_meta.get(candidate, {})
+                    cycle_ok, cycle_reason = self._crypto_cycle_entry_override_ok(meta, plan)
+                    if cycle_ok:
+                        eligible_candidates.append(candidate)
+                        skipped_candidates.append(f"{candidate}: cycle override allowed ({cycle_reason})")
+                        continue
                     # cycle-level entries are low-precision in ALL regimes; hot-path only
                     # 사이클 계산→실행 지연 사이 모멘텀 소진 → 전 regime hot-path 전용
                     skipped_candidates.append(
