@@ -3738,6 +3738,7 @@ def _scanner_html() -> str:
     .chip.c-pullback.active{background:var(--purple-bg);border-color:var(--purple-bd);color:var(--purple)}
     .chip.c-ict.active{background:var(--cyan-bg);border-color:var(--cyan-bd);color:var(--cyan)}
     .chip.c-stream.active{background:rgba(255,210,80,.10);border-color:rgba(255,210,80,.3);color:#ffd250}
+    .chip.c-smart.active{background:rgba(188,140,255,.14);border-color:rgba(188,140,255,.38);color:#d7b8ff}
 
     /* ── 정렬 안내 ── */
     .sort-hint{font-size:.7rem;color:var(--muted);margin-bottom:8px}
@@ -3799,6 +3800,7 @@ def _scanner_html() -> str:
     .sbadge.pullback{background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-bd)}
     .sbadge.ict{background:var(--cyan-bg);color:var(--cyan);border:1px solid var(--cyan-bd)}
     .sbadge.stream{background:rgba(255,210,80,.12);color:#ffd250;border:1px solid rgba(255,210,80,.3)}
+    .sbadge.smart{background:rgba(188,140,255,.14);color:#d7b8ff;border:1px solid rgba(188,140,255,.36)}
     .sbadge.reversal{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd)}
     .sbadge.ob{background:var(--blue-bg);color:var(--blue);border:1px solid var(--blue-bd)}
     .sbadge.exhaust{background:rgba(255,100,100,.1);color:#f87;border:1px solid rgba(255,100,100,.25)}
@@ -3812,6 +3814,10 @@ def _scanner_html() -> str:
     /* ── RSI 셀 ── */
     .rsi-val{font-family:var(--mono);font-size:.78rem;font-weight:600}
     .rsi-val.hot{color:var(--red)}.rsi-val.warm{color:var(--yellow)}.rsi-val.cool{color:var(--green)}.rsi-val.flat{color:var(--muted)}
+    .smart-cell{min-width:126px}
+    .smart-meter{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+    .smart-meter .score-bar{width:46px}
+    .smart-tags{display:flex;gap:3px;flex-wrap:wrap}
 
     /* ── 자동발견 섹션 ── */
     .discovery-section{margin-top:18px}
@@ -3876,6 +3882,7 @@ def _scanner_html() -> str:
     <div class="mbar-card"><div class="mbar-label">브레이크아웃</div><div class="mbar-val" id="mb-bk">—</div></div>
     <div class="mbar-card"><div class="mbar-label">눌림목</div><div class="mbar-val" id="mb-pb">—</div></div>
     <div class="mbar-card"><div class="mbar-label">스트림 점화</div><div class="mbar-val" id="mb-si">—</div></div>
+    <div class="mbar-card"><div class="mbar-label">세력흐름</div><div class="mbar-val" id="mb-sm">—</div></div>
   </div>
 
   <!-- 필터 칩 -->
@@ -3888,6 +3895,7 @@ def _scanner_html() -> str:
     <button class="chip c-pullback" data-f="pullback" onclick="setFilter('pullback',this)">🔄 눌림목</button>
     <button class="chip c-ict" data-f="ict" onclick="setFilter('ict',this)">🎯 ICT</button>
     <button class="chip c-stream" data-f="stream" onclick="setFilter('stream',this)">⚡ 스트림</button>
+    <button class="chip c-smart" data-f="smart" onclick="setFilter('smart',this)">💜 세력흐름</button>
   </div>
   <div class="sort-hint">컬럼 클릭으로 정렬 · 현재 정렬: <span id="sort-label">Combined ↓</span></div>
 
@@ -3905,6 +3913,7 @@ def _scanner_html() -> str:
           <th onclick="sortBy('micro_score')">Micro</th>
           <th onclick="sortBy('orderbook_score')">OB</th>
           <th onclick="sortBy('stream_score')">Stream</th>
+          <th onclick="sortBy('capital_flow_score')">세력</th>
           <th onclick="sortBy('rsi')">RSI</th>
           <th onclick="sortBy('vol_ratio')">Vol배율</th>
           <th onclick="sortBy('atr_pct')">ATR%</th>
@@ -3913,7 +3922,7 @@ def _scanner_html() -> str:
         </tr>
       </thead>
       <tbody id="scan-body">
-        <tr><td colspan="14" style="text-align:center;padding:30px;color:var(--muted)">로딩 중…</td></tr>
+        <tr><td colspan="15" style="text-align:center;padding:30px;color:var(--muted)">로딩 중…</td></tr>
       </tbody>
     </table>
   </div>
@@ -3934,6 +3943,10 @@ def _scanner_html() -> str:
   <div class="discovery-section">
     <div class="disc-title">⚡ 스트림 점화 <span class="disc-count" id="disc-si-cnt">0</span></div>
     <div class="disc-grid" id="disc-si"></div>
+  </div>
+  <div class="discovery-section">
+    <div class="disc-title">💜 세력흐름 / 작도 돌파 <span class="disc-count" id="disc-sm-cnt">0</span></div>
+    <div class="disc-grid" id="disc-sm"></div>
   </div>
 
   <!-- 한국 주식 스캐너 섹션 -->
@@ -4075,6 +4088,21 @@ function biasKo(b){
   if(b==='defense') return '방어';
   return '균형';
 }
+function smartActive(c){
+  return !!(c.smart_money_flow_long || c.flow_box_breakout_long || c.auto_trendline_breakout_long || c.capital_flow_long);
+}
+function smartHtml(c){
+  var tags=[];
+  if(c.smart_money_flow_long) tags.push('<span class="sbadge smart">SMF</span>');
+  if(c.capital_flow_long) tags.push('<span class="sbadge smart">세력</span>');
+  if(c.flow_box_breakout_long) tags.push('<span class="sbadge breakout">박스</span>');
+  if(c.auto_trendline_breakout_long) tags.push('<span class="sbadge ict">작도</span>');
+  if(!tags.length && sc(c.capital_flow_score)>0) tags.push('<span class="sbadge ob">관찰</span>');
+  var score = scoreBar(c.capital_flow_score,'linear-gradient(90deg,var(--purple),var(--green))');
+  var sub = 'vol '+sc(c.capital_flow_volume_ratio).toFixed(1)+'x';
+  if(sc(c.trendline_break_price)>0) sub += ' · break '+fmtPrice(c.trendline_break_price);
+  return '<div class="smart-cell"><div class="smart-meter">'+score+'</div><div class="smart-tags">'+tags.join('')+'</div><div class="price-sub">'+sub+'</div></div>';
+}
 
 function getStatuses(c){
   var tags = [];
@@ -4085,6 +4113,10 @@ function getStatuses(c){
   if(c.ict_bullish_count>=3) tags.push({cls:'ict',txt:'🎯ICT'+c.ict_bullish_count});
   if(c.stream_ignition) tags.push({cls:'stream',txt:'⚡점화'});
   else if(c.stream_fresh && sc(c.stream_score)>=0.5) tags.push({cls:'stream',txt:'⚡활성'});
+  if(c.smart_money_flow_long) tags.push({cls:'smart',txt:'💜SMF'});
+  else if(c.capital_flow_long) tags.push({cls:'smart',txt:'💜세력'});
+  if(c.flow_box_breakout_long) tags.push({cls:'breakout',txt:'박스'});
+  if(c.auto_trendline_breakout_long) tags.push({cls:'ict',txt:'작도'});
   if(c.stream_reversal) tags.push({cls:'reversal',txt:'↩반전'});
   if(c.orderbook_ready) tags.push({cls:'ob',txt:'🟢OB'});
   if(c.micro_exhausted) tags.push({cls:'exhaust',txt:'⚠소진'});
@@ -4099,6 +4131,7 @@ function passesFilter(c){
   if(_filter==='pullback') return c.pullback_detected && sc(c.pullback_score)>=0.50;
   if(_filter==='ict') return (c.ict_bullish_count||0)>=2;
   if(_filter==='stream') return c.stream_ignition || (c.stream_fresh && sc(c.stream_score)>=0.4);
+  if(_filter==='smart') return smartActive(c);
   return true;
 }
 
@@ -4164,6 +4197,7 @@ function renderTable(){
       +'<td>'+scoreBar(c.micro_score,  scoreColor(sc(c.micro_score)))+'</td>'
       +'<td>'+scoreBar(c.orderbook_score, scoreColor(sc(c.orderbook_score)))+'</td>'
       +'<td>'+scoreBar(c.stream_score, '#ffd250')+'</td>'
+      +'<td>'+smartHtml(c)+'</td>'
       +'<td><span class="rsi-val '+rsiCls(rsiV)+'">'+(isNaN(rsiV)?'—':rsiV.toFixed(0))+'</span></td>'
       +'<td><span style="font-family:var(--mono);font-size:.78rem">'+sc(c.vol_ratio).toFixed(1)+'x</span></td>'
       +'<td><span style="font-family:var(--mono);font-size:.78rem;color:var(--muted)">'+sc(c.atr_pct).toFixed(2)+'%</span></td>'
@@ -4172,12 +4206,12 @@ function renderTable(){
       +'</tr>';
   });
 
-  body.innerHTML = rows || '<tr><td colspan="14" style="text-align:center;padding:24px;color:var(--muted)">조건에 맞는 코인 없음</td></tr>';
+  body.innerHTML = rows || '<tr><td colspan="15" style="text-align:center;padding:24px;color:var(--muted)">조건에 맞는 코인 없음</td></tr>';
 
   // 정렬 헤더 표시
   document.querySelectorAll('th').forEach(function(th){ th.className=''; });
   var ths = document.querySelectorAll('thead th');
-  var keyMap = {rank:0,market:1,current_price:2,sparkline_change_pct:3,combined_score:4,signal_score:5,micro_score:6,orderbook_score:7,stream_score:8,rsi:9,vol_ratio:10,atr_pct:11,bias:12};
+  var keyMap = {rank:0,market:1,current_price:2,sparkline_change_pct:3,combined_score:4,signal_score:5,micro_score:6,orderbook_score:7,stream_score:8,capital_flow_score:9,rsi:10,vol_ratio:11,atr_pct:12,bias:13};
   var idx2 = keyMap[_sortKey];
   if(idx2!==undefined) ths[idx2].className = _sortAsc?'sorted-asc':'sorted-desc';
   document.getElementById('sort-label').textContent = (_sortKey||'combined_score') + (_sortAsc?' ↑':' ↓');
@@ -4193,12 +4227,13 @@ function discCard(c, tagsHtml){
 }
 
 function renderDiscovery(){
-  var bkList=[], pbList=[], ictList=[], siList=[];
+  var bkList=[], pbList=[], ictList=[], siList=[], smList=[];
   _data.forEach(function(c){
     if(c.breakout_confirmed) bkList.push(c);
     if(c.pullback_detected && sc(c.pullback_score)>=0.55) pbList.push(c);
     if((c.ict_bullish_count||0)>=3) ictList.push(c);
     if(c.stream_ignition) siList.push(c);
+    if(smartActive(c)) smList.push(c);
   });
   function renderList(id, cntId, list, tagsF){
     var el=document.getElementById(id), cnt=document.getElementById(cntId);
@@ -4220,6 +4255,12 @@ function renderDiscovery(){
   renderList('disc-si','disc-si-cnt',siList,function(c){
     return '<span class="sbadge stream">⚡'+sc(c.stream_move_15s_pct).toFixed(3)+'%/15s</span>';
   });
+  renderList('disc-sm','disc-sm-cnt',smList,function(c){
+    return '<span class="sbadge smart">flow '+sc(c.capital_flow_score).toFixed(2)+'</span>'
+      +'<span class="sbadge ob" style="font-size:.6rem">vol '+sc(c.capital_flow_volume_ratio).toFixed(1)+'x</span>'
+      +(c.auto_trendline_breakout_long?'<span class="sbadge ict" style="font-size:.6rem">작도</span>':'')
+      +(c.flow_box_breakout_long?'<span class="sbadge breakout" style="font-size:.6rem">박스</span>':'');
+  });
 }
 
 // ── 시장 개요 ──
@@ -4234,6 +4275,7 @@ function renderMarketBar(meta){
   var bkCnt  = _data.filter(function(c){ return c.breakout_confirmed; }).length;
   var pbCnt  = _data.filter(function(c){ return c.pullback_detected && sc(c.pullback_score)>=0.55; }).length;
   var siCnt  = _data.filter(function(c){ return c.stream_ignition; }).length;
+  var smCnt  = _data.filter(function(c){ return smartActive(c); }).length;
 
   var mbOff = document.getElementById('mb-off');
   mbOff.textContent = offCnt+'개';
@@ -4250,6 +4292,10 @@ function renderMarketBar(meta){
   var mbSi = document.getElementById('mb-si');
   mbSi.textContent = siCnt+'개';
   mbSi.className = 'mbar-val '+(siCnt>0?'bull':'neutral');
+
+  var mbSm = document.getElementById('mb-sm');
+  mbSm.textContent = smCnt+'개';
+  mbSm.className = 'mbar-val '+(smCnt>0?'bull':'neutral');
 }
 
 function highlightRow(market){

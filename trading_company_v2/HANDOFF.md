@@ -1,5 +1,23 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-15 (session 44 - scanner visibility for smart money flow)
+
+### Why this change was needed
+- `crypto.smart_money_flow` was added from the user's chart references, but the scanner still only showed generic columns.
+- User needs to see whether "capital inflow / smart money", box breakout, and auto trendline breakout are actually present before the bot enters or waits.
+
+### Changes
+- Updated `/scanner` embedded UI in `app/main.py`:
+  - Added market summary card: `세력흐름`.
+  - Added filter chip: `💜 세력흐름`.
+  - Added table column: `세력`, showing `capital_flow_score`, flow volume ratio, box breakout, auto trendline breakout, and `SMF` tag.
+  - Added status badges for `SMF`, `세력`, `박스`, and `작도`.
+  - Added discovery section: `💜 세력흐름 / 작도 돌파`.
+- This is intentionally UI-only. It does not change entry/exit behavior.
+
+### Verification
+- `python -m compileall app` passed.
+
 ## 0. Latest Codex Notes - 2026-05-15 (session 43 - smart money flow from user chart references)
 
 ### Why this change was needed
