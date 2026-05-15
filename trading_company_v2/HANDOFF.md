@@ -1,5 +1,41 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-15 (3차 감사 잔여 수정: ict_structure + ssl_sweep + Korea overheat)
+
+### 수정 내용 (3건, 커밋 eb55f9f)
+
+**1. `ict_structure == "bearish_break"` dead variable → 실제 차단 게이트 활성화**
+- 파일: `recommendation_engine.py`
+- 문제: `ict_structure`가 f-string 로그에만 쓰이고 진입 차단 로직 없음
+- 수정: `choch_bearish` 블록 바로 아래에 gate 추가
+  - `ict_structure == "bearish_break" and signal_score < 0.65` → `capital_preservation` 반환
+
+**2. `ssl_sweep_confirmed` hot_path_guard 완전 누락 → 추출 + 임계값 완화 적용**
+- 파일: `hot_path_guard.py`
+- 문제: recommendation_engine에서는 ICT entry gate로 쓰이지만 hot_path_guard에는 미추출
+- 수정: 추출 추가 + `_ema_stack_relax`에 `+0.015 if ssl_sweep_confirmed` 항목 추가
+  - SSL 스윕 = 스마트머니가 매도 유동성 소화 후 상승 의도 → 진입 임계값 1.5% 완화
+
+**3. Korea Path B/F 과열 페널티 불완전 → `burst_change_pct`, `ema_gap_pct` 추가**
+- 파일: `korea_stock_desk_agent.py`
+- 문제: RSI >= 78 체크만 있고 급등폭/EMA 이격 기준 없음
+- 수정: `burst_change_pct >= 12% → +0.08`, `ema_gap_pct >= 12% → +0.06` 페널티 추가
+
+### 변경 파일
+- `app/agents/korea_stock_desk_agent.py`
+- `app/services/hot_path_guard.py`
+- `app/services/recommendation_engine.py`
+
+### 배포
+- git push origin main + Oracle VM pull & restart 완료 (active × 2)
+
+### 다음 세션 확인사항 (추가 잔여 이슈)
+- Korea debate agents: `avg_sentiment_top3`, `inst_radar_count`, `in_open_window`/`in_close_window` bull/bear scoring 미사용
+- `pullback_gap_pct`, `range_4_pct`: signal_engine 계산, 어디서도 미사용
+- `bb_sq_width`: BB 스퀴즈 폭 수치, 계산되지만 미사용
+
+---
+
 ## 0. Claude - 2026-05-15 (지표 감사 + 미연결 신호 11개 전체 배선)
 
 ### 배경
