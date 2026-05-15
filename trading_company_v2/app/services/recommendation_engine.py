@@ -14,6 +14,14 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     backtest_weights = payload.get("backtest_weights", {}) or {}
     lead_market = str(payload.get("lead_market", "") or "")
     candidate_symbols = [str(item).strip() for item in (payload.get("candidate_symbols", []) or []) if str(item).strip()]
+    all_candidates = [item for item in (payload.get("all_candidates", []) or []) if isinstance(item, dict)]
+    def _cf(item: dict[str, Any], key: str, default: float = 0.0) -> float:
+        try:
+            return float(item.get(key, default) or default)
+        except (TypeError, ValueError):
+            return default
+    def _cb(item: dict[str, Any], key: str) -> bool:
+        return bool(item.get(key, False))
     lead_weight = float(backtest_weights.get(lead_market, 0.0) or 0.0)
     discovery_score = float(payload.get("discovery_score", 0.0) or 0.0)
     volume_24h_krw = float(payload.get("volume_24h_krw", 0.0) or 0.0)
@@ -450,12 +458,87 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 "score": 66 + signal_score * 16 + capital_flow_score * 12 + (5 if auto_trendline_breakout_long else 0),
                 "profile": "smart_money_flow",
                 "strategy_id": "crypto.smart_money_flow",
+                "symbol": lead_market,
                 "size": entry_size,
                 "reason": "capital flow + box/trendline break",
                 "note": (
                     f"smart_money flow={capital_flow_score:.2f} vol={capital_flow_volume_ratio:.2f}x "
                     f"trendline={auto_trendline_breakout_long} box={flow_box_breakout_long} "
                     f"break={trendline_break_price:.4f} slope={trendline_slope_pct:.3f}% / {transition_note}"
+                ),
+            })
+        # The desk leader can be overextended while another scanned coin has the
+        # cleaner "capital flow + box/trendline break" pattern. Score the full
+        # scanner set so we do not miss HYPER/BIO/SPK-style second-rank movers.
+        for _cand in all_candidates[:24]:
+            _sym = str(_cand.get("market") or "").strip()
+            if not _sym or _sym == lead_market:
+                continue
+            _combined = _cf(_cand, "combined_score", _cf(_cand, "signal_score", 0.0))
+            _flow = _cf(_cand, "capital_flow_score")
+            _flow_vol = _cf(_cand, "capital_flow_volume_ratio")
+            _ob = _cf(_cand, "orderbook_bid_ask_ratio")
+            _ob_score = _cf(_cand, "orderbook_score")
+            _micro = _cf(_cand, "micro_score")
+            _micro3 = _cf(_cand, "micro_move_3_pct")
+            _vwap_gap = _cf(_cand, "micro_vwap_gap_pct")
+            _rsi = _cand.get("rsi")
+            _rsi_f = _cf(_cand, "rsi", 50.0)
+            _recent = _cf(_cand, "recent_change_pct")
+            _burst = _cf(_cand, "burst_change_pct")
+            _extension = _cf(_cand, "trend_extension_pct")
+            _trend = str(_cand.get("trend_alignment") or "")
+            _stream_reversal = _cb(_cand, "stream_reversal")
+            _bear_div = _cb(_cand, "rsi_bearish_divergence")
+            _smart = _cb(_cand, "smart_money_flow_long")
+            _capital = _cb(_cand, "capital_flow_long")
+            _trendline = _cb(_cand, "auto_trendline_breakout_long")
+            _box = _cb(_cand, "flow_box_breakout_long")
+            _structural = _trendline or _box
+            _candidate_long_flip = (
+                (
+                    _cb(_cand, "stream_fresh")
+                    and not _stream_reversal
+                    and _cf(_cand, "stream_score") >= 0.55
+                    and _cf(_cand, "stream_move_15s_pct") >= 0.08
+                    and _cf(_cand, "stream_buy_ratio_15s") >= 0.52
+                )
+                or (_micro >= 0.50 and _micro3 >= 0.0 and _ob >= 0.95)
+                or (_capital and _structural and _flow >= 0.65 and _ob >= 0.75)
+            )
+            _smart_candidate_ok = (
+                (_smart or (_capital and _structural))
+                and _candidate_long_flip
+                and _combined >= (0.54 if (_smart and _structural) else 0.58)
+                and _flow >= 0.55
+                and (_ob >= 0.78 or _ob_score >= 0.50)
+                and _micro3 >= -0.15
+                and _vwap_gap <= 3.8
+                and _extension <= 4.2
+                and _recent < 10.0
+                and _burst < 9.0
+                and _rsi_f <= 82.0
+                and _trend not in {"downtrend", "late_extension"}
+                and not _stream_reversal
+                and not _bear_div
+                and stance != "DEFENSE"
+            )
+            if not _smart_candidate_ok:
+                continue
+            _size = "0.30x" if (_smart and _combined >= 0.62) else "0.22x"
+            if _rsi_f >= 76.0 or _extension >= 3.2:
+                _size = "0.18x"
+            ranging_blend.append({
+                "score": 64 + _combined * 18 + _flow * 12 + (5 if _trendline else 0) + (4 if _box else 0),
+                "profile": "smart_money_flow",
+                "strategy_id": "crypto.smart_money_flow",
+                "symbol": _sym,
+                "size": _size,
+                "reason": "scanner capital flow + box/trendline break",
+                "note": (
+                    f"scanner_smart_money symbol={_sym} combined={_combined:.2f} flow={_flow:.2f} "
+                    f"vol={_flow_vol:.2f}x ob={_ob:.2f}x micro3={_micro3:.2f}% "
+                    f"trendline={_trendline} box={_box} rsi={_rsi if _rsi is not None else '?'}"
                 ),
             })
         strength_follow_ok = (
@@ -493,16 +576,17 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             })
         if ranging_blend:
             best = sorted(ranging_blend, key=lambda item: float(item["score"]), reverse=True)[0]
+            best_symbol = str(best.get("symbol") or lead_market or "KRW-BTC")
             notes = [
-                f"{item['profile']} score={float(item['score']):.1f} size={item['size']} reason={item['reason']}"
+                f"{item.get('symbol', lead_market)} {item['profile']} score={float(item['score']):.1f} size={item['size']} reason={item['reason']}"
                 for item in sorted(ranging_blend, key=lambda item: float(item["score"]), reverse=True)[:4]
             ]
             return {
                 "action": "probe_longs",
                 "size": str(best["size"]),
-                "focus": f"{best['profile']}: {lead_market or 'KRW-BTC'} {best['reason']} - selected by RANGING strategy blend",
-                "symbol": lead_market,
-                "candidate_symbols": candidate_symbols,
+                "focus": f"{best['profile']}: {best_symbol} {best['reason']} - selected by RANGING strategy blend",
+                "symbol": best_symbol,
+                "candidate_symbols": [best_symbol] + [s for s in candidate_symbols if s != best_symbol],
                 "strategy_id": str(best["strategy_id"]),
                 "entry_profile": str(best["profile"]),
                 "notes": reasons + [

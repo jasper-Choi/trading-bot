@@ -1,5 +1,37 @@
 # Trading Company V2 Handoff
 
+## 0. Latest Codex Notes - 2026-05-15 (session 45 - scanner-wide smart money selection)
+
+### Why this change was needed
+- Live Oracle data showed `KRW-KAVA` as the crypto desk leader with `smart_money_flow_long=True`, but it was unsafe:
+  - RSI about `79`,
+  - trend extension about `4.7%`,
+  - orderbook bid/ask about `0.33x`.
+- Another scanned coin, `KRW-AZTEC`, had the cleaner reference-pattern setup:
+  - capital flow,
+  - box breakout,
+  - auto trendline breakout,
+  - orderbook about `2.2x`.
+- The previous RANGING strategy blend judged mostly the desk leader, so clean second-rank smart-money candidates could be missed.
+
+### Changes
+- Updated `app/services/recommendation_engine.py`:
+  - Added scanner-wide smart-money candidate selection from `all_candidates`.
+  - Allows a non-leader coin to win the RANGING blend when it has:
+    - `capital_flow_long`,
+    - box or auto-trendline breakout,
+    - candidate-specific long flip,
+    - controlled RSI/extension,
+    - acceptable orderbook and micro timing.
+  - Keeps overextended leaders blocked instead of chasing them.
+
+### Verification
+- `python -m compileall app` passed.
+- Replayed the live-style KAVA/AZTEC case:
+  - leader `KRW-KAVA` was skipped,
+  - `KRW-AZTEC` selected as `crypto.smart_money_flow`,
+  - action `probe_longs`, size `0.22x`.
+
 ## 0. Latest Codex Notes - 2026-05-15 (session 44 - scanner visibility for smart money flow)
 
 ### Why this change was needed
