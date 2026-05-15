@@ -153,8 +153,13 @@ class BearCaseAgent(BaseAgent):
             risk += 0.35
             reasons.append("market regime is stressed")
         if losses >= 3 and losses > wins and win_rate < 35.0:
-            risk += 0.18
-            reasons.append(f"loss streak control active ({wins}W/{losses}L, win_rate {win_rate:.1f}%)")
+            # NOTE: risk_committee_agent already shrinks risk_budget for loss streaks.
+            # Adding a large bear-score penalty here creates a double-penalty feedback
+            # loop: losses → bear↑ → PM blocks → fewer (worse-timed) entries → more losses.
+            # Keep the note for transparency but limit the score impact to +0.06 so that
+            # a genuine strong setup can still pass through at reduced size.
+            risk += 0.06
+            reasons.append(f"loss streak noted ({wins}W/{losses}L, win_rate {win_rate:.1f}%) — size already throttled by risk committee")
         if combined < -0.75:
             risk += 0.16
             reasons.append(f"combined pnl pressure {combined:.2f}%")
@@ -289,12 +294,33 @@ class PortfolioManagerAgent(BaseAgent):
         reason = f"bull={bull_score:.2f} bear={bear_score:.2f} edge={edge:.2f}"
         loss_control = self._loss_control_active()
 
+        # ── Strategy independence: if the desk plan carries a high-confidence
+        # independent signal, protect it from being silenced by a combined score.
+        # This prevents one weak strategy from blocking a genuinely strong one.
+        plan_confidence = str(plan.get("strategy_confidence", "") or "").lower()
+        has_strong_independent = (
+            plan_confidence == "high"
+            or bool(plan.get("divergence_confirmed"))
+            or bool(plan.get("bullish_divergence_ok"))
+            or bull_score >= 0.82
+        )
+
         if action in _ENTRY_ACTIONS and size > 0:
-            if bear_score >= 0.78 and bull_score < 0.72:
+            # Block threshold raised: requires a much stronger bear case to silence entry.
+            # Previously 0.78/0.72 — this fired too easily after a loss streak.
+            if bear_score >= 0.88 and bull_score < 0.62 and not has_strong_independent:
                 adjusted["action"] = "stand_by"
                 adjusted["size"] = "0.00x"
                 decision = "block"
                 reason += " / severe bear case blocks entry"
+            elif has_strong_independent and bear_score < 0.92:
+                # Strong independent signal bypasses PM size cuts — but still caps at
+                # selective_probe to ensure position sizing stays conservative.
+                adjusted["action"] = "selective_probe"
+                multiplier = max(0.45, min(multiplier, 1.0))
+                adjusted["size"] = _float_to_size(size * multiplier)
+                decision = "strong_signal_probe"
+                reason += f" / high-confidence signal bypasses PM (bull={bull_score:.2f})"
             elif edge <= -0.18:
                 adjusted["action"] = "selective_probe"
                 multiplier = 0.55
@@ -307,10 +333,11 @@ class PortfolioManagerAgent(BaseAgent):
                 decision = "throttle"
                 reason += " / mixed debate throttles size"
             elif loss_control:
-                multiplier = 0.72
+                # Loss streak: reduce size moderately (risk_committee already throttled budget)
+                multiplier = 0.80
                 adjusted["size"] = _float_to_size(size * multiplier)
                 decision = "loss_control"
-                reason += " / losing streak disables pressing and cuts size"
+                reason += " / losing streak cuts size (risk committee already throttled budget)"
             elif bull_score >= 0.74 and bear_score <= 0.46 and self.state and self.state.stance != "DEFENSE":
                 multiplier = 1.12 if desk == "crypto" else 1.08
                 adjusted["size"] = _float_to_size(size * multiplier)

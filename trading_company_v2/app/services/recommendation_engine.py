@@ -2096,6 +2096,61 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             or (rsi_float <= 25.0 and not bool(candidate.get("open_reversal", False)))
         )
 
+    def _stock_intraday_extended(candidate: dict[str, Any]) -> bool:
+        """Reject intraday-extended entries — the move has already happened.
+
+        패턴: 장중 4%+ 급등 후 RSI 72+ → 이미 과열. 여기서 진입하면 눌림목에 바로 스탑 맞음.
+        해결: burst_change 기준으로 '이미 달린 종목' 필터 추가.
+        예외: 다이버전스 신호(bullish_divergence_ok) 또는 강한 돌파 컨펌(breakout_count >= 4)은
+              모멘텀이 지속될 가능성이 있으므로 통과시킴.
+        """
+        burst = float(candidate.get("burst_change_pct", 0.0) or 0.0)
+        rsi_raw = candidate.get("rsi")
+        try:
+            rsi_float = float(rsi_raw) if rsi_raw is not None else 50.0
+        except (TypeError, ValueError):
+            rsi_float = 50.0
+        # Already-run filter: strong recent move + overbought
+        # Tiers: 6%+ burst is almost always exhaustion. 4-6% with RSI >= 72 is risky.
+        if burst >= 6.0:
+            return True
+        if burst >= 4.0 and rsi_float >= 72.0:
+            # Allow if: confirmed breakout strength (4+ signals) or fresh divergence
+            breakout_count = int(candidate.get("breakout_count", 0) or 0)
+            has_divergence = bool(candidate.get("bullish_divergence_ok", False))
+            if breakout_count < 4 and not has_divergence:
+                return True
+        return False
+
+    def _stock_pullback_quality(candidate: dict[str, Any]) -> float:
+        """눌림목 진입 품질 보너스 (0.0 ~ 0.15).
+
+        가장 수익성 높은 진입은 추세 속 눌림목:
+          - 최근 급등 후 RSI가 55-68로 리셋됨 (과열 해소)
+          - ema10 위에 가격 유지 (추세 유효)
+          - 다이버전스 신호 존재 시 추가 보너스
+        이를 candidate_score에 보너스로 반영.
+        """
+        rsi_raw = candidate.get("rsi")
+        try:
+            rsi_float = float(rsi_raw) if rsi_raw is not None else 50.0
+        except (TypeError, ValueError):
+            rsi_float = 50.0
+        burst = float(candidate.get("burst_change_pct", 0.0) or 0.0)
+        ema_gap = float(candidate.get("ema_gap_pct", 0.0) or 0.0)
+        has_divergence = bool(candidate.get("bullish_divergence_ok", False))
+        bonus = 0.0
+        # RSI in reset zone (was hot, now controlled) = classic pullback entry
+        if 50.0 <= rsi_float <= 65.0 and burst <= 2.5:
+            bonus += 0.08
+        # Tight EMA gap = price is near support, not extended
+        if 0.0 <= ema_gap <= 2.0:
+            bonus += 0.04
+        # Bullish divergence = smart money accumulation signal (세력 신호)
+        if has_divergence:
+            bonus += 0.12
+        return round(min(bonus, 0.15), 3)
+
     if not session.get("korea_open"):
         return {
             "action": "pre_market_watch",
@@ -2296,6 +2351,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         and gap_candidates
         and _stock_long_flip(gap_candidates[0], 0.58)
         and not _stock_falling_knife(gap_candidates[0])
+        and not _stock_intraday_extended(gap_candidates[0])
         and stance != "DEFENSE"
     ):
         return {
@@ -2311,43 +2367,85 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             ],
             **_qmeta,
         }
-    if active_gap_count >= 1 and quality_score >= 0.5 and avg_signal >= 0.48 and avg_volume >= 3500 and top_candidate_score >= 0.52 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.50) and not _stock_falling_knife(gap_candidates[0]):
+    if (
+        active_gap_count >= 1
+        and quality_score >= 0.5
+        and avg_signal >= 0.48
+        and avg_volume >= 3500
+        and top_candidate_score >= 0.52
+        and gap_candidates
+        and _stock_long_flip(gap_candidates[0], 0.50)
+        and not _stock_falling_knife(gap_candidates[0])
+        and not _stock_intraday_extended(gap_candidates[0])
+    ):
+        pb_bonus = _stock_pullback_quality(gap_candidates[0])
         return {
             "action": "selective_probe",
             "size": "0.50x",
             "focus": f"{top_name} selective probe while confirmation improves.",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
+            "strategy_confidence": "high" if pb_bonus >= 0.10 else "normal",
+            "bullish_divergence_ok": bool(gap_candidates[0].get("bullish_divergence_ok", False)),
             "notes": [
                 f"watchlist candidates {active_gap_count}",
                 f"quality {quality_score:.2f} / top candidate {top_candidate_score:.2f} / avg gap {avg_gap:.2f}% / avg volume {int(avg_volume):,} / avg signal {avg_signal:.2f}",
+                f"pullback_bonus={pb_bonus:.2f}" if pb_bonus > 0 else "entry at current momentum",
                 "Only selective exploration until follow-through proves itself.",
             ],
             **_qmeta,
         }
     # Single strong candidate — smaller size, tighter criteria
-    if active_gap_count >= 1 and quality_score >= 0.54 and avg_signal >= 0.5 and top_candidate_score >= 0.56 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.52) and not _stock_falling_knife(gap_candidates[0]) and not mid_session:
+    if (
+        active_gap_count >= 1
+        and quality_score >= 0.54
+        and avg_signal >= 0.5
+        and top_candidate_score >= 0.56
+        and gap_candidates
+        and _stock_long_flip(gap_candidates[0], 0.52)
+        and not _stock_falling_knife(gap_candidates[0])
+        and not _stock_intraday_extended(gap_candidates[0])
+        and not mid_session
+    ):
+        pb_bonus = _stock_pullback_quality(gap_candidates[0])
         return {
             "action": "selective_probe",
             "size": "0.32x",
             "focus": f"{top_name} cautious single-candidate probe (opening window).",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
+            "strategy_confidence": "high" if pb_bonus >= 0.10 else "normal",
+            "bullish_divergence_ok": bool(gap_candidates[0].get("bullish_divergence_ok", False)),
             "notes": [
                 f"single candidate quality {quality_score:.2f} / signal {avg_signal:.2f} / candidate_score {top_candidate_score:.2f}",
+                f"pullback_bonus={pb_bonus:.2f}" if pb_bonus > 0 else "entry at current momentum",
                 "Small size — only 1 gap candidate confirmed.",
             ],
             **_qmeta,
         }
-    if mid_session and active_gap_count >= 1 and quality_score >= 0.58 and avg_signal >= 0.52 and top_candidate_score >= 0.58 and gap_candidates and _stock_long_flip(gap_candidates[0], 0.52) and not _stock_falling_knife(gap_candidates[0]):
+    if (
+        mid_session
+        and active_gap_count >= 1
+        and quality_score >= 0.58
+        and avg_signal >= 0.52
+        and top_candidate_score >= 0.58
+        and gap_candidates
+        and _stock_long_flip(gap_candidates[0], 0.52)
+        and not _stock_falling_knife(gap_candidates[0])
+        and not _stock_intraday_extended(gap_candidates[0])
+    ):
+        pb_bonus = _stock_pullback_quality(gap_candidates[0])
         return {
             "action": "selective_probe",
             "size": "0.24x",
             "focus": f"{top_name} mid-session follow-through probe.",
             "symbol": top_ticker,
             "candidate_symbols": candidate_symbols,
+            "strategy_confidence": "high" if pb_bonus >= 0.10 else "normal",
+            "bullish_divergence_ok": bool(gap_candidates[0].get("bullish_divergence_ok", False)),
             "notes": [
                 f"mid-session quality {quality_score:.2f} / signal {avg_signal:.2f} / candidate_score {top_candidate_score:.2f}",
+                f"pullback_bonus={pb_bonus:.2f}" if pb_bonus > 0 else "entry at current momentum",
                 "Small size — mid-session entry, requires high conviction.",
             ],
             **_qmeta,

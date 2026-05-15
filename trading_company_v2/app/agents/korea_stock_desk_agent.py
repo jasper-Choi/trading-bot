@@ -75,6 +75,11 @@ class KoreaStockDeskAgent(BaseAgent):
                 - overheat_penalty,
                 2,
             )
+            # 상승 다이버전스 정보 추출 (signal에서 이미 계산됨)
+            bullish_div = bool(signal.get("bullish_divergence_ok", False))
+            div_strength = float(signal.get("divergence_strength", 0.0) or 0.0)
+            # 다이버전스 신호 시 추가 점수 (눌림목 매집 구간)
+            div_bonus = round(div_strength * 0.12, 3) if bullish_div else 0.0
             enriched_candidates.append(
                 {
                     **item,
@@ -85,10 +90,12 @@ class KoreaStockDeskAgent(BaseAgent):
                     "burst_change_pct": burst_change,
                     "ema_gap_pct": ema_gap,
                     "overheat_penalty": round(overheat_penalty, 2),
-                    "candidate_score": candidate_score,
+                    "candidate_score": round(candidate_score + div_bonus, 2),
                     "is_breakout": False,
                     "breakout_count": 0,
                     "sentiment_score": 0.5,
+                    "bullish_divergence_ok": bullish_div,
+                    "divergence_strength": div_strength,
                 }
             )
 

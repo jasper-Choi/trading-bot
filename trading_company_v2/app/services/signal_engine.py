@@ -256,6 +256,91 @@ def summarize_rsi_momentum_overlay(
     }
 
 
+def summarize_rsi_bullish_divergence(
+    candles: list[dict[str, Any]],
+    period: int = 14,
+    lookback: int = 20,
+) -> dict[str, Any]:
+    """상승 다이버전스(세력 신호) 감지.
+
+    세력/스마트머니 축적 패턴:
+    - 가격은 저점을 낮추지만 (lower low)
+    - RSI는 저점을 높임 (higher low)
+    → 숨겨진 매수세 존재 = 반전 가능성 높음
+
+    이미지의 '세력 신호' 개념:
+    - 오실레이터 저점에서 빛나는 초록 점 = 대량 자본 유입 구간
+    - 가격이 조정받는 동안 RSI가 올라가면 스마트머니가 매집 중
+    """
+    _empty: dict[str, Any] = {
+        "bullish_divergence_ok": False,
+        "divergence_strength": 0.0,
+        "divergence_reasons": ["not enough candles"],
+    }
+    if len(candles) < period + lookback:
+        return _empty
+
+    closes = [float(item.get("close", 0) or 0) for item in candles]
+    series = rsi_series(closes, period)
+    if not series or series[-1] is None:
+        return _empty
+
+    recent_closes = closes[-lookback:]
+    recent_rsi = [v for v in series[-lookback:] if v is not None]
+    if len(recent_rsi) < 8:
+        return _empty
+
+    last_close = recent_closes[-1]
+    last_rsi = float(recent_rsi[-1])
+
+    # 최근 저점 찾기 (가격 기준)
+    mid = len(recent_closes) // 2
+    left_half_closes = recent_closes[:mid]
+    left_half_rsi = recent_rsi[:mid]
+    if not left_half_closes or not left_half_rsi:
+        return _empty
+
+    prev_low_idx = min(range(len(left_half_closes)), key=lambda i: left_half_closes[i])
+    prev_low_price = left_half_closes[prev_low_idx]
+    prev_low_rsi = float(left_half_rsi[min(prev_low_idx, len(left_half_rsi) - 1)])
+
+    # 조건 1: 가격이 이전 저점보다 낮거나 비슷한 구간에 있음 (조정)
+    price_lower_low = last_close <= prev_low_price * 1.005
+
+    # 조건 2: RSI는 이전 저점보다 높음 (누적)
+    rsi_higher_low = last_rsi >= prev_low_rsi + 3.0
+
+    # 조건 3: RSI가 과매도 영역에서 회복 중 (세력 매집 구간)
+    rsi_in_accumulation = 25.0 <= last_rsi <= 52.0
+
+    bullish_divergence = bool(price_lower_low and rsi_higher_low and rsi_in_accumulation)
+
+    # 다이버전스 강도: RSI 차이가 클수록, 가격 차이가 클수록 강함
+    strength = 0.0
+    reasons: list[str] = []
+    if bullish_divergence:
+        rsi_gap = last_rsi - prev_low_rsi
+        price_gap_pct = (prev_low_price - last_close) / prev_low_price * 100 if prev_low_price else 0
+        # 강도: RSI 5p 차이 + 가격 1% 차이 조합
+        strength = min(1.0, (rsi_gap / 15.0) * 0.6 + (price_gap_pct / 3.0) * 0.4)
+        reasons.append(
+            f"상승 다이버전스 확인: 가격 하락({price_gap_pct:.1f}%) + RSI 상승({prev_low_rsi:.1f}→{last_rsi:.1f})"
+        )
+        reasons.append(f"세력 매집 구간 (RSI={last_rsi:.1f}, 강도={strength:.2f})")
+    else:
+        reasons.append(
+            f"다이버전스 미확인: 가격_LL={price_lower_low} RSI_HL={rsi_higher_low} 구간={rsi_in_accumulation}"
+        )
+
+    return {
+        "bullish_divergence_ok": bullish_divergence,
+        "divergence_strength": round(strength, 3),
+        "divergence_reasons": reasons,
+        "last_rsi": round(last_rsi, 1),
+        "prev_low_rsi": round(prev_low_rsi, 1),
+    }
+
+
 # ─── ICT (Inner Circle Trader) Detection Functions ──────────────────────────
 
 def detect_fvg(candles: list[dict[str, Any]], lookback: int = 30) -> dict[str, Any]:
@@ -2377,13 +2462,26 @@ def summarize_equity_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         score -= 0.06
         reasons.append(f"3-day flush {short_burst:.2f}%")
 
+    # ── 상승 다이버전스 (세력 신호) 오버레이 ─────────────────────────────────
+    # 가격은 저점을 낮추지만 RSI는 저점을 높이면 스마트머니 축적 신호
+    div_result = summarize_rsi_bullish_divergence(candles)
+    bullish_divergence_ok = bool(div_result.get("bullish_divergence_ok", False))
+    divergence_strength = float(div_result.get("divergence_strength", 0.0))
+    if bullish_divergence_ok:
+        # 다이버전스 강도에 비례해 점수 보너스 (+0.05 ~ +0.18)
+        div_bonus = round(0.05 + divergence_strength * 0.13, 3)
+        score += div_bonus
+        reasons.append(div_result["divergence_reasons"][0] if div_result.get("divergence_reasons") else "상승 다이버전스")
+
     score = max(0.0, min(1.0, round(score, 2)))
     if score >= 0.64:
-        bias = "offense"
+        bias = "bullish"
+    elif score >= 0.54:
+        bias = "neutral"
     elif score <= 0.4:
-        bias = "defense"
+        bias = "bearish"
     else:
-        bias = "balanced"
+        bias = "neutral"
     return {
         "bias": bias,
         "score": score,
@@ -2392,4 +2490,6 @@ def summarize_equity_signal(candles: list[dict[str, Any]]) -> dict[str, Any]:
         "burst_change_pct": round(short_burst, 2),
         "ema_gap_pct": ema_gap_pct,
         "rsi": round(last_rsi, 1) if last_rsi is not None else None,
+        "bullish_divergence_ok": bullish_divergence_ok,
+        "divergence_strength": divergence_strength,
     }
