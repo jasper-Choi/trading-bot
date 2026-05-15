@@ -2668,12 +2668,28 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
                 continue
             if row.action in {"probe_longs", "attack_opening_drive", "selective_probe"}:
                 open_position = db.execute(
-                    select(PositionRecord).where(
-                        PositionRecord.desk == row.desk,
-                        PositionRecord.symbol == row.symbol,
+                    select(PaperPositionRecord).where(
+                        PaperPositionRecord.desk == row.desk,
+                        PaperPositionRecord.symbol == row.symbol,
+                        PaperPositionRecord.status == "open",
                     )
                 ).scalar_one_or_none()
                 if open_position is None:
+                    closed_position = db.execute(
+                        select(PaperPositionRecord)
+                        .where(
+                            PaperPositionRecord.desk == row.desk,
+                            PaperPositionRecord.symbol == row.symbol,
+                            PaperPositionRecord.status == "closed",
+                        )
+                        .order_by(PaperPositionRecord.id.desc())
+                        .limit(1)
+                    ).scalar_one_or_none()
+                    if closed_position is not None:
+                        row.effect_status = "already_reconciled"
+                        row.linked_closed_symbol = closed_position.symbol
+                        updated += 1
+                        continue
                     row.effect_status = "partial_balance_sync" if row.request_status == "partial" else "awaiting_balance_sync"
                     continue
                 row.effect_status = "linked_partial_open" if row.request_status == "partial" else "linked_open"
