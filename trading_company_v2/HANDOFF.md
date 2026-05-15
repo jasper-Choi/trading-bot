@@ -1,5 +1,44 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-15 (전략 앙상블 개선 + 세력 신호 추가)
+
+### 배경
+- 전체 5건 거래 모두 손실 (0% 승률): Korea 3 stop_hit, Crypto 2 momentum_collapse_exit
+- 문제 진단:
+  1. 연패 이중 패널티: BearCase +0.18 + RiskCommittee budget 축소 → PM이 강한 신호도 차단
+  2. 순서형 판단: 전략들이 독립 평가 없이 combined score로만 필터링
+  3. 한국 주식 추격 진입: burst>=4%+RSI>=72 과열 구간에서 진입 후 즉시 stop_hit
+
+### 변경 내용
+- `debate_agents.py`:
+  - BearCase 연패 패널티 +0.18 → +0.06 (RiskCommittee가 이미 budget 축소)
+  - PM 차단 임계치 bear>=0.78 → bear>=0.88 (훨씬 강해야 차단)
+  - 강한 독립 신호(bull>=0.82, divergence_confirmed) → `strong_signal_probe` 패스
+  - 연패 사이즈 컷 0.72x → 0.80x
+- `recommendation_engine.py`:
+  - `_stock_intraday_extended()`: burst>=6% 또는 burst>=4%+RSI>=72 → 과열 필터 (추격 차단)
+  - `_stock_pullback_quality()`: 눌림목(RSI 50-65) + 다이버전스 보너스 계산
+  - 모든 선별 진입에 과열 체크 추가, `strategy_confidence='high'` 플래그 전달
+- `signal_engine.py`:
+  - `summarize_rsi_bullish_divergence()`: 세력 신호 감지 (가격LL + RSI HL + 축적 구간)
+  - `summarize_equity_signal()` bias: offense/defense → bullish/bearish (기존 버그 수정)
+  - 다이버전스 확인 시 score 보너스 자동 적용
+- `korea_stock_desk_agent.py`:
+  - `bullish_divergence_ok`, `divergence_strength` candidate에 전달
+
+### 검증
+- 문법 OK (py_compile 통과)
+- PM debate 유닛 테스트: bull=0.85 → strong_signal_probe 정상 동작 확인
+- VM 배포 완료 (trading-loop, trading-dashboard 재시작)
+- equity_signal bias 버그 수정으로 breakout path도 이전보다 더 잘 발화할 것
+
+### 다음 세션 확인사항
+- 오늘 장중 한국 주식: `_stock_intraday_extended()` 필터가 과열 종목 잡아내는지 로그 확인
+- divergence 신호가 candidate_score에 반영되는지 스캐너 페이지에서 확인
+- 추가 고려: ML 학습 데이터에 divergence 피처 추가 (다음 일요일 재학습 전)
+
+---
+
 ## 0. Latest Codex Notes - 2026-05-15 (session 46 - controlled cycle entry override)
 
 ### Why this change was needed
