@@ -2448,6 +2448,28 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "notes": ["Preserve capital unless a cleaner afternoon drive appears."],
             **_qmeta,
         }
+    if (
+        candidate_symbols
+        and quality_score >= 0.82
+        and avg_signal >= 0.65
+        and stance != "DEFENSE"
+    ):
+        probe_symbol = top_ticker or candidate_symbols[0]
+        return {
+            "action": "selective_probe",
+            "size": "0.14x",
+            "focus": f"quality_follow_probe: {probe_symbol} high-quality Korea candidate, small controlled entry.",
+            "symbol": probe_symbol,
+            "candidate_symbols": [probe_symbol],
+            "strategy_id": "korea.selective_probe",
+            "entry_profile": "quality_follow_probe",
+            "notes": [
+                f"quality {quality_score:.2f} / avg signal {avg_signal:.2f}",
+                "General session quality fallback: not opening-drive, but score is high enough for a small test.",
+                "This keeps Korea desk active without forcing full-size entries.",
+            ],
+            **_qmeta,
+        }
     return {
         "action": "stand_by",
         "size": "0.00x",
