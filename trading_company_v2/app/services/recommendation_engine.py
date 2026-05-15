@@ -59,6 +59,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     orderbook_score = float(payload.get("orderbook_score", 0.0) or 0.0)
     orderbook_bid_ask = float(payload.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
     breakout_count = int(payload.get("breakout_count", 0) or 0)
+    breakout_score = float(payload.get("breakout_score", 0.0) or 0.0)   # 돌파 품질 수치 (0~0.95)
     vol_ratio = float(payload.get("vol_ratio", 0.0) or 0.0)
     pullback_detected = bool(payload.get("pullback_detected", False))
     pullback_score = float(payload.get("pullback_score", 0.0) or 0.0)
@@ -149,6 +150,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     choch_bearish_early = bool(payload.get("choch_bearish", False))
     bos_bullish_early = bool(payload.get("bos_bullish", False))
     bos_bearish_early = bool(payload.get("bos_bearish", False))
+    ema_stack_bullish = bool(payload.get("ema_stack_bullish", False))    # EMA 8>21>34 정배열
+    bsl_sweep_confirmed = bool(payload.get("bsl_sweep_confirmed", False)) # 고점 유동성 스윕 후 반락 (매도신호)
     trend_ignition_score = round(
         min(
             1.0,
@@ -159,6 +162,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             + min(max(discovery_score, 0.0), 1.0) * 0.07
             + min(max(vol_ratio / 3.0, 0.0), 1.0) * 0.08
             + min(max(stream_score, 0.0), 1.0) * 0.06
+            + (0.04 if ema_stack_bullish else 0.0)          # EMA 정배열 보너스
+            + min(max(breakout_score, 0.0), 1.0) * 0.05    # 돌파 품질 점수
         ),
         3,
     )
@@ -216,7 +221,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # Volume gate: ignition entries need real volume confirmation.
     # Pullback entries intentionally have low current volume (contracting on retracement).
     # High-quality signals (>=0.70) bypass the strict vol gate — edge from signal quality is sufficient.
-    _high_quality_signal = signal_score >= 0.70 and micro_score >= 0.46 and orderbook_bid_ask >= 1.0
+    _high_quality_signal = (
+        signal_score >= 0.70 and micro_score >= 0.46 and orderbook_bid_ask >= 1.0
+        and (ema_stack_bullish or breakout_score >= 0.45)  # EMA 정배열 또는 돌파 품질 추가 확인
+    )
     ignition_vol_ok = vol_ratio >= 1.4 or micro_vol_ratio >= 1.5 or _high_quality_signal
     late_chase_risk = (
         micro_exhausted
@@ -263,6 +271,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         or rsi_bearish_divergence
         or choch_bearish_early
         or bos_bearish_early
+        or bsl_sweep_confirmed   # BSL 스윕 = 고점 유동성 소화 후 하락 가능성 → 롱 압력 약화
     )
     long_flip_confirmed = (
         (

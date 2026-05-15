@@ -328,6 +328,14 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     airborne_long = bool(item.get("airborne_long", False))
     airborne_score = _float(item.get("airborne_score", 0.0))
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or rsi_value >= 92.0
+    ema_stack_bullish = bool(item.get("ema_stack_bullish", False))
+    bsl_sweep_confirmed = bool(item.get("bsl_sweep_confirmed", False))
+    breakout_score_val = _float(item.get("breakout_score", 0.0))
+
+    # BSL 스윕(고점 유동성 소화 후 하락) + combined < 0.72 → 롱 진입 전체 차단
+    # combined >= 0.72인 극강 신호는 BSL 스윕에도 진입 허용 (강한 추세 지속 가능성)
+    if bsl_sweep_confirmed and combined < 0.72:
+        return False
 
     # ── RANGING regime: block all trend-following, only range_scalp allowed ──
     if regime == "RANGING":
@@ -858,6 +866,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     else:
         _vb_stream_score = _vb_cached_stream
 
+    _vb_breakout_score = float(item.get("breakout_score", 0.0) or 0.0)
+    _vb_ema_stack = bool(item.get("ema_stack_bullish", False))
+    _vb_bsl_sweep = bool(item.get("bsl_sweep_confirmed", False))
     _vol_breakout_ok = (
         vol_surge_long_signal
         and breakout_vol_confirm_signal
@@ -866,12 +877,15 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and 55.0 <= rsi_value <= 78.0   # RSI 55-78: 모멘텀 확인 + 과열 전
         and combined >= 0.58
         and orderbook_bid_ask >= 1.06
+        and _vb_breakout_score >= 0.45  # 돌파 품질 수치 활용 (bool 대신): 2건 이상 확인 수준
+        and (_vb_ema_stack or _vb_breakout_score >= 0.70)  # EMA 정배열 또는 고품질 돌파
+        and not _vb_bsl_sweep           # BSL 스윕 = 고점 유동성 소화 후 하락 → 롱 차단
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
         and not hard_overheat
         and signal_freshness >= 0.50
         and _vb_stream_score >= 0.52   # 틱 레벨 매수 모멘텀 확인 (live 조회)
-        and _daily_persist(symbol) >= 0.48                  # ↓ 0.52→0.48: 캐시 미스 0.5 반환시 차단 방지
+        and _daily_persist(symbol) >= 0.48
         and not _strategy_is_disabled("crypto.vol_breakout")
     )
     if _vol_breakout_ok:
@@ -942,6 +956,9 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     multi_ranging_combo_signal = bool(item.get("multi_ranging_combo", False))
     momentum_breakout_cont_signal = bool(item.get("momentum_breakout_cont", False))
 
+    # EMA 정배열(8>21>34) 시 진입 임계값 0.02 완화 적용
+    _ema_stack_relax = 0.02 if ema_stack_bullish else 0.0
+
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성
     # Best3 앙상블: SELL 신호(<=0.40) 시 추가 차단 / BUY 신호(>=0.58) 시 combined 요건 0.02 완화
@@ -950,7 +967,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and bool(item.get("trend_entry_allowed", False))
         and trend_alignment not in {"downtrend", "late_extension"}
         and trend_score >= 0.65
-        and combined >= (0.58 if _ensemble_buy else 0.60)  # BUY 앙상블 시 임계값 완화
+        and combined >= (0.58 if _ensemble_buy else 0.60) - _ema_stack_relax  # EMA 정배열 시 추가 완화
         and orderbook_bid_ask >= 1.08
         and not bool(item.get("rsi_bearish_divergence", False))
         and not bool(item.get("micro_exhausted", False))
