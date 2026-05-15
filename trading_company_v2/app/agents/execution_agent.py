@@ -147,6 +147,39 @@ class ExecutionAgent(BaseAgent):
                 return item
         return None
 
+    def _strategy_stats(self, strategy_id: str) -> dict:
+        for item in self.daily_summary.get("strategy_performance_stats", []) or []:
+            if str(item.get("strategy_id", "") or "") == strategy_id:
+                return item
+        return {}
+
+    def _strategy_recovery_allowed(self, desk: str, strategy_id: str, action: str) -> bool:
+        """Let proven strategies keep trading small while weak strategies stay quarantined."""
+        if action not in {"probe_longs", "attack_opening_drive", "selective_probe"}:
+            return False
+        if self._strategy_disabled(strategy_id):
+            return False
+        stats = self._strategy_stats(strategy_id)
+        if not stats:
+            return False
+        health = str(stats.get("health", "") or "")
+        count = int(stats.get("count", stats.get("closed_positions", 0)) or 0)
+        win_rate = float(stats.get("win_rate", 0.0) or 0.0)
+        capital_pnl = float(stats.get("capital_pnl_pct", 0.0) or 0.0)
+        raw_pnl = float(stats.get("raw_pnl_pct", stats.get("realized_pnl_pct", 0.0)) or 0.0)
+        peak0_pct = float(stats.get("peak0_pct", 0.0) or 0.0)
+        if health == "disabled_candidate":
+            return False
+        # Candidate strategies that are already net positive should not be
+        # suffocated by desk-level losses from unrelated experimental routes.
+        if health == "candidate" and count >= 2 and (capital_pnl > 0 or raw_pnl > 0) and win_rate >= 45.0:
+            return True
+        if desk == "korea" and strategy_id in {"korea.selective_probe", "korea.attack_opening_drive"}:
+            return count >= 2 and win_rate >= 45.0 and raw_pnl >= -0.3
+        if desk == "crypto" and strategy_id in {"crypto.selective_probe", "crypto.range_scalp"}:
+            return count >= 2 and win_rate >= 50.0 and peak0_pct <= 50.0 and raw_pnl >= 0
+        return False
+
     @staticmethod
     def _is_stop_like_exit(item: dict) -> bool:
         reason = str(item.get("closed_reason", "") or "")
@@ -772,6 +805,9 @@ class ExecutionAgent(BaseAgent):
         if not entry_profile:
             entry_profile = strategy_id.split(".", 1)[-1] if "." in strategy_id else strategy_id
         strategy_disabled = self._strategy_disabled(strategy_id) if action in actionable_entries else None
+        strategy_recovery_allowed = self._strategy_recovery_allowed(desk, strategy_id, action)
+        if strategy_recovery_allowed and desk_loss_pressure_blocks:
+            desk_loss_pressure_blocks = False
         meta = {
             "symbol": symbol,
             "reference_price": reference_price,
@@ -851,6 +887,8 @@ class ExecutionAgent(BaseAgent):
         if desk_loss_pressure:
             if crypto_recovery_mode:
                 notes.append(f"{desk} desk loss pressure active, recovery mode keeps only throttled entries")
+            elif strategy_recovery_allowed:
+                notes.append(f"{desk} desk loss pressure active, but proven strategy {strategy_id} remains allowed at throttled size")
             else:
                 notes.append(f"{desk} desk loss pressure active, new entries paused")
         if desk_chronic_drawdown:
@@ -952,6 +990,11 @@ class ExecutionAgent(BaseAgent):
         strategy_id = str(plan.get("strategy_id", "") or "")
         profile = str(plan.get("entry_profile", "") or "")
         focus = str(plan.get("focus", "") or "").lower()
+        if not strategy_id:
+            strategy_id = self._infer_strategy_id(str(plan.get("action", "")), focus, profile, "crypto")
+        disabled_stats = self._strategy_disabled(strategy_id)
+        if disabled_stats:
+            return False, f"{strategy_id} disabled by live strategy stats"
         symbol = str(meta.get("market", "") or "")
         combined = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
         signal = float(meta.get("signal_score", combined) or combined)
@@ -1397,7 +1440,11 @@ class ExecutionAgent(BaseAgent):
                     if armed_ok:
                         range_armed_candidates.append(candidate)
                         range_armed_notes.append(f"{candidate}: {armed_reason}")
-                all_candidates = eligible_candidates
+                if len(eligible_candidates) > 1:
+                    skipped_candidates.append(
+                        f"cycle override capped: {len(eligible_candidates)} eligible, opening best 1 only"
+                    )
+                all_candidates = eligible_candidates[:1]
                 if not all_candidates:
                     blocked_plan = dict(plan)
                     blocked_plan["action"] = "watchlist_only"
