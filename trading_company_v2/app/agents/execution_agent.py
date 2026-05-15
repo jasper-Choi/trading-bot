@@ -743,6 +743,13 @@ class ExecutionAgent(BaseAgent):
             # because multi-candidate orders were scaled to ~0.04-0.07x.
             floor = 0.16 if action == "attack_opening_drive" else 0.12
             scaled_notional_pct = max(scaled_notional_pct, floor)
+        if (
+            desk == "korea"
+            and action in {"probe_longs", "attack_opening_drive", "selective_probe"}
+            and desk_stop_pressure != "high"
+            and any(key in str(plan.get("focus", "") or "") for key in ("quality_follow_probe", "mid_session_quality_probe"))
+        ):
+            scaled_notional_pct = max(scaled_notional_pct, 0.06)
         size = f"{scaled_notional_pct:.2f}x"
         notional_pct = scaled_notional_pct
         reference_price = self._reference_price(desk, symbol)
