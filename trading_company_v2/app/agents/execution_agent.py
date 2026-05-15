@@ -450,6 +450,11 @@ class ExecutionAgent(BaseAgent):
         realized = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent)
         if realized > 0:
             return False
+        if desk == "us":
+            return realized <= -4.0 or (losses >= 3 and realized <= -2.0)
+        if desk == "crypto":
+            return realized <= -4.0 or (losses >= 3 and realized <= -2.0)
+        return realized <= -5.0 or (losses >= 3 and realized <= -3.0)
         # Thresholds calibrated to new P&L scale: -2% stop (crypto/us), -2.5% (korea)
         # "Loss pressure" fires when 3 losses OR cumulative P&L < 2 full stops
         if desk == "us":
@@ -884,13 +889,15 @@ class ExecutionAgent(BaseAgent):
             notes.append(f"repeated losses in {symbol}, extended block stays active")
         if extended_symbol_block and symbol:
             notes.append(f"{symbol} remains under extended Korea block after repeated failed attempts")
-        if desk_loss_pressure:
+        if desk_loss_pressure and action in actionable_entries:
             if crypto_recovery_mode:
                 notes.append(f"{desk} desk loss pressure active, recovery mode keeps only throttled entries")
             elif strategy_recovery_allowed:
                 notes.append(f"{desk} desk loss pressure active, but proven strategy {strategy_id} remains allowed at throttled size")
             else:
                 notes.append(f"{desk} desk loss pressure active, new entries paused")
+        elif desk_loss_pressure:
+            notes.append(f"{desk} desk loss pressure noted; waiting for a valid entry setup")
         if desk_chronic_drawdown:
             notes.append(f"{desk} desk under chronic drawdown lock, new entries require manual recovery")
         if desk_performance_lock:

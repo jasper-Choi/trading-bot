@@ -113,6 +113,10 @@ class RiskCommitteeAgent(BaseAgent):
             # Crypto-only growth mode should throttle after losses, not suffocate.
             # The execution/hot-path guards still cap exposure and cut failures fast.
             state.risk_budget = max(state.risk_budget, 0.32)
+        elif active_desks.issubset({"crypto", "korea"}) and state.allow_new_entries:
+            # Crypto+Korea mode still needs enough budget for small verified
+            # entries; otherwise a few tiny probes can freeze both desks.
+            state.risk_budget = max(state.risk_budget, 0.18)
 
         if "risk committee enforcing conservative defaults" not in state.notes:
             state.notes.append("risk committee enforcing conservative defaults")
