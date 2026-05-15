@@ -1183,7 +1183,10 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
                 position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
             position.cycles_open += 1
-            pos_focus = str(position.focus or "")
+            pos_focus = " ".join(
+                str(part or "")
+                for part in (position.focus, position.entry_profile, position.strategy_id)
+            )
             target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action, pos_focus)
             is_range_scalp = "range_scalp" in pos_focus or "ranging_b36" in pos_focus
             # early_failure: exit if still deeply losing after fast_fail_cycle cycles
@@ -1407,7 +1410,10 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
             position.current_price = current_price
             position.pnl_pct = _paper_net_pnl_pct(position.entry_price, current_price, position.symbol, "rapid")
             position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
-            pos_focus_rapid = str(position.focus or "")
+            pos_focus_rapid = " ".join(
+                str(part or "")
+                for part in (position.focus, position.entry_profile, position.strategy_id)
+            )
             target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action, pos_focus_rapid)
             peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
             is_range_scalp_rapid = "range_scalp" in pos_focus_rapid or "ranging_b36" in pos_focus_rapid
