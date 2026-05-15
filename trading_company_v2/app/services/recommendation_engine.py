@@ -2415,6 +2415,29 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 **_qmeta,
             }
 
+    if (
+        mid_session
+        and candidate_symbols
+        and quality_score >= 0.80
+        and avg_signal >= 0.65
+        and stance != "DEFENSE"
+    ):
+        return {
+            "action": "selective_probe",
+            "size": "0.16x",
+            "focus": f"mid_session_quality_probe: {top_name} strong afternoon quality, small controlled entry.",
+            "symbol": top_ticker,
+            "candidate_symbols": [top_ticker],
+            "strategy_id": "korea.selective_probe",
+            "entry_profile": "mid_session_quality_probe",
+            "notes": [
+                f"afternoon quality {quality_score:.2f} / avg signal {avg_signal:.2f}",
+                "No opening-drive pattern, but quality is high enough for a small controlled probe.",
+                "Stop/position sizing remain throttled because this is an afternoon continuation probe.",
+            ],
+            **_qmeta,
+        }
+
     if mid_session:
         return {
             "action": "stand_by",
