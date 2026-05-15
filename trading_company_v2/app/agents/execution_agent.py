@@ -348,16 +348,20 @@ class ExecutionAgent(BaseAgent):
             entry_profile = "attack_opening_drive"
             strategy_id = "korea.attack_opening_drive"
         else:
-            focus = f"{name} ({symbol}) selective probe while confirmation improves"
             entry_profile = str(mapped.get("entry_profile", "") or "selective_probe")
             strategy_id = str(mapped.get("strategy_id", "") or "korea.selective_probe")
             if not strategy_id.startswith("korea."):
                 strategy_id = f"korea.{entry_profile or 'selective_probe'}"
+            if entry_profile in {"quality_follow_probe", "mid_session_quality_probe"}:
+                focus = f"{entry_profile}: {name} ({symbol}) selective probe while confirmation improves"
+            else:
+                focus = f"{name} ({symbol}) selective probe while confirmation improves"
 
         mapped["focus"] = focus
         mapped["entry_profile"] = entry_profile
         mapped["strategy_id"] = strategy_id
         mapped["signal_score"] = signal
+        mapped["candidate_score"] = candidate_score
         mapped["candidate_symbols"] = []
         notes = list(mapped.get("notes", []) or [])
         notes.append(
@@ -381,6 +385,44 @@ class ExecutionAgent(BaseAgent):
                 continue
             if pnl <= 0:
                 return True
+        return False
+
+    def _quality_reentry_override(self, desk: str, symbol: str, plan: dict) -> bool:
+        """Let high-quality Korea continuation setups re-enter after one small shakeout.
+
+        A same-symbol loss should not permanently suppress a fresh quality follow
+        signal. Repeated/catastrophic losses are still handled by the regular
+        repeated-loss and extended-block gates.
+        """
+        if desk != "korea" or not symbol:
+            return False
+        focus = str(plan.get("focus", "") or "").lower()
+        profile = str(plan.get("entry_profile", plan.get("entry_path", "")) or "").lower()
+        strategy_id = str(plan.get("strategy_id", "") or "").lower()
+        is_quality_follow = any(
+            key in f"{focus} {profile} {strategy_id}"
+            for key in ("quality_follow_probe", "mid_session_quality_probe", "attack_opening_drive", "opening_drive")
+        )
+        if not is_quality_follow:
+            return False
+        signal_score = float(plan.get("signal_score", 0.0) or 0.0)
+        quality_score = float(plan.get("quality_score", 0.0) or 0.0)
+        candidate_score = float(plan.get("candidate_score", 0.0) or 0.0)
+        strong_current_signal = (
+            signal_score >= 0.68
+            or quality_score >= 0.82
+            or candidate_score >= 0.58
+        )
+        if not strong_current_signal:
+            return False
+
+        for item in self.closed_positions[:8]:
+            if item.get("desk") != desk or item.get("symbol") != symbol:
+                continue
+            pnl = float(item.get("pnl_pct", 0.0) or 0.0)
+            if pnl <= -1.6:
+                return False
+            return True
         return False
 
     def _desk_recent_trades(self, desk: str, limit: int = 6) -> list[dict]:
@@ -665,7 +707,8 @@ class ExecutionAgent(BaseAgent):
 
         for idx, (symbol, rank_score, rank_reason) in enumerate(ranked_candidates):
             existing_open = any(item.get("desk") == desk and item.get("symbol") == symbol for item in self.open_positions)
-            cooldown_loss = self._recent_loss_cooldown(desk, symbol)
+            reentry_override = self._quality_reentry_override(desk, symbol, plan)
+            cooldown_loss = self._recent_loss_cooldown(desk, symbol) and not reentry_override
             repeated_loss_block = self._repeated_loss_block(desk, symbol)
             extended_block = self._extended_symbol_block(desk, symbol)
             if existing_open or cooldown_loss or repeated_loss_block or extended_block:
@@ -757,7 +800,8 @@ class ExecutionAgent(BaseAgent):
         actionable_entries = {"probe_longs", "attack_opening_drive", "selective_probe"}
         actionable_exits = {"reduce_risk", "capital_preservation"}
         existing_open = self._has_open_position(desk, symbol)
-        cooldown_loss = self._recent_loss_cooldown(desk, symbol)
+        reentry_override = self._quality_reentry_override(desk, symbol, plan)
+        cooldown_loss = self._recent_loss_cooldown(desk, symbol) and not reentry_override
         repeated_loss_block = self._repeated_loss_block(desk, symbol)
         extended_symbol_block = self._extended_symbol_block(desk, symbol)
         desk_loss_pressure = self._desk_loss_pressure(desk)
@@ -767,7 +811,11 @@ class ExecutionAgent(BaseAgent):
         desk_performance_lock = self._desk_performance_lock(desk)
         desk_recovery_ready = self._desk_recovery_ready(desk)
         desk_offense_block = not bool(desk_offense.get("entry_allowed", True)) and action in actionable_entries
-        symbol_edge_block = not bool(symbol_edge.get("entry_allowed", True)) and action in actionable_entries
+        symbol_edge_block = (
+            not bool(symbol_edge.get("entry_allowed", True))
+            and action in actionable_entries
+            and not reentry_override
+        )
         blocked_by_stop_pressure = (
             desk_stop_pressure == "high"
             and action in actionable_entries
@@ -890,6 +938,8 @@ class ExecutionAgent(BaseAgent):
             notes.append(f"existing open paper position in {symbol}, skip duplicate entry")
         if action in actionable_exits and not existing_open:
             notes.append(f"no open position found for {desk} / {symbol or 'desk'}, exit kept idle")
+        if reentry_override and symbol:
+            notes.append(f"{symbol} quality re-entry override active: fresh Korea signal can retry after one small shakeout")
         if cooldown_loss and symbol:
             notes.append(f"recent losing exit in {symbol}, cooldown blocks immediate re-entry")
         if repeated_loss_block and symbol:
