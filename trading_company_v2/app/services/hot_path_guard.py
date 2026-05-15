@@ -331,10 +331,20 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     ema_stack_bullish = bool(item.get("ema_stack_bullish", False))
     bsl_sweep_confirmed = bool(item.get("bsl_sweep_confirmed", False))
     breakout_score_val = _float(item.get("breakout_score", 0.0))
+    at_bb_upper = bool(item.get("at_bb_upper", False))
+    price_above_trend_ema = bool(item.get("price_above_trend_ema", True))  # 기본값 True (캐시 미스 시 차단 방지)
+    rsi_reset_confirmed = bool(item.get("rsi_reset_confirmed", False))
 
     # BSL 스윕(고점 유동성 소화 후 하락) + combined < 0.72 → 롱 진입 전체 차단
-    # combined >= 0.72인 극강 신호는 BSL 스윕에도 진입 허용 (강한 추세 지속 가능성)
     if bsl_sweep_confirmed and combined < 0.72:
+        return False
+
+    # BB 상단 근접(>80%) + EMA 정배열 없음 + combined < 0.76 → 저항권 진입 차단
+    if at_bb_upper and not ema_stack_bullish and combined < 0.76:
+        return False
+
+    # EMA21 아래에서 combined < 0.68 → 기본 상승 구조 미충족 차단
+    if not price_above_trend_ema and combined < 0.68:
         return False
 
     # ── RANGING regime: block all trend-following, only range_scalp allowed ──
@@ -956,8 +966,8 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     multi_ranging_combo_signal = bool(item.get("multi_ranging_combo", False))
     momentum_breakout_cont_signal = bool(item.get("momentum_breakout_cont", False))
 
-    # EMA 정배열(8>21>34) 시 진입 임계값 0.02 완화 적용
-    _ema_stack_relax = 0.02 if ema_stack_bullish else 0.0
+    # EMA 정배열(8>21>34) 또는 RSI 재점화 시 진입 임계값 완화
+    _ema_stack_relax = (0.02 if ema_stack_bullish else 0.0) + (0.01 if rsi_reset_confirmed else 0.0)
 
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성

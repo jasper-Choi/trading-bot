@@ -72,6 +72,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     airborne_deviation_pct = float(payload.get("airborne_deviation_pct", 0.0) or 0.0)
     airborne_deviation_sigma = float(payload.get("airborne_deviation_sigma", 0.0) or 0.0)
     at_bb_lower = bool(payload.get("at_bb_lower", False))
+    at_bb_upper = bool(payload.get("at_bb_upper", False))         # BB 상단 근처 (>80%) = 저항/과열
+    bb_pct_b = float(payload.get("bb_pct_b", 0.5) or 0.5)        # 볼린저 밴드 내 위치 (0~1)
+    price_above_trend_ema = bool(payload.get("price_above_trend_ema", True))  # 가격 > EMA21 (기본 상승 구조)
+    rsi_reset_confirmed = bool(payload.get("rsi_reset_confirmed", False))     # RSI 눌림 후 회복 = 재점화
     range_scalp_eligible = bool(payload.get("range_scalp_eligible", False))
     rsi_mean_rev_long = bool(payload.get("rsi_mean_rev_long", False))
     # RANGING 보조 전략 신호
@@ -164,6 +168,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             + min(max(stream_score, 0.0), 1.0) * 0.06
             + (0.04 if ema_stack_bullish else 0.0)          # EMA 정배열 보너스
             + min(max(breakout_score, 0.0), 1.0) * 0.05    # 돌파 품질 점수
+            + (0.03 if rsi_reset_confirmed else 0.0)        # RSI 눌림 후 재점화 보너스
+            + (0.02 if price_above_trend_ema else -0.03)    # EMA21 위: +0.02 / 아래: -0.03
         ),
         3,
     )
@@ -223,6 +229,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # High-quality signals (>=0.70) bypass the strict vol gate — edge from signal quality is sufficient.
     _high_quality_signal = (
         signal_score >= 0.70 and micro_score >= 0.46 and orderbook_bid_ask >= 1.0
+        and price_above_trend_ema                           # 가격이 EMA21 위 = 기본 상승 구조 필수
         and (ema_stack_bullish or breakout_score >= 0.45)  # EMA 정배열 또는 돌파 품질 추가 확인
     )
     ignition_vol_ok = vol_ratio >= 1.4 or micro_vol_ratio >= 1.5 or _high_quality_signal
@@ -272,6 +279,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         or choch_bearish_early
         or bos_bearish_early
         or bsl_sweep_confirmed   # BSL 스윕 = 고점 유동성 소화 후 하락 가능성 → 롱 압력 약화
+        or (at_bb_upper and not ema_stack_bullish)  # BB 상단 + EMA 정배열 없으면 저항권 → 약화
     )
     long_flip_confirmed = (
         (
@@ -1085,7 +1093,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         }
 
     # ICT 컨플루언스 진입: breakout_partial 없어도 ICT 3개 이상이면 허용
-    ict_entry_ok = ict_bullish_count >= 3 or (ssl_sweep_confirmed and kill_zone_active) or (choch_bullish and ict_bullish_count >= 2)
+    # ict_score >= 0.08: 킬존 진입 이상의 컨플루언스 (SSL스윕+킬존+FVG 중 일부 활성)
+    ict_entry_ok = (
+        ict_bullish_count >= 3
+        or (ssl_sweep_confirmed and kill_zone_active)
+        or (choch_bullish and ict_bullish_count >= 2)
+        or (ict_score >= 0.10 and ict_bullish_count >= 2)  # ict_score 수치 실제 활용
+    )
     # micro_entry_ok: simplified — needs 1m momentum + volume without requiring all 5 sub-flags of micro_ready
     micro_entry_ok = (
         clean_momentum_window
@@ -1112,12 +1126,17 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # it already weights signal×0.34 + trend×0.14 + micro×0.24 + ob×0.17 + btc×0.08.
     # Do NOT re-gate on clean_momentum_window/stream/breakout — those are already baked in.
     # Just confirm: composite is high + orderbook tilted + trend direction correct.
+    # ADX 수치 활용: 방향성 있는 강한 추세 = adx_val >= 20 (bool adx_trend_strong은 22 기준)
+    # adx_val이 높을수록 추세 강도 → direct_entry 요건 완화 / 약할수록 유지
+    _adx_trend_ok = adx_val >= 20.0 or adx_trend_strong
     direct_entry_ok = (
         signal_score >= 0.76
         and orderbook_bid_ask >= 1.08
         and trend_entry_allowed
         and trend_follow_score >= 0.58
         and launch_confirmed
+        and _adx_trend_ok             # ADX 수치 기반 추세 강도 확인 추가
+        and price_above_trend_ema     # EMA21 위 = 기본 상승 구조 확인
         and not rsi_bearish_divergence
         and (trend_extension_pct <= 2.8 or pullback_detected)
     )
