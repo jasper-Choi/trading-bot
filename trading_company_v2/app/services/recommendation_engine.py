@@ -379,9 +379,18 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             keltner_lower_touch,
             mfi_oversold,
         ])
+        # 강한 과매도 확인 신호: RSI extreme / Williams %R / CCI / MFI 중 1개 이상 필수
+        blend_hard_oversold = (
+            sig_rsi_extreme            # RSI ≤ 25 극단 과매도
+            or sig_williams_r          # Williams %R ≤ -80
+            or sig_cci                 # CCI < -100
+            or sig_mfi                 # MFI ≤ 20
+            or sig_keltner             # 켈트너 채널 하단 터치
+        )
         if (
-            blend_mean_rev_signals >= 4          # ↑ 1→4: 단일신호 RANGING 진입 0% 승률 차단
-            and signal_score >= 0.60             # 신호 품질 최소 기준 추가
+            blend_mean_rev_signals >= 2          # ↓ 4→2: 단 2개 신호로 완화 (단, 아래 hard_oversold 필수)
+            and blend_hard_oversold              # 진짜 과매도 확인 필수 — soft signal 단독 차단
+            and signal_score >= 0.58             # ↓ 0.60→0.58: 신호 품질 최소 기준
             and blend_safe
             and long_flip_confirmed
             and orderbook_bid_ask >= 1.05
@@ -775,9 +784,17 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             and long_flip_confirmed
             and stance != "DEFENSE"
         )
-        # 최소 4개 신호 + 신호 품질 + 공통 필터 충족 시 진입
-        # ↑ 1→4: RANGING probe_longs 8건 전패(0%) 데이터 기반, 단일신호 평균회귀 차단
-        range_scalp_ok = mean_rev_count >= 4 and signal_score >= 0.60 and _ranging_guard
+        # 최소 2개 신호 + 강한 과매도 확인 1개 + 신호 품질 + 공통 필터 충족 시 진입
+        # soft signal 1개 단독 진입 차단, 진짜 과매도 구간만 허용
+        _hard_oversold_flag = (
+            sig_rsi_extreme or sig_williams_r or sig_cci or sig_mfi or sig_keltner
+        )
+        range_scalp_ok = (
+            mean_rev_count >= 2
+            and _hard_oversold_flag
+            and signal_score >= 0.58
+            and _ranging_guard
+        )
 
         airborne_note = (
             f"airborne dev={airborne_deviation_pct:.2f}% sigma={airborne_deviation_sigma:.1f}x "
