@@ -518,6 +518,11 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "korea" and "pullback_ma" in focus:
         # 눌림목 매수: 상승 추세 내 MA20 눌림 — 표준 Korea와 동일 파라미터
         return 25.0, -1.5, 2700
+    if desk == "korea" and ("quality_follow_probe" in focus or "mid_session_quality_probe" in focus):
+        # General intraday quality probes need room for a first shakeout, but
+        # must not become loose swing positions. SFA 036540 showed the previous
+        # -0.8% stop can cut a valid +2% continuation after only a few minutes.
+        return 2.8, -1.3, 540
     if desk == "korea" and action == "selective_probe":
         # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
         # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
