@@ -368,7 +368,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
                 and _ot_ext <= 5.0
                 and not hard_overheat
                 and not _strategy_is_disabled("crypto.obvious_trend")
-                and _daily_persist(symbol) >= 0.52  # 일봉 상승 추세 지속 확인 (Path B는 ignition 없음)
+                and _daily_persist(symbol) >= 0.48  # ↓ 0.52→0.48: 캐시 미스 0.5 반환시 차단 방지
             )
             if _ot_path_a or _ot_path_b:
                 return True  # RANGING에서 강한 개별 돌파 허용 (Path A: ignition / Path B: ultra-high)
@@ -397,7 +397,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             and _elig_ext <= 5.0
             and not hard_overheat
             and not _strategy_is_disabled("crypto.obvious_trend")
-            and _daily_persist(symbol) >= 0.52  # 일봉 상승 추세 지속 확인
+            and _daily_persist(symbol) >= 0.48  # ↓ 0.52→0.48: 캐시 미스 0.5 반환시 차단 방지
         ):
             return True  # Path B 후보: ultra-high score → 캐시 진입 허용 (tick에서 obvious_trend_ok Path B 재검증)
 
@@ -871,7 +871,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         and not hard_overheat
         and signal_freshness >= 0.50
         and _vb_stream_score >= 0.52   # 틱 레벨 매수 모멘텀 확인 (live 조회)
-        and _daily_persist(symbol) >= 0.52                  # 일봉 상승 추세 지속 확인
+        and _daily_persist(symbol) >= 0.48                  # ↓ 0.52→0.48: 캐시 미스 0.5 반환시 차단 방지
         and not _strategy_is_disabled("crypto.vol_breakout")
     )
     if _vol_breakout_ok:

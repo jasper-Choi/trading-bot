@@ -380,7 +380,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             mfi_oversold,
         ])
         if (
-            blend_mean_rev_signals >= 1
+            blend_mean_rev_signals >= 4          # ↑ 1→4: 단일신호 RANGING 진입 0% 승률 차단
+            and signal_score >= 0.60             # 신호 품질 최소 기준 추가
             and blend_safe
             and long_flip_confirmed
             and orderbook_bid_ask >= 1.05
@@ -597,7 +598,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             }
         local_continuation_ok = (
             (range_breakout_long or high_tight_flag_long)
-            and orderbook_bid_ask >= 0.98
+            and signal_score >= 0.65             # ↑ 추가: RANGING 로컬 돌파 품질 기준
+            and orderbook_bid_ask >= 1.05        # ↑ 0.98→1.05: 매수 우위 필수
             and micro_move_3 >= -0.35
             and micro_vwap_gap <= 4.8
             and not rsi_bearish_divergence
@@ -685,8 +687,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             }
 
         local_strength_follow_ok = (
-            signal_score >= 0.70
-            and trend_follow_score >= 0.48
+            signal_score >= 0.78              # ↑ 0.70→0.78: RANGING 강도추종 품질 강화
+            and trend_follow_score >= 0.52    # ↑ 0.48→0.52
             and orderbook_bid_ask >= 0.75
             and micro_move_3 >= -0.10
             and micro_vwap_gap <= 2.4
@@ -773,8 +775,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             and long_flip_confirmed
             and stance != "DEFENSE"
         )
-        # 최소 1개 신호 + 공통 필터 충족 시 진입
-        range_scalp_ok = mean_rev_count >= 1 and _ranging_guard
+        # 최소 4개 신호 + 신호 품질 + 공통 필터 충족 시 진입
+        # ↑ 1→4: RANGING probe_longs 8건 전패(0%) 데이터 기반, 단일신호 평균회귀 차단
+        range_scalp_ok = mean_rev_count >= 4 and signal_score >= 0.60 and _ranging_guard
 
         airborne_note = (
             f"airborne dev={airborne_deviation_pct:.2f}% sigma={airborne_deviation_sigma:.1f}x "
