@@ -1,5 +1,61 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-15 (지표 감사 + 미연결 신호 11개 전체 배선)
+
+### 배경
+- 사용자: "내가 얘기한 지표들이 한두개가 아닌데 왜 제대로 적용이 안되냐"
+- 전체 감사 결과: signal_engine에서 계산만 되고 결정 로직에 전혀 안 쓰이는 신호 15개, 추출만 되고 노트에만 쓰이는 수치 13개 발견
+- 그 중 actionable한 11개 즉시 연결
+
+### 버그 수정
+
+**1. RSI 불리시 다이버전스 RANGING 경로 단절 버그**
+- 문제: `rsi_bullish_div` 진입 로직이 line~1896에 있는데, RANGING 블록이 line 356에서 먼저 return → 세력 신호가 RANGING에서 영구 도달 불가
+- 수정: RANGING 블록 최상단에 세력 신호 우선 체크 추가
+  - `rsi_bullish_div + long_flip_confirmed + signal >= 0.42 + ob >= 1.02` → `probe_longs 0.40~0.50x`
+  - `mean_rev_count` 15번째 신호로도 추가, `_hard_oversold_flag`에도 포함
+
+**2. vol_breakout 캐시 미스 차단 버그**
+- 문제: `_daily_persist()` 캐시 미스 시 0.5 반환, 임계값 0.52로 설정 → vol_breakout 항상 차단
+- 수정: 3곳 모두 0.52 → 0.48 (캐시 미스 중립값 0.5가 통과되도록)
+
+**3. RANGING probe_longs 0% 승률 구조**
+- 문제: `mean_rev_count >= 1` 단일 soft signal 진입 → 8건 전패
+- 수정: `mean_rev_count >= 2 + hard_oversold 1개 이상 + signal >= 0.58`
+  - hard_oversold = RSI extreme / Williams%R / CCI / MFI / Keltner / rsi_bullish_div 중 1개
+
+### 미연결 신호 11개 배선 (recommendation_engine.py + hot_path_guard.py)
+
+| 신호 | 적용 |
+|---|---|
+| `ema_stack_bullish` | `trend_ignition_score` +0.04, `_high_quality_signal` 조건, hot_path 임계값 -0.02 완화 |
+| `breakout_score` (수치) | `trend_ignition_score` ×0.05, `_high_quality_signal` 조건, `vol_breakout` >= 0.45 수치 기준 |
+| `bsl_sweep_confirmed` | `short_pressure_visible` 추가, hot_path combined < 0.72 롱 차단 |
+| `price_above_trend_ema` | `trend_ignition_score` ±조정, `_high_quality_signal` 필수, `direct_entry_ok` 필수, hot_path < 0.68 차단 |
+| `rsi_reset_confirmed` | `trend_ignition_score` +0.03, hot_path 임계값 -0.01 완화 |
+| `at_bb_upper` | `short_pressure_visible` 추가, hot_path combined < 0.76 차단 |
+| `adx_val` (수치) | `_adx_trend_ok = adx_val >= 20` 수치 기준 → `direct_entry_ok`에 사용 |
+| `ict_score` (수치) | `ict_entry_ok`에 `ict_score >= 0.10` 경로 추가 (이전: 완전 dead variable) |
+| `airborne_short` | `short_pressure_visible` 추가, hot_path combined < 0.74 차단 |
+| `bb_pct_b` (수치) | `trend_ignition_score` +(pct_b-0.5)×0.04, RANGING 진입 사이즈 < 0.25 시 확대 |
+| `kill_zone_name` | `ignition_note` 로그에 킬존 이름 표시 |
+
+### 변경 파일
+- `app/services/recommendation_engine.py`
+- `app/services/hot_path_guard.py`
+
+### 검증
+- git push origin main → Oracle VM pull & restart 완료
+- 커밋: `fix: RANGING probe_longs`, `fix: vol_breakout persistence gate`, `fix: rsi_bullish_div RANGING path`, `feat: wire 11 unused indicators`
+
+### 다음 세션 확인사항
+- `vol_breakout` 실제 발화 여부 (캐시 미스 버그 수정 후 첫 TRENDING 조건 확인)
+- 세력 신호(`rsi_bullish_div`) RANGING 진입 발화 여부
+- `at_bb_upper` + `airborne_short` 차단 효과 — 잘못된 저항권/과열 진입 감소 여부
+- Korea `attack_opening_drive` 승률 유지 확인 (86% → 변화 없어야 함)
+
+---
+
 ## 0. Claude - 2026-05-15 (전략 앙상블 개선 + 세력 신호 추가)
 
 ### 배경

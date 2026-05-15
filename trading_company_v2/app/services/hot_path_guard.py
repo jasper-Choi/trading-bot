@@ -330,7 +330,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     hard_overheat = recent_change >= 12.0 or burst_change >= 10.0 or ema_gap >= 8.0 or rsi_value >= 92.0
     ema_stack_bullish = bool(item.get("ema_stack_bullish", False))
     bsl_sweep_confirmed = bool(item.get("bsl_sweep_confirmed", False))
-    breakout_score_val = _float(item.get("breakout_score", 0.0))
+    breakout_score_val = _float(item.get("breakout_score", 0.0))  # 돌파 품질 수치 (0~0.95)
     at_bb_upper = bool(item.get("at_bb_upper", False))
     price_above_trend_ema = bool(item.get("price_above_trend_ema", True))  # 기본값 True (캐시 미스 시 차단 방지)
     rsi_reset_confirmed = bool(item.get("rsi_reset_confirmed", False))
@@ -971,8 +971,12 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     multi_ranging_combo_signal = bool(item.get("multi_ranging_combo", False))
     momentum_breakout_cont_signal = bool(item.get("momentum_breakout_cont", False))
 
-    # EMA 정배열(8>21>34) 또는 RSI 재점화 시 진입 임계값 완화
-    _ema_stack_relax = (0.02 if ema_stack_bullish else 0.0) + (0.01 if rsi_reset_confirmed else 0.0)
+    # EMA 정배열 / RSI 재점화 / 고품질 돌파 시 진입 임계값 완화
+    _ema_stack_relax = (
+        (0.02 if ema_stack_bullish else 0.0)
+        + (0.01 if rsi_reset_confirmed else 0.0)
+        + (0.02 if breakout_score_val >= 0.70 else 0.01 if breakout_score_val >= 0.45 else 0.0)
+    )
 
     # EMA Crossover Long: EMA8/21 골든크로스 직후 조기 진입
     # standard_ok보다 낮은 threshold(trend_score ≥ 0.65) — 크로스 직후라 EMA 스택 미완성

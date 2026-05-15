@@ -287,6 +287,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         or bsl_sweep_confirmed               # BSL 스윕 = 고점 유동성 소화 후 하락 가능성
         or (at_bb_upper and not ema_stack_bullish)  # BB 상단 + EMA 정배열 없으면 저항권
         or airborne_short                    # EMA 위로 과이격 = 평균회귀 하락 압력
+        or stoch_k >= 78                     # Stochastic 과매수 수치 = 단기 되돌림 압력
     )
     long_flip_confirmed = (
         (
@@ -435,7 +436,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             mfi_oversold,
             rsi_bullish_div,           # 세력 신호: 가격신저 RSI고저 = 스마트머니 매집
         ])
-        # 강한 과매도 확인 신호: RSI extreme / Williams %R / CCI / MFI 중 1개 이상 필수
+        # 강한 과매도 확인 신호: RSI extreme / Williams %R / CCI / MFI / Stoch 중 1개 이상 필수
         blend_hard_oversold = (
             sig_rsi_extreme            # RSI ≤ 25 극단 과매도
             or sig_williams_r          # Williams %R ≤ -80
@@ -443,6 +444,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             or sig_mfi                 # MFI ≤ 20
             or sig_keltner             # 켈트너 채널 하단 터치
             or rsi_bullish_div         # 세력 신호 단독으로도 strong signal 인정
+            or stoch_k <= 20           # Stochastic K ≤ 20 극단 과매도 수치 (bool은 교차만 감지, 수치로 상태 확인)
+            or rsi_reset_confirmed     # RSI 눌림 후 회복 = 반전 재점화 확인
         )
         if (
             blend_mean_rev_signals >= 2          # ↓ 4→2: 단 2개 신호로 완화 (단, 아래 hard_oversold 필수)
@@ -848,7 +851,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         # soft signal 1개 단독 진입 차단, 진짜 과매도 구간만 허용
         _hard_oversold_flag = (
             sig_rsi_extreme or sig_williams_r or sig_cci or sig_mfi or sig_keltner
-            or sig_rsi_div   # 세력 신호도 strong confirmation으로 인정
+            or sig_rsi_div          # 세력 신호도 strong confirmation으로 인정
+            or stoch_k <= 20        # Stochastic 극단 수치 (교차 대기 없이 상태로 판단)
+            or rsi_reset_confirmed  # RSI 눌림 후 회복 확인
         )
         range_scalp_ok = (
             mean_rev_count >= 2
