@@ -20,6 +20,15 @@ from app.services.upbit_stream_cache import summarize_stream_momentum
 _log = logging.getLogger(__name__)
 
 
+def _safe_float(value: object) -> float:
+    try:
+        if value is None or value == "":
+            return 0.0
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class Base(DeclarativeBase):
     pass
 
