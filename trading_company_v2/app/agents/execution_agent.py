@@ -1071,9 +1071,55 @@ class ExecutionAgent(BaseAgent):
         return None
 
     def _crypto_cycle_entry_override_ok(self, meta: dict, plan: dict) -> tuple[bool, str]:
-        """Allow only high-structure RANGING entries to bypass hot-path-only mode."""
-        if self.regime != "RANGING" or not meta:
-            return False, "not a ranging override"
+        """Allow high-structure entries to bypass hot-path-only mode.
+
+        RANGING: smart_money_flow / ranging_strength_follow 기존 경로 유지.
+        TRENDING + RANGING: ADX 강세 + CHoCH 불리시 추세 코인 — selective_probe 허용.
+        근거: stream_ticks=0 (저거래량) 시간대에도 강한 추세는 사이클 진입 허용.
+        """
+        if not meta:
+            return False, "no candidate meta"
+        regime_ok = self.regime in {"RANGING", "TRENDING"}
+        if not regime_ok:
+            return False, f"regime={self.regime} not eligible for cycle override"
+
+        # ── ADX 강세 + CHoCH 불리시 추세 경로 (RANGING/TRENDING 공통) ─────────
+        adx_strong = bool(meta.get("adx_trend_strong", False))
+        choch_bull = bool(meta.get("choch_bullish", False))
+        meta_trend_align = str(meta.get("trend_alignment", "") or "")
+        meta_combined = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
+        meta_signal = float(meta.get("signal_score", meta_combined) or meta_combined)
+        meta_ob = float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
+        meta_micro3 = float(meta.get("micro_move_3_pct", 0.0) or 0.0)
+        meta_ema_gap = float(meta.get("ema_gap_pct", 0.0) or 0.0)
+        meta_rsi = meta.get("rsi")
+        try:
+            meta_rsi_f = float(meta_rsi) if meta_rsi is not None else 50.0
+        except (TypeError, ValueError):
+            meta_rsi_f = 50.0
+        meta_rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
+        meta_choch_bearish = bool(meta.get("choch_bearish", False))
+        if (
+            adx_strong
+            and choch_bull
+            and meta_trend_align == "trend_long"
+            and meta_combined >= 0.62
+            and meta_signal >= 0.62
+            and meta_ema_gap <= 5.5           # 과이격 차단
+            and meta_ob >= 0.85
+            and meta_micro3 >= -0.30
+            and meta_rsi_f <= 86.0
+            and not meta_rsi_bearish_div
+            and not meta_choch_bearish
+        ):
+            return True, (
+                f"adx_trend cycle ok combined={meta_combined:.2f} "
+                f"ema_gap={meta_ema_gap:.1f}% ob={meta_ob:.2f}x regime={self.regime}"
+            )
+
+        # TRENDING regime에서는 adx_trend 경로만 허용 (아래 RANGING 전용 경로 차단)
+        if self.regime != "RANGING":
+            return False, f"trending regime: adx_trend conditions not met combined={meta_combined:.2f}"
         strategy_id = str(plan.get("strategy_id", "") or "")
         profile = str(plan.get("entry_profile", "") or "")
         focus = str(plan.get("focus", "") or "").lower()
