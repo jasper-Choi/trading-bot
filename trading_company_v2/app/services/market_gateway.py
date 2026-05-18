@@ -369,6 +369,28 @@ def build_market_snapshot() -> MarketSnapshot:
                     crypto_leaders.append({"market": market, "trade_price": price, "change_rate": change_rate, "volume_24h_krw": volume_24h})
         except Exception:
             pass
+
+    # 신호 엔진이 분석하는 전체 후보군(get_krw_crypto_candidates)에서 가격 정보를 가져와
+    # crypto_leaders에 없는 코인을 자동으로 추가한다.
+    # 이유: 신규 상장 코인 또는 거래량 상위 20위 밖의 코인이 시그널을 발생시켜도
+    #       reference_price=0 → unsupported_order_shape 로 주문이 불가한 문제 해결.
+    # get_krw_crypto_candidates는 캐시된 ticker_rows를 재사용하므로 추가 API 호출 없음.
+    leader_markets = {item["market"] for item in crypto_leaders}
+    try:
+        candidates = get_krw_crypto_candidates(limit=50)
+        for item in candidates:
+            market = str(item.get("market") or "")
+            price = float(item.get("trade_price") or 0)
+            if market and price > 0 and market not in leader_markets:
+                crypto_leaders.append({
+                    "market": market,
+                    "trade_price": price,
+                    "change_rate": round(float(item.get("change_rate") or 0), 2),
+                    "volume_24h_krw": int(float(item.get("volume_24h_krw") or 0)),
+                })
+                leader_markets.add(market)
+    except Exception:
+        pass
     active_desks = settings.active_desk_set
     stock_leaders = get_kosdaq_snapshot(top_n=30) if "korea" in active_desks else []
     us_leaders = get_us_core_snapshot() if "us" in active_desks else []
