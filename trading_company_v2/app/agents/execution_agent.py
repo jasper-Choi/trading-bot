@@ -1594,6 +1594,13 @@ class ExecutionAgent(BaseAgent):
                         f"cycle override capped: {len(eligible_candidates)} eligible, opening best 1 only"
                     )
                 all_candidates = eligible_candidates[:1]
+                if all_candidates:
+                    # cycle override 통과 → strategy_id를 명시적으로 설정해 candidate_rotation 오판 방지
+                    # 이유: _apply_crypto_candidate_meta가 focus에 "candidate-specific multi-coin entry"를 설정하고
+                    #       _infer_strategy_id가 이를 crypto.candidate_rotation으로 매핑 (영구 차단됨)
+                    plan = dict(plan)
+                    plan["strategy_id"] = "crypto.selective_probe"
+                    plan["entry_profile"] = "selective_probe"
                 if not all_candidates:
                     blocked_plan = dict(plan)
                     blocked_plan["action"] = "watchlist_only"
