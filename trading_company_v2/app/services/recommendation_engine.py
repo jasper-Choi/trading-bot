@@ -438,12 +438,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             rsi_bullish_div,           # 세력 신호: 가격신저 RSI고저 = 스마트머니 매집
         ])
         # 강한 과매도 확인 신호: RSI extreme / Williams %R / CCI / MFI / Stoch 중 1개 이상 필수
+        # sig_* 변수들은 line 800+ 에서 정의되므로 여기서는 원본 payload 추출 변수 직접 사용
         blend_hard_oversold = (
-            sig_rsi_extreme            # RSI ≤ 25 극단 과매도
-            or sig_williams_r          # Williams %R ≤ -80
-            or sig_cci                 # CCI < -100
-            or sig_mfi                 # MFI ≤ 20
-            or sig_keltner             # 켈트너 채널 하단 터치
+            rsi_extreme_long           # RSI ≤ 25 극단 과매도
+            or williams_r_oversold     # Williams %R ≤ -80
+            or cci_oversold_bounce     # CCI < -100
+            or mfi_oversold            # MFI ≤ 20
+            or keltner_lower_touch     # 켈트너 채널 하단 터치
             or rsi_bullish_div         # 세력 신호 단독으로도 strong signal 인정
             or stoch_k <= 20           # Stochastic K ≤ 20 극단 과매도 수치 (bool은 교차만 감지, 수치로 상태 확인)
             or rsi_reset_confirmed     # RSI 눌림 후 회복 = 반전 재점화 확인
