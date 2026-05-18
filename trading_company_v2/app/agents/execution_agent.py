@@ -175,7 +175,9 @@ class ExecutionAgent(BaseAgent):
         if health == "candidate" and count >= 2 and (capital_pnl > 0 or raw_pnl > 0) and win_rate >= 45.0:
             return True
         if desk == "korea" and strategy_id in {"korea.selective_probe", "korea.attack_opening_drive"}:
-            return count >= 2 and win_rate >= 45.0 and raw_pnl >= -0.3
+            # selective_probe: 38% WR이지만 이익 크기>손실 크기 패턴, 회복 허용
+            # attack_opening_drive: 67% WR, 검증됨
+            return count >= 2 and win_rate >= 35.0 and raw_pnl >= -1.5
         if desk == "crypto" and strategy_id in {"crypto.selective_probe", "crypto.range_scalp"}:
             return count >= 2 and win_rate >= 50.0 and peak0_pct <= 50.0 and raw_pnl >= 0
         return False
@@ -805,7 +807,9 @@ class ExecutionAgent(BaseAgent):
         repeated_loss_block = self._repeated_loss_block(desk, symbol)
         extended_symbol_block = self._extended_symbol_block(desk, symbol)
         desk_loss_pressure = self._desk_loss_pressure(desk)
-        crypto_recovery_mode = desk == "crypto" and settings.active_desk_set == {"crypto"}
+        # crypto_recovery_mode: Korea 병행 여부와 무관하게 crypto는 항상 loss_pressure 비차단
+        # (Korea 활성 시 active_desk_set != {"crypto"} 조건으로 crypto도 블록되는 문제 수정)
+        crypto_recovery_mode = desk == "crypto" and "crypto" in settings.active_desk_set
         desk_loss_pressure_blocks = desk_loss_pressure and not crypto_recovery_mode
         desk_chronic_drawdown = self._desk_chronic_drawdown(desk)
         desk_performance_lock = self._desk_performance_lock(desk)
@@ -874,8 +878,12 @@ class ExecutionAgent(BaseAgent):
             entry_profile = strategy_id.split(".", 1)[-1] if "." in strategy_id else strategy_id
         strategy_disabled = self._strategy_disabled(strategy_id) if action in actionable_entries else None
         strategy_recovery_allowed = self._strategy_recovery_allowed(desk, strategy_id, action)
-        if strategy_recovery_allowed and desk_loss_pressure_blocks:
+        if strategy_recovery_allowed:
+            # 검증된 전략: loss_pressure + chronic_drawdown + performance_lock 모두 해제
+            # chronic/performance_lock이 loss_pressure만 풀고 chronic은 블록 → 회복 기회 자체가 없는 데드락 방지
             desk_loss_pressure_blocks = False
+            desk_chronic_drawdown = False
+            desk_performance_lock = False
         meta = {
             "symbol": symbol,
             "reference_price": reference_price,
