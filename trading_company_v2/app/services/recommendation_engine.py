@@ -513,16 +513,23 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 "reason": "individual momentum leader",
                 "note": f"leader signal={signal_score:.2f} trend={trend_follow_score:.2f} recent={recent_change:.2f}% burst={burst_change:.2f}% change={change_rate:.2f}% ob={orderbook_bid_ask:.2f}x / {transition_note}",
             })
+        # smart_money_ok: RANGING 내 자본흐름 진입 — 추세 확인 없이 발동 차단
+        _smf_ranging_confirm = (
+            ema_stack_bullish
+            or ssl_sweep_confirmed
+            or trend_follow_score >= 0.62
+        )
         smart_money_ok = (
             (smart_money_flow_long or (capital_flow_long and (auto_trendline_breakout_long or flow_box_breakout_long)))
             and blend_safe
             and long_flip_confirmed
-            and signal_score >= 0.58
-            and capital_flow_score >= 0.55
-            and orderbook_bid_ask >= 0.82
+            and signal_score >= 0.62         # 0.58 → 0.62
+            and capital_flow_score >= 0.60   # 0.55 → 0.60
+            and orderbook_bid_ask >= 0.95    # 0.82 → 0.95
             and micro_move_3 >= -0.10
-            and micro_vwap_gap <= 3.8
-            and (rsi_value is None or float(rsi_value) <= 82.0)
+            and micro_vwap_gap <= 3.0        # 3.8 → 3.0
+            and (rsi_value is None or float(rsi_value) <= 78.0)
+            and _smf_ranging_confirm         # 추세 확인 필수
         )
         if smart_money_ok:
             entry_size = "0.32x" if smart_money_flow_long and signal_score >= 0.68 else "0.24x"
@@ -1181,6 +1188,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and launch_confirmed
         and not rsi_bearish_divergence
     )
+    # smart_money_flow: 2건 전패 (no_lift_exit) → 추세 강도 확인 강화
+    # 자본 유입 신호만으로 부족 — EMA 정배열/SSL스윕/추세추종 중 1개 이상 필수
+    _smf_trend_confirm = (
+        ema_stack_bullish                # EMA 8>21>34 정배열
+        or ssl_sweep_confirmed           # ICT 매도 유동성 스윕 후 상승
+        or trend_follow_score >= 0.62    # 차트 추세 강도 충분
+    )
     smart_money_flow_ok = (
         (smart_money_flow_long or flow_box_breakout_long or (capital_flow_long and auto_trendline_breakout_long))
         and trend_alignment not in {"downtrend", "late_extension"}
@@ -1188,12 +1202,13 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and not hard_overheat
         and not rsi_bearish_divergence
         and long_flip_confirmed
-        and signal_score >= 0.58
-        and capital_flow_score >= 0.55
-        and orderbook_bid_ask >= 0.82
+        and signal_score >= 0.62         # 0.58 → 0.62: 신호 품질 기준 상향
+        and capital_flow_score >= 0.60   # 0.55 → 0.60: 자본흐름 강도 기준 상향
+        and orderbook_bid_ask >= 0.95    # 0.82 → 0.95: 오더북 압력 강화
         and micro_move_3 >= -0.10
-        and micro_vwap_gap <= 3.8
-        and (rsi_value is None or float(rsi_value) <= 82.0)
+        and micro_vwap_gap <= 3.0        # 3.8 → 3.0: VWAP 근접 요구
+        and (rsi_value is None or float(rsi_value) <= 78.0)  # 82 → 78: RSI 과매수 기준 강화
+        and _smf_trend_confirm           # 추세 확인 필수
     )
     # Volume gate: pullback/trend paths bypass only after launch confirmation.
     if not ignition_vol_ok and not pullback_entry_ok and not ict_entry_ok and not direct_entry_ok and not stream_entry_ok and not trend_pullback_ok and not combined_score_ok and not smart_money_flow_ok and stance != "DEFENSE":

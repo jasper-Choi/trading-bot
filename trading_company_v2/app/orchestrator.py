@@ -631,6 +631,19 @@ class CompanyOrchestrator:
             "korea_stock_desk": stock_desk_result.payload if "korea" in active_desks else {"disabled": True},
             "us_stock_desk": us_desk_result.payload if "us" in active_desks else {"disabled": True},
         }
+
+        # ── 포지션 조기 손절/트레일 ────────────────────────────────────────────
+        # 플래닝(recommendation_engine) 실패와 무관하게 항상 실행.
+        # run_cycle() 예외가 여기 이후에 발생해도 기존 포지션 보호는 완료된 상태.
+        try:
+            _early_prices = dict(_extract_prices(state.market_snapshot))
+            if _early_prices:
+                update_positions_unrealized(_early_prices)
+                auto_exit_positions(_early_prices)
+        except Exception as _pos_guard_exc:
+            state.notes.append(f"early position guard: {_pos_guard_exc}")
+        # ─────────────────────────────────────────────────────────────────────
+
         korea_plan = (
             build_korea_plan(
                 state.stance,

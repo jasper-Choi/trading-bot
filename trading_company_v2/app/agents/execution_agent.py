@@ -850,6 +850,14 @@ class ExecutionAgent(BaseAgent):
                 desk_position_cap_hit = True
             if "close_drive" in _focus_lower and _korea_strategy_open("close_drive") >= 1:
                 desk_position_cap_hit = True
+            # 동일 종목 중복 진입 차단 — 064760/131290 같은 같은 심볼 반복 진입 방지
+            if symbol:
+                _same_symbol_open = sum(
+                    1 for p in self.open_positions
+                    if p.desk == "korea" and getattr(p, "symbol", "") == symbol and p.status == "open"
+                )
+                if _same_symbol_open >= 1:
+                    desk_position_cap_hit = True
         desk_notional_cap_hit = (desk_open_notional + notional_pct) > max_desk_notional and action in actionable_entries
         gross_notional_cap_hit = (gross_open_notional + notional_pct) > total_notional_cap and action in actionable_entries
         high_corr_cap_hit = (
