@@ -999,7 +999,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         _ranging_trend_adx_ok = (
             adx_trend_strong                        # ADX > 40 (강한 방향성)
             and choch_bullish_early                 # CHoCH 불리시 (추세 전환 확인)
-            and trend_alignment == "trend_long"     # 15m EMA 정배열 + 가격 EMA 위
+            and trend_alignment in ("trend_long", "pullback_long")  # 추세 구조 (pullback도 허용)
             and combined >= 0.62                    # 신호 품질 최소 기준
             and signal_score >= 0.65                # 차트 신호 최소 기준
             and ema_gap <= 5.0                      # 과이격 차단 (5% 초과면 너무 늦음)

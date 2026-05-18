@@ -1102,7 +1102,7 @@ class ExecutionAgent(BaseAgent):
         if (
             adx_strong
             and choch_bull
-            and meta_trend_align == "trend_long"
+            and meta_trend_align in ("trend_long", "pullback_long")  # pullback_long도 추세 구조
             and meta_combined >= 0.62
             and meta_signal >= 0.62
             and meta_ema_gap <= 5.5           # 과이격 차단

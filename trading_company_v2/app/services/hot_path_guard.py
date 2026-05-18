@@ -619,7 +619,7 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         if (
             _adx_trend_strong
             and _choch_bull
-            and _trend_align == "trend_long"
+            and _trend_align in ("trend_long", "pullback_long")  # pullback_long도 추세 구조
             and combined >= 0.62
             and chart_score >= 0.65
             and _ema_gap <= 5.0
