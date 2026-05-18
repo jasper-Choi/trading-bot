@@ -2947,6 +2947,42 @@ def load_current_loss_streak(desk: str = "crypto", lookback: int = 15) -> int:
     return streak
 
 
+def load_hours_since_last_loss(desk: str = "crypto") -> float:
+    """Hours elapsed since the most recent losing trade for a desk.
+
+    Returns 999.0 if no losses found (treated as "streak is very old").
+    Used to apply time-based streak decay: stale streaks from crashes or
+    non-trading periods should not permanently suppress the risk budget.
+    """
+    init_db()
+    try:
+        with SessionLocal() as db:
+            last_loss = db.execute(
+                select(PaperPositionRecord)
+                .where(
+                    PaperPositionRecord.status == "closed",
+                    PaperPositionRecord.desk == desk,
+                    PaperPositionRecord.pnl_pct <= 0,
+                )
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(1)
+            ).scalars().first()
+        if not last_loss or not last_loss.closed_at:
+            return 999.0
+        closed_at_str = str(last_loss.closed_at)
+        if closed_at_str.endswith("Z"):
+            closed_at_str = closed_at_str[:-1] + "+00:00"
+        if "+" not in closed_at_str and closed_at_str[-6] != "+":
+            closed_at_str += "+00:00"
+        closed_dt = datetime.fromisoformat(closed_at_str)
+        if closed_dt.tzinfo is None:
+            closed_dt = closed_dt.replace(tzinfo=timezone.utc)
+        hours_ago = (datetime.now(timezone.utc) - closed_dt).total_seconds() / 3600
+        return round(max(0.0, hours_ago), 1)
+    except Exception:
+        return 0.0
+
+
 def load_hourly_win_rates(desk: str = "crypto", days: int = 30) -> dict[int, dict]:
     """Returns per-hour stats {hour: {win_rate, trades}} from the last `days` days.
     Only hours with trades >= 5 are returned (insufficient sample otherwise).

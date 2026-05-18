@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from app.agents.base import BaseAgent
 from app.config import settings
 from app.core.models import AgentResult, CompanyState
-from app.core.state_store import load_current_loss_streak, load_hourly_win_rates
+from app.core.state_store import load_current_loss_streak, load_hourly_win_rates, load_hours_since_last_loss
 
 _KST = ZoneInfo("Asia/Seoul")
 
@@ -55,7 +55,10 @@ class RiskCommitteeAgent(BaseAgent):
             note = f"crypto recovery mode keeps entries open at throttled risk ({combined_pnl:.2f}% active P&L)"
             if note not in state.notes:
                 state.notes.append(note)
-        crypto_growth_mode = active_desks == {"crypto"}
+        # 버그 수정: "crypto" in active_desks (이전: active_desks == {"crypto"})
+        # Korea도 동시 활성 시 crypto_growth_mode=False → floor 0.18 (너무 낮음)
+        # 실제로 "crypto 데스크가 활성화됐는가"를 체크해야 함
+        crypto_growth_mode = "crypto" in active_desks
         if state.stance == "OFFENSE":
             state.risk_budget = min(state.risk_budget, 0.72 if crypto_growth_mode else 0.65)
         elif state.stance == "DEFENSE":
@@ -78,19 +81,36 @@ class RiskCommitteeAgent(BaseAgent):
             state.risk_budget = round(max(state.risk_budget, boosted_budget), 2)
         if compounding_mode == "capital_protect":
             state.risk_budget = min(state.risk_budget, 0.22 if crypto_growth_mode else 0.18)
-        # ── 연패 후 사이징 축소 ──────────────────────────────────────────
+        # ── 연패 후 사이징 축소 (시간 감쇠 적용) ────────────────────────
         # 3연패부터 risk_budget을 10%씩 감산 (최대 45% 감산, floor 55%)
-        # 연승이 다시 나오면 다음 사이클에서 자동 해제됨
+        # [2026-05-18] 시간 감쇠 추가: 마지막 손실이 24h+ 이전이면 streak -1/24h (최대 -3)
+        #   근거: 68시간 크래시 동안 쌓인 streak=8이 복구 후에도 계속 억압 → 비합리적
+        #   크래시/비거래 기간의 오래된 streak은 현재 시장 위험과 무관함
         try:
             loss_streak = load_current_loss_streak(desk="crypto")
         except Exception:
             loss_streak = 0
+        effective_streak = loss_streak  # 시간 감쇠 전 초기값 (purge 로직에서 참조)
         if loss_streak >= 3:
-            streak_mult = max(0.55, 1.0 - (loss_streak - 2) * 0.10)
-            state.risk_budget = round(state.risk_budget * streak_mult, 2)
-            streak_note = f"risk budget reduced to {streak_mult:.0%} after {loss_streak}-loss streak"
-            if streak_note not in state.notes:
-                state.notes.append(streak_note)
+            try:
+                hours_since_loss = load_hours_since_last_loss(desk="crypto")
+                if hours_since_loss >= 24.0:
+                    # 24h마다 streak 1씩 감쇠 (최대 3까지 — 안전 마진 유지)
+                    time_decay = min(3, int(hours_since_loss / 24))
+                    effective_streak = max(0, loss_streak - time_decay)
+                else:
+                    effective_streak = loss_streak
+            except Exception:
+                effective_streak = loss_streak
+            if effective_streak >= 3:
+                streak_mult = max(0.55, 1.0 - (effective_streak - 2) * 0.10)
+                state.risk_budget = round(state.risk_budget * streak_mult, 2)
+                streak_note = (
+                    f"risk budget reduced to {streak_mult:.0%} after {loss_streak}-loss streak"
+                    + (f" (time-decayed to {effective_streak})" if effective_streak != loss_streak else "")
+                )
+                if streak_note not in state.notes:
+                    state.notes.append(streak_note)
 
         # ── 시간대별 소프트 필터 ────────────────────────────────────────
         # 최근 30일 기준으로 현재 시간대 승률이 35% 미만 + 샘플 5건 이상이면
@@ -110,12 +130,11 @@ class RiskCommitteeAgent(BaseAgent):
         except Exception:
             pass
         if crypto_growth_mode and state.allow_new_entries:
-            # Crypto-only growth mode should throttle after losses, not suffocate.
-            # The execution/hot-path guards still cap exposure and cut failures fast.
+            # Crypto 활성 시 (단독 또는 Korea 병행): 손실 후에도 충분한 회복 기회 보장
+            # 0.32 floor: 연패 후 0.10x 회복 진입 × 3개 정도 가능한 수준
             state.risk_budget = max(state.risk_budget, 0.32)
-        elif active_desks.issubset({"crypto", "korea"}) and state.allow_new_entries:
-            # Crypto+Korea mode still needs enough budget for small verified
-            # entries; otherwise a few tiny probes can freeze both desks.
+        elif active_desks.issubset({"korea", "us"}) and state.allow_new_entries:
+            # Korea/US only: 이전 0.18 유지
             state.risk_budget = max(state.risk_budget, 0.18)
 
         if "risk committee enforcing conservative defaults" not in state.notes:
@@ -135,7 +154,7 @@ class RiskCommitteeAgent(BaseAgent):
         # removed and re-added fresh (the text changes each cycle as conditions change).
         state.notes = [
             n for n in state.notes
-            if not (n.startswith("risk budget reduced") and loss_streak < 3)
+            if not (n.startswith("risk budget reduced") and (loss_streak < 3 or effective_streak < 3))
             and not n.startswith("risk budget -15% (hour")
         ]
         _stale_block_notes = {
