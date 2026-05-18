@@ -800,6 +800,13 @@ class ExecutionAgent(BaseAgent):
         # Recovery 전략 최소 size 보장: 연패 후 검증된 전략이 너무 작은 size로 차단되지 않도록
         # 근거: risk_budget=0.18 시 scaled_notional_pct=0.04~0.06x → 진입해도 회복 불가
         # strategy_recovery_allowed인 경우 최소 0.10x 보장 (stop-pressure 높을 때 제외)
+        # NOTE: strategy_recovery_allowed는 아래(887줄)에서 최종 계산되지만, size floor에도 필요하므로
+        # entry_profile/strategy_id를 미리 계산해 사전 결정. 아래 887줄에서 동일 값으로 재계산됨.
+        _ep_early = str(plan.get("entry_profile", plan.get("entry_path", "")) or "")
+        _sid_early = str(plan.get("strategy_id", "") or self._infer_strategy_id(action, str(plan.get("focus", "")), _ep_early, desk))
+        if not _ep_early:
+            _ep_early = _sid_early.split(".", 1)[-1] if "." in _sid_early else _sid_early
+        strategy_recovery_allowed = self._strategy_recovery_allowed(desk, _sid_early, action)
         if strategy_recovery_allowed and scaled_notional_pct < 0.10 and desk_stop_pressure != "high":
             scaled_notional_pct = 0.10
         size = f"{scaled_notional_pct:.2f}x"
