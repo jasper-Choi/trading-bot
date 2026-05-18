@@ -157,6 +157,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     bos_bearish_early = bool(payload.get("bos_bearish", False))
     ema_stack_bullish = bool(payload.get("ema_stack_bullish", False))    # EMA 8>21>34 정배열
     bsl_sweep_confirmed = bool(payload.get("bsl_sweep_confirmed", False)) # 고점 유동성 스윕 후 반락 (매도신호)
+    kill_zone_name = payload.get("kill_zone_name")  # "london" / "ny" / None — ignition_note 로깅용 (ICT 블록보다 먼저 필요)
     trend_ignition_score = round(
         min(
             1.0,
@@ -1094,7 +1095,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     price_in_bull_fvg = bool(payload.get("price_in_bull_fvg", False))
     ict_bullish_count = int(payload.get("ict_bullish_count", 0) or 0)
     ict_structure = str(payload.get("ict_structure", "undecided") or "undecided")
-    kill_zone_name = payload.get("kill_zone_name")  # "london" / "ny" / None — 킬존 이름 로깅용
+    # kill_zone_name: line 158 부근 payload 추출 블록에서 먼저 할당됨 (ignition_note에서 사용)
 
     # ICT CHoCH bearish: 추세 반전 하락 — 신규 진입 차단
     if choch_bearish and signal_score < 0.58:
