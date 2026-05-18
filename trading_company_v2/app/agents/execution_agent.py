@@ -795,6 +795,11 @@ class ExecutionAgent(BaseAgent):
             and any(key in str(plan.get("focus", "") or "") for key in ("quality_follow_probe", "mid_session_quality_probe"))
         ):
             scaled_notional_pct = max(scaled_notional_pct, 0.06)
+        # Recovery 전략 최소 size 보장: 연패 후 검증된 전략이 너무 작은 size로 차단되지 않도록
+        # 근거: risk_budget=0.18 시 scaled_notional_pct=0.04~0.06x → 진입해도 회복 불가
+        # strategy_recovery_allowed인 경우 최소 0.10x 보장 (stop-pressure 높을 때 제외)
+        if strategy_recovery_allowed and scaled_notional_pct < 0.10 and desk_stop_pressure != "high":
+            scaled_notional_pct = 0.10
         size = f"{scaled_notional_pct:.2f}x"
         notional_pct = scaled_notional_pct
         reference_price = self._reference_price(desk, symbol)

@@ -990,24 +990,10 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         and not late_chase_risk
         and not hard_overheat
     )
-    # Obvious trend ride:
-    # A clear 15m rising trigger should not be blocked by weak orderbook/micro
-    # snapshots. Candles define the setup; tick/rapid guard manages the exit line.
-    obvious_trend_ride_ok = (
-        trend_alignment in {"trend_long", "pullback_long", "range"}
-        and (trend_entry_allowed or trend_follow_score >= 0.76)
-        and trend_follow_score >= 0.68
-        and recent_change >= 0.00
-        and (
-            signal_score >= 0.52
-            or (trend_follow_score >= 0.90 and max(change_rate, burst_change) >= 3.0)
-            or (change_rate >= 20.0 and rsi_numeric <= 70.0)
-        )
-        and trend_extension_pct <= 8.5
-        and not rsi_bearish_divergence
-        and rsi_numeric < 88.0
-        and not (stream_fresh and stream_reversal and stream_move_15 <= -0.25)
-    )
+    # Obvious trend ride: [2026-05-18 비활성화]
+    # hot_path_guard의 obvious_trend_ok와 동일 근거로 비활성화.
+    # 데이터: 13건 WR 0% → cycle 단계에서 setup을 arm하지 않음.
+    obvious_trend_ride_ok = False  # 비활성화: obvious_trend 전략 전체 차단
     if obvious_trend_ride_ok and stance != "DEFENSE":
         return {
             "action": "watchlist_only",
@@ -2468,7 +2454,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         }
 
     if (
-        opening_window
+        (opening_window or in_open_window)  # in_open_window(장초반 40분)도 attack 허용
         and active_gap_count >= 2
         and quality_score >= 0.62
         and avg_gap >= 1.8
@@ -2500,12 +2486,12 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         }
     if (
         active_gap_count >= 1
-        and quality_score >= 0.5
-        and avg_signal >= 0.48
-        and avg_volume >= 3500
-        and top_candidate_score >= 0.52
+        and quality_score >= 0.54  # 0.50 → 0.54: 품질 기준 강화
+        and avg_signal >= 0.54  # 0.48 → 0.54: 신호 강도 요구 상향
+        and avg_volume >= 4000  # 3500 → 4000: 유동성 기준 강화
+        and top_candidate_score >= 0.56  # 0.52 → 0.56: 후보 품질 상향
         and gap_candidates
-        and _stock_long_flip(gap_candidates[0], 0.50)
+        and _stock_long_flip(gap_candidates[0], 0.52)  # 0.50 → 0.52
         and not _stock_falling_knife(gap_candidates[0])
         and not _stock_intraday_extended(gap_candidates[0])
     ):
