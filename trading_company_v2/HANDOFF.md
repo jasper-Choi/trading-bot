@@ -1,5 +1,89 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-18 (orders=[] 근본 원인 3개 수정)
+
+### 배경
+이전 세션에서 RANGING→TRENDING 개선(±0.08→±0.06, cycle override, pullback_long 추가)을 배포했지만
+사이클 저널의 `total_orders=0`이 지속됨. 근본 원인 3개를 발굴·수정.
+
+---
+
+### 버그 1: UnboundLocalError — execution_agent.py (커밋 9b68039)
+
+**문제**: `_plan_to_order` 내 `strategy_recovery_allowed` 변수가 라인 803에서 사용되지만
+정의는 라인 887에서 이루어짐. `safe_run()`이 예외를 무음으로 잡아 `payload={}` 반환
+→ 모든 사이클에서 `orders=[]`.
+
+**수정**: 라인 800 직전에 `entry_profile` / `strategy_id` 조기 계산 블록 추가.
+라인 887의 최종 계산은 그대로 유지 (동일 값으로 재계산, 동작 변화 없음).
+
+---
+
+### 버그 2: adx_trend_strong 게이트 이진 과민 — 3개 파일 (커밋 2b8dc13)
+
+**문제**: `adx_trend_strong = (adx_val >= 22) AND (DI+ > DI-)`.  
+KRW-HYPER: ADX=47.9인데 단기 pullback 중 DI->DI+ 역전으로 `adx_trend_strong=False`.
+→ cycle override, hot_path_guard, recommendation_engine 모두 차단.
+
+**수정 (`execution_agent.py`, `hot_path_guard.py`, `recommendation_engine.py`)**:
+```python
+_adx_ok = adx_trend_strong or (
+    adx_val >= 35.0          # ADX 수치 직접 확인 (고강도 추세)
+    and choch_bullish         # CHoCH 불리시 (구조 전환 확인)
+    and trend_alignment in ("trend_long", "pullback_long")
+)
+```
+
+---
+
+### 버그 3: strategy_id 오인식 → candidate_rotation 영구 차단 — execution_agent.py (커밋 b509625)
+
+**문제**: cycle override 통과 후 `_apply_crypto_candidate_meta`가 focus에
+"candidate-specific multi-coin entry" 텍스트 삽입 → `_infer_strategy_id`가
+`crypto.candidate_rotation` 반환 → 영구 차단 전략 → `status=idle`.
+
+**수정**: `eligible_candidates` 비어있지 않을 때 plan에 명시적으로
+`strategy_id="crypto.selective_probe"`, `entry_profile="selective_probe"` 스탬프.
+
+---
+
+### 최종 상태 (배포 완료)
+- `total_orders`: 0 → **2** (crypto + korea 정상 생성)
+- cycle override: KRW-HYPER 조건 충족 시 `ok=True` 확인 완료
+- 현재 KRW-HYPER: `trend=late_extension` (과이격) → 차단 정상
+- 다음 진입 조건: `trend_long/pullback_long` 복귀 + `choch_bullish` + `adx_val>=35`
+
+### 다음 세션 확인사항
+- 실제 거래 발생 여부 모니터링 (live_order_log)
+- Korea 시장 개장 시 (월 09:00 KST) attack_opening_drive 발화 여부
+- 누적 데이터 기반 crypto.selective_probe WR 모니터링
+
+---
+
+## 0. Claude - 2026-05-18 (전체 재점검: RANGING→TRENDING + cycle override + pullback_long)
+
+### 수정 내용 (커밋 3b9f450, 1835829)
+
+**문제**: RANGING 레짐에서 모든 전략 차단 → 거래 0건.
+- `abs(trend_score - 0.5) <= 0.08` → RANGING 과다 판정
+- TRENDING에서도 cycle override 차단 → hot-path 없으면 진입 불가
+
+**1. `orchestrator.py` — RANGING 밴드 축소**
+- `±0.08` → `±0.06` (→ TRENDING 전환 빈도 증가)
+
+**2. `execution_agent.py` — `_crypto_cycle_entry_override_ok` 재작성**
+- TRENDING regime 지원 추가
+- ADX 강세 + CHoCH 불리시 경로: RANGING/TRENDING 공통 허용
+
+**3. `recommendation_engine.py` + `hot_path_guard.py`**
+- RANGING-override 추세 경로 추가 (ADX 강세 + CHoCH + trend_long/pullback_long)
+
+**4. `state_store.py` — 전략 비활성화 임계값 완화**
+- `catastrophic_peak0`: count>=2 → >=5
+- `repeated_stop_like`: count>=3 → >=6
+
+---
+
 ## 0. Claude - 2026-05-18 (BB 스퀴즈 브레이크아웃 전략 배선)
 
 ### 수정 내용 (커밋 bbad60b)
