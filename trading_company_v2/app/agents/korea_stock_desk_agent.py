@@ -523,9 +523,24 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.08
         elif avg_sentiment < 0.42:
             score -= 0.06
-        score = min(round(score, 2), 0.95)
 
+        # 기관 레이더 보너스: top5 후보 중 기관 레이더 포착 종목 수
+        # inst_radar=True → 기관이 주목하는 종목 → 지속성 높음
         inst_radar_count = sum(1 for c in gap_candidates[:5] if c.get("inst_radar", False))
+        if inst_radar_count >= 2:
+            score += 0.10  # top5 중 2개+ 기관 레이더 = 강한 신뢰
+        elif inst_radar_count >= 1:
+            score += 0.05  # 1개라도 기관 레이더 = 약한 보너스
+
+        # 장초반/마감 윈도우 타이밍 보정
+        # 장초반(in_open_window): 갭업 종목 모멘텀 최고조 → 보너스
+        # 마감 직전(in_close_window): 유동성 감소, 변동성 확대 → 페널티
+        if _in_open_window and gap_candidates:
+            score += 0.06  # 09:00~09:40 KST: 갭업 추세 유효성 높음
+        if _in_close_window and gap_candidates:
+            score -= 0.05  # 15:00~15:30 KST: 마감 리스크
+
+        score = min(round(score, 2), 0.95)
 
         return AgentResult(
             name=self.name,
