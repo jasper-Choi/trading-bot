@@ -853,17 +853,17 @@ class ExecutionAgent(BaseAgent):
         _is_pyramid_entry = "pyramid" in str(plan.get("entry_profile", "") or "").lower() or "pyramid" in str(plan.get("focus", "") or "").lower()
         if _is_pyramid_entry:
             # Pyramid slot: max 1 pyramid per desk (they're tiny 0.20x follow-ons)
-            _pyramid_open = sum(1 for p in self.open_positions if p.desk == desk and "pyramid" in (getattr(p, "entry_profile", "") or "").lower())
+            _pyramid_open = sum(1 for p in self.open_positions if p.get("desk") == desk and "pyramid" in (p.get("entry_profile", "") or "").lower())
             desk_position_cap_hit = _pyramid_open >= 1
         else:
             # Regular slot: exclude pyramid positions from count
-            _non_pyramid_open = sum(1 for p in self.open_positions if p.desk == desk and "pyramid" not in (getattr(p, "entry_profile", "") or "").lower())
+            _non_pyramid_open = sum(1 for p in self.open_positions if p.get("desk") == desk and "pyramid" not in (p.get("entry_profile", "") or "").lower())
             desk_position_cap_hit = _non_pyramid_open >= max_positions
         # Per-strategy Korea slot limits (prevent duplicate open_reversal / close_drive)
         if desk == "korea" and action in actionable_entries and not _is_pyramid_entry:
             _focus_lower = str(plan.get("focus", "") or "").lower()
             def _korea_strategy_open(key: str) -> int:
-                return sum(1 for p in self.open_positions if p.desk == "korea" and key in (p.focus or "").lower())
+                return sum(1 for p in self.open_positions if p.get("desk") == "korea" and key in (p.get("focus", "") or "").lower())
             if "open_reversal" in _focus_lower and _korea_strategy_open("open_reversal") >= 1:
                 desk_position_cap_hit = True
             if "close_drive" in _focus_lower and _korea_strategy_open("close_drive") >= 1:
@@ -872,7 +872,7 @@ class ExecutionAgent(BaseAgent):
             if symbol:
                 _same_symbol_open = sum(
                     1 for p in self.open_positions
-                    if p.desk == "korea" and getattr(p, "symbol", "") == symbol and p.status == "open"
+                    if p.get("desk") == "korea" and p.get("symbol", "") == symbol and p.get("status") == "open"
                 )
                 if _same_symbol_open >= 1:
                     desk_position_cap_hit = True

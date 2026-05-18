@@ -276,8 +276,8 @@ class KoreaStockDeskAgent(BaseAgent):
                 pass
             return c
 
-        with ThreadPoolExecutor(max_workers=min(8, len(top15))) as executor:
-            enriched_top = list(executor.map(_enrich_sentiment, top15))
+        with ThreadPoolExecutor(max_workers=max(1, min(8, len(top15)))) as executor:
+            enriched_top = list(executor.map(_enrich_sentiment, top15)) if top15 else []
 
         # Rebuild final ranked list: enriched top + remaining (already scored)
         top_tickers = {str(c.get("ticker", "")) for c in enriched_top}
