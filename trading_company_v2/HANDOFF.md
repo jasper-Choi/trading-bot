@@ -1,5 +1,46 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-18 (전략 개선: obvious_trend 비활성화 + recovery size + Korea 품질)
+
+### 수정 내용 (커밋 634e6d8)
+
+**1. `obvious_trend` 전략 완전 비활성화**
+- 파일: `hot_path_guard.py`, `recommendation_engine.py`
+- 근거: 13건 WR 0%, peak=0.000% — 임계값 강화해도 개선 없음
+- `obvious_trend_ok = False`, `obvious_trend_ride_ok = False`
+- 재활성화 기준: 백테스트 WR >= 55% 확인 후
+
+**2. Recovery 전략 최소 size 0.10x 보장**
+- 파일: `execution_agent.py`
+- 문제: 8연패 후 risk_budget 축소 → scaled_notional_pct=0.04~0.06x → 회복 불가 루프
+- 수정: `strategy_recovery_allowed` 상태에서 stop-pressure 없으면 최소 0.10x 보장
+
+**3. Korea `selective_probe` 진입 품질 강화**
+- 파일: `recommendation_engine.py`
+- `avg_signal` 0.48 → 0.54, `top_candidate_score` 0.52 → 0.56, `quality_score` 0.50 → 0.54
+- 근거: Korea selective_probe WR 38% → 저품질 진입 차단
+
+**4. `attack_opening_drive` 장초반 창 확장**
+- 파일: `recommendation_engine.py`
+- `opening_window OR in_open_window` — 장초반 40분(KST 09:00~09:40) 적극 활용
+
+**5. `range_impulse` combined 임계값 강화**
+- 파일: `hot_path_guard.py`
+- `combined >= 0.38` → `combined >= 0.45` — RANGING 약한 신호 오진입 차단
+
+### 분석 요약 (전략 전수 감사)
+- 41개 전략 중 수익: `crypto.selective_probe` 100% WR, `crypto.attack_opening_drive` 100% WR
+- 손실: `obvious_trend` 0% WR (13건), RANGING 전략 전반 저조
+- 핵심 문제: RANGING 시장에서 가용 전략 4개뿐 → 장기 개선 과제
+- Korea combined_score 미구축 → `volume_ratio + foreign_net_buy` 활용은 장기 과제
+
+### 다음 세션 확인사항
+- obvious_trend 비활성화 후 사이클 로그에서 obvious_trend 진입 시도가 사라지는지 확인
+- Korea selective_probe 품질 강화 후 WR 변화 모니터링 (현재 38%)
+- RANGING 전략 장기 개선: regime 감지 속도 향상, 레인지 특화 전략 발굴
+
+---
+
 ## 0. Claude - 2026-05-15 (3차 감사 잔여 수정: ict_structure + ssl_sweep + Korea overheat)
 
 ### 수정 내용 (3건, 커밋 eb55f9f)
