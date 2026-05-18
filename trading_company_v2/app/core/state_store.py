@@ -934,14 +934,14 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         is_retired_strategy = strategy_id in {"korea.pyramid"}
         catastrophic_peak0 = (
             is_crypto_strategy
-            and count >= 2
+            and count >= 5          # 2→5: 2~4건은 통계 의미 없음, 재진입 기회 부여
             and wins == 0
             and bucket["peak0_pct"] >= 80.0
             and bucket["raw_pnl_pct"] < 0
         )
         repeated_stop_like = (
             is_crypto_strategy
-            and count >= 3
+            and count >= 6          # 3→6: 스탑류 연속이 진짜 구조 실패인지 더 확인 후 차단
             and bucket["stop_like_pct"] >= 80.0
             and bucket["raw_pnl_pct"] < 0
         )

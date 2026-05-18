@@ -607,6 +607,34 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             item["entry_profile"] = "bb_squeeze_breakout"
             return True
 
+        # ── RANGING 내 강한 개별 추세 코인 — 핫패스 통과 허용 ─────────────────────
+        # recommendation_engine에서 selective_probe로 plan된 경우 hot-path에서도 허용
+        # 조건: ADX 강세 + CHoCH 불리시 + EMA 정배열 + 과이격 아님
+        _adx_trend_strong = bool(item.get("adx_trend_strong", False))
+        _choch_bull = bool(item.get("choch_bullish", False))
+        _trend_align = str(item.get("trend_alignment", "") or "")
+        _ema_gap = _float(item.get("ema_gap_pct", 0.0))
+        _trend_ext = _float(item.get("trend_extension_pct", 0.0))
+        _entry_profile_flag = str(item.get("entry_profile", "") or "")
+        if (
+            _adx_trend_strong
+            and _choch_bull
+            and _trend_align == "trend_long"
+            and combined >= 0.62
+            and chart_score >= 0.65
+            and _ema_gap <= 5.0
+            and _trend_ext <= 5.5                  # 과이격 차단
+            and not hard_overheat
+            and orderbook_bid_ask >= 0.85
+            and micro_move_3 >= -0.30
+            and signal_freshness >= 0.40
+            and rsi_value <= 85.0
+            and not bool(item.get("rsi_bearish_divergence", False))
+            and not _strategy_is_disabled("crypto.selective_probe")
+        ):
+            item["entry_profile"] = "selective_probe"
+            return True
+
         # 나머지 모든 RANGING 전략 차단
         # (higher_lows 0승, trend_reversal_early 0승, range_scalp 0승, inside_bar_break 0승)
         return False

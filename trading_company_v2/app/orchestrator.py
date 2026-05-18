@@ -339,7 +339,7 @@ class CompanyOrchestrator:
     def _determine_regime(macro_score: float, trend_score: float) -> str:
         if macro_score <= 0.35:
             return "STRESSED"
-        if abs(trend_score - 0.5) <= 0.08:
+        if abs(trend_score - 0.5) <= 0.06:  # 0.08→0.06: 밴드 축소, 추세 판단 빠르게
             return "RANGING"
         return "TRENDING"
 

@@ -991,6 +991,45 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                     f"range scalp: ob={orderbook_bid_ask:.2f}x micro={micro_score:.2f} rsi={rsi_value}",
                 ],
             }
+        # ── RANGING 내 강한 개별 추세 코인 — 소규모 추세 진입 허용 ─────────────
+        # 시장 전체는 RANGING이더라도 개별 코인이 ADX>40 + CHoCH 불리시 + 추세 정렬이면
+        # selective_probe 스타일(0.18~0.22x)로 소규모 진입. 추세추종 전략의 최소 경로 확보.
+        # 근거: crypto.selective_probe WR 100%(4건) — 최고 성과 전략을 RANGING에서 완전 차단하는
+        #       구조적 손실을 해소. ema_gap <= 5.0으로 과이격 진입 차단.
+        _ranging_trend_adx_ok = (
+            adx_trend_strong                        # ADX > 40 (강한 방향성)
+            and choch_bullish_early                 # CHoCH 불리시 (추세 전환 확인)
+            and trend_alignment == "trend_long"     # 15m EMA 정배열 + 가격 EMA 위
+            and combined >= 0.62                    # 신호 품질 최소 기준
+            and signal_score >= 0.65                # 차트 신호 최소 기준
+            and ema_gap <= 5.0                      # 과이격 차단 (5% 초과면 너무 늦음)
+            and not hard_overheat                   # 과열 차단
+            and long_flip_confirmed                 # 단기 방향 확인
+            and blend_safe                          # 기본 안전 필터
+            and orderbook_bid_ask >= 0.88           # 오더북 최소 매수 우위
+            and micro_move_3 >= -0.30               # 직전 3분 급락 차단
+            and not rsi_bearish_divergence          # RSI 베어리시 다이버전스 차단
+        )
+        if _ranging_trend_adx_ok:
+            _rt_size = "0.22x" if (combined >= 0.72 and orderbook_bid_ask >= 1.05) else "0.18x"
+            return {
+                "action": "probe_longs",
+                "size": _rt_size,
+                "focus": (
+                    f"RANGING내 강한 추세({lead_market}) ADX강세+CHoCH불리시 — "
+                    f"소규모 추세진입 (combined={combined:.2f} ema_gap={ema_gap:.1f}%)"
+                ),
+                "symbol": lead_market,
+                "candidate_symbols": candidate_symbols,
+                "strategy_id": "crypto.selective_probe",
+                "entry_profile": "selective_probe",
+                "notes": reasons + [
+                    f"RANGING-override: adx_strong={adx_trend_strong} choch={choch_bullish_early} "
+                    f"trend={trend_alignment} combined={combined:.2f} ema_gap={ema_gap:.1f}%",
+                    f"ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% flip={long_flip_confirmed}",
+                    transition_note,
+                ],
+            }
         # RANGING이지만 신호 없음 → 대기
         return {
             "action": "watchlist_only",
