@@ -1,5 +1,40 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-18 (risk_budget 회복: streak decay + crypto_growth_mode + Korea 신호)
+
+### 수정 내용 (커밋 0e4823b, e664e13)
+
+**진단 결과**: risk_budget=0.18 (floor) — DB 확인 결과
+- Open positions: 0개
+- 오늘 손실 1건: 090710 -3.55% (68h 크래시 때 묶혔다 02:26 UTC 자동 청산)
+- Crypto 연패: 8 (마지막 손실 May 15, 68시간 전)
+- 계산: 0.28 × 0.55 = 0.154 → floor 0.18
+
+**1. `crypto_growth_mode` 버그 수정** (`risk_committee_agent.py`)
+- 이전: `active_desks == {"crypto"}` → Korea 병행 시 False → floor 0.18
+- 수정: `"crypto" in active_desks` → Korea+Crypto 혼합에도 crypto 기준 적용
+- 효과: floor 0.18 → 0.32, exposure_warn 0.9 → 1.65
+
+**2. 연패 streak 시간 감쇠** (`risk_committee_agent.py`, `state_store.py`)
+- `load_hours_since_last_loss()` 함수 추가
+- 마지막 손실 24h+ 이전이면 24h마다 streak -1 (최대 -3 감쇠)
+- 현재: streak=8, 68h 경과 → effective=6, mult 0.55→0.60
+- 재활성화: 68h/24 = 2 감쇠 적용
+
+**결과**: risk_budget 0.18 → **0.32** (78% 개선, 로그 확인 완료)
+
+**3. Korea debate 미사용 신호 배선** (`korea_stock_desk_agent.py`)
+- `inst_radar_count` → quality_score: +0.10(2개+), +0.05(1개)
+- `in_open_window` → +0.06 (09:00~09:40 KST 갭 모멘텀 보너스)
+- `in_close_window` → -0.05 (15:00~15:30 KST 마감 리스크)
+
+### 다음 세션 확인사항
+- 내일(May 19) 새 거래에서 crypto streak이 깨지면 risk_budget 0.48+ 기대
+- Korea inst_radar 신호 실제 포착 여부 로그 확인
+- RANGING 전략 부족 이슈 장기 개선 (레짐 감지 속도, 레인지 특화 전략)
+
+---
+
 ## 0. Claude - 2026-05-18 (전략 개선: obvious_trend 비활성화 + recovery size + Korea 품질)
 
 ### 수정 내용 (커밋 634e6d8)
