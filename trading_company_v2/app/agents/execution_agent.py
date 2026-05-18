@@ -1092,6 +1092,7 @@ class ExecutionAgent(BaseAgent):
 
         # ── ADX 강세 + CHoCH 불리시 추세 경로 (RANGING/TRENDING 공통) ─────────
         adx_strong = bool(meta.get("adx_trend_strong", False))
+        meta_adx_val = float(meta.get("adx_val", 0.0) or 0.0)
         choch_bull = bool(meta.get("choch_bullish", False))
         meta_trend_align = str(meta.get("trend_alignment", "") or "")
         meta_combined = float(meta.get("combined_score", meta.get("signal_score", 0.0)) or 0.0)
@@ -1106,8 +1107,16 @@ class ExecutionAgent(BaseAgent):
             meta_rsi_f = 50.0
         meta_rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
         meta_choch_bearish = bool(meta.get("choch_bearish", False))
+        # ADX 조건 완화: adx_trend_strong(DI+>DI-)가 False여도 ADX≥35+CHoCH+추세구조면 허용
+        # 이유: 강한 추세 구간에서 단기 DI-우위(pullback 중)로 인해 adx_trend_strong=False가 되지만
+        #      ADX 수치 자체가 높고 CHoCH+trend 구조가 확인되면 사이클 진입 허용
+        _adx_ok = adx_strong or (
+            meta_adx_val >= 35.0
+            and choch_bull
+            and meta_trend_align in ("trend_long", "pullback_long")
+        )
         if (
-            adx_strong
+            _adx_ok
             and choch_bull
             and meta_trend_align in ("trend_long", "pullback_long")  # pullback_long도 추세 구조
             and meta_combined >= 0.62
@@ -1121,7 +1130,7 @@ class ExecutionAgent(BaseAgent):
         ):
             return True, (
                 f"adx_trend cycle ok combined={meta_combined:.2f} "
-                f"ema_gap={meta_ema_gap:.1f}% ob={meta_ob:.2f}x regime={self.regime}"
+                f"ema_gap={meta_ema_gap:.1f}% ob={meta_ob:.2f}x adx={meta_adx_val:.0f} regime={self.regime}"
             )
 
         # TRENDING regime에서는 adx_trend 경로만 허용 (아래 RANGING 전용 경로 차단)

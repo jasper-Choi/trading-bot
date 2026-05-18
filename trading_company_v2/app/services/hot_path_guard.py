@@ -611,13 +611,20 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
         # recommendation_engine에서 selective_probe로 plan된 경우 hot-path에서도 허용
         # 조건: ADX 강세 + CHoCH 불리시 + EMA 정배열 + 과이격 아님
         _adx_trend_strong = bool(item.get("adx_trend_strong", False))
+        _adx_val_hp = _float(item.get("adx_val", 0.0))
         _choch_bull = bool(item.get("choch_bullish", False))
         _trend_align = str(item.get("trend_alignment", "") or "")
         _ema_gap = _float(item.get("ema_gap_pct", 0.0))
         _trend_ext = _float(item.get("trend_extension_pct", 0.0))
         _entry_profile_flag = str(item.get("entry_profile", "") or "")
+        # ADX 조건 완화: adx_trend_strong(DI+>DI-)가 False여도 ADX≥35+CHoCH+추세구조면 허용
+        _adx_ok_hp = _adx_trend_strong or (
+            _adx_val_hp >= 35.0
+            and _choch_bull
+            and _trend_align in ("trend_long", "pullback_long")
+        )
         if (
-            _adx_trend_strong
+            _adx_ok_hp
             and _choch_bull
             and _trend_align in ("trend_long", "pullback_long")  # pullback_long도 추세 구조
             and combined >= 0.62

@@ -996,8 +996,15 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         # selective_probe 스타일(0.18~0.22x)로 소규모 진입. 추세추종 전략의 최소 경로 확보.
         # 근거: crypto.selective_probe WR 100%(4건) — 최고 성과 전략을 RANGING에서 완전 차단하는
         #       구조적 손실을 해소. ema_gap <= 5.0으로 과이격 진입 차단.
+        # ADX 조건 완화: adx_trend_strong(ADX≥22+DI+>DI-)이 False여도
+        # ADX≥35 + CHoCH + 추세구조 조합이면 진입 허용 (강한 추세 중 단기 DI- 우위 허용)
+        _adx_strong_re = adx_trend_strong or (
+            adx_val >= 35.0
+            and choch_bullish_early
+            and trend_alignment in ("trend_long", "pullback_long")
+        )
         _ranging_trend_adx_ok = (
-            adx_trend_strong                        # ADX > 40 (강한 방향성)
+            _adx_strong_re                          # ADX 강세 (직접 or ADX≥35 + CHoCH 구조)
             and choch_bullish_early                 # CHoCH 불리시 (추세 전환 확인)
             and trend_alignment in ("trend_long", "pullback_long")  # 추세 구조 (pullback도 허용)
             and combined >= 0.62                    # 신호 품질 최소 기준
