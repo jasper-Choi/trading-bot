@@ -585,6 +585,28 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
             item["entry_profile"] = "ranging_strength_follow"
             return True
 
+        # ── BB 스퀴즈 브레이크아웃: RANGING → TRENDING 전환 진입 ──────────────────
+        # 볼린저 밴드 폭 20봉 최소(스퀴즈) + 상단 돌파 + 거래량 확인
+        # signal_engine이 이미 (BB폭최소 + 상단터치 + 거래량1.3× + RSI + 추세구조) 검증
+        # 여기선 추가로: 틱 스트림 반전 없음 + 오버히트 없음 확인
+        _bsq_breakout_flag = bool(item.get("bb_squeeze_breakout", False))
+        if (
+            _bsq_breakout_flag
+            and not hard_overheat
+            and not bool(item.get("rsi_bearish_divergence", False))
+            and not bool(item.get("micro_exhausted", False))
+            and combined >= 0.56
+            and signal_freshness >= 0.48
+            and orderbook_bid_ask >= 0.90          # 1.05보다 완화 (브레이크아웃 초기)
+            and rsi_value <= 80.0
+            and micro_move_3 >= 0.0                # 이미 상승 중 — 낙하 중 진입 차단
+            and _ranging_stream_score >= 0.40      # 0.48보다 완화 (추세 초기)
+            and not (bool(item.get("stream_reversal", False)) and bool(item.get("stream_fresh", False)))
+            and not _strategy_is_disabled("crypto.bb_squeeze_breakout")
+        ):
+            item["entry_profile"] = "bb_squeeze_breakout"
+            return True
+
         # 나머지 모든 RANGING 전략 차단
         # (higher_lows 0승, trend_reversal_early 0승, range_scalp 0승, inside_bar_break 0승)
         return False

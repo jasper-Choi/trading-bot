@@ -84,6 +84,8 @@ class ExecutionAgent(BaseAgent):
             return "crypto.ranging_strength_follow"
         if "ranging_momentum_leader" in text:
             return "crypto.ranging_momentum_leader"
+        if "bb_squeeze_breakout" in text or "bb 스퀴즈" in text:
+            return "crypto.bb_squeeze_breakout"
         if "range_scalp" in text:
             return "crypto.range_scalp"
         if "range_impulse" in text:

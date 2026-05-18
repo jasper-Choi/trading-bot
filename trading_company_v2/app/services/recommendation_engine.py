@@ -546,6 +546,66 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                     f"break={trendline_break_price:.4f} slope={trendline_slope_pct:.3f}% / {transition_note}"
                 ),
             })
+        # ── BB 스퀴즈 브레이크아웃: RANGING → TRENDING 전환 포착 ──────────────────
+        # BB 폭 20봉 최소(스퀴즈) + 상단 돌파 + 거래량 1.3× → 추세 시작 시점 진입
+        # 근거: 수집은 됐으나 한 번도 사용 안 된 신호 — 레인지 탈출 가장 초기에 포착
+        # 조건 설계: signal_engine이 이미 거래량/RSI/추세 구조를 검증 → 여기선 추가 확인만
+        bb_sq_width_pct = float(payload.get("bb_sq_width", 0.0) or 0.0)
+        if (
+            bb_squeeze_breakout
+            and blend_safe
+            and long_flip_confirmed
+            and signal_score >= 0.58          # 최소 신호 품질
+            and orderbook_bid_ask >= 0.92     # 매수 우위 (스퀴즈 해소 시 약간 완화)
+            and micro_move_3 >= 0.0           # 이미 반등 중 (낙하 중 진입 차단)
+            and (rsi_value is None or float(rsi_value) <= 80.0)
+            and not hard_overheat
+        ):
+            ranging_blend.append({
+                "score": 78,  # 최고 우선순위: regime 전환 신호는 즉시 포착해야 함
+                "profile": "bb_squeeze_breakout",
+                "strategy_id": "crypto.bb_squeeze_breakout",
+                "symbol": lead_market,
+                "size": "0.38x" if signal_score >= 0.68 else "0.28x",
+                "reason": f"BB 스퀴즈 브레이크아웃 (width={bb_sq_width_pct:.3f}%)",
+                "note": (
+                    f"bb_squeeze 폭={bb_sq_width_pct:.3f}% signal={signal_score:.2f} "
+                    f"ob={orderbook_bid_ask:.2f}x micro3={micro_move_3:.2f}% / {transition_note}"
+                ),
+            })
+        # Also scan all_candidates for squeeze breakouts on non-lead coins
+        for _cand in all_candidates[:20]:
+            _sym = str(_cand.get("market") or "").strip()
+            if not _sym or _sym == lead_market:
+                continue
+            if not bool(_cand.get("bb_squeeze_breakout", False)):
+                continue
+            _combined = _cf(_cand, "combined_score", _cf(_cand, "signal_score", 0.0))
+            _ob = _cf(_cand, "orderbook_bid_ask_ratio")
+            _micro3 = _cf(_cand, "micro_move_3_pct")
+            _rsi_f = _cf(_cand, "rsi", 50.0)
+            _stream_rev = _cb(_cand, "stream_reversal")
+            _bear_div = _cb(_cand, "rsi_bearish_divergence")
+            _bsq_width = _cf(_cand, "bb_sq_width")
+            if (
+                _combined >= 0.60
+                and _ob >= 0.90
+                and _micro3 >= 0.0
+                and _rsi_f <= 80.0
+                and not _stream_rev
+                and not _bear_div
+                and not bool(_cand.get("micro_exhausted", False))
+                and stance != "DEFENSE"
+            ):
+                ranging_blend.append({
+                    "score": 76 + _combined * 10,
+                    "profile": "bb_squeeze_breakout",
+                    "strategy_id": "crypto.bb_squeeze_breakout",
+                    "symbol": _sym,
+                    "size": "0.30x" if _combined >= 0.65 else "0.22x",
+                    "reason": f"scanner BB 스퀴즈 브레이크아웃 ({_sym})",
+                    "note": f"scanner squeeze width={_bsq_width:.3f}% combined={_combined:.2f} ob={_ob:.2f}x",
+                })
         # The desk leader can be overextended while another scanned coin has the
         # cleaner "capital flow + box/trendline break" pattern. Score the full
         # scanner set so we do not miss HYPER/BIO/SPK-style second-rank movers.
