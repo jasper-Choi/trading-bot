@@ -1,5 +1,32 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-18 (BB 스퀴즈 브레이크아웃 전략 배선)
+
+### 수정 내용 (커밋 bbad60b)
+
+**문제**: `bb_squeeze_breakout` 신호가 `signal_engine`에서 계산되었으나 파이프라인에 연결되지 않아 RANGING 시장에서 진입 기회를 100% 놓침.
+
+**1. `hot_path_guard.py` — RANGING 게이트 추가**
+- RANGING 블록 마지막 `return False` 직전에 `bb_squeeze_breakout` 전용 게이트 추가
+- 조건: `combined>=0.56`, `signal_freshness>=0.48`, `ob>=0.90`, `rsi<=80`, `micro3>=0.0`, `stream_score>=0.40`
+- hard_overheat / rsi_bearish_divergence / micro_exhausted / stream_reversal 차단
+
+**2. `recommendation_engine.py` — ranging_blend 추가**
+- 리드 마켓 bb_squeeze_breakout: signal_score>=0.58, ob>=0.92 → size 0.28x~0.38x
+- 전체 후보군 스캔(상위 20개): combined>=0.60, ob>=0.90 → size 0.22x~0.30x
+
+**3. `execution_agent.py` — 전략 ID 인식**
+- `"bb_squeeze_breakout"` / `"bb 스퀴즈"` 텍스트 → `crypto.bb_squeeze_breakout` 매핑
+
+**배포**: Oracle VM 07:01 UTC 재기동, 첫 사이클 확인 완료 (`risk_budget=0.32` 유지)
+
+### 다음 세션 확인사항
+- bb_squeeze_breakout 진입 로그 모니터링 (RANGING 레짐 + BB 압축 발생 시)
+- RANGING 전략 추가 발굴: range_scalp / pullback_gap 신호 품질 점검
+- Korea micro/orderbook 파이프라인 구축 (장기)
+
+---
+
 ## 0. Claude - 2026-05-18 (risk_budget 회복: streak decay + crypto_growth_mode + Korea 신호)
 
 ### 수정 내용 (커밋 0e4823b, e664e13)
