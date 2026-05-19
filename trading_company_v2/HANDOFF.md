@@ -1,5 +1,79 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-19 (Strategy D: ETH 4H 신고점 돌파 전략 실전 적용)
+
+### 배경
+코인 전략 v1~v4 백테스트 완료 후 ETH 4H 신고점 돌파 전략 채택.
+기존 crypto_desk_agent는 15m 기반 복잡 멀티전략이나 hot-path 의존으로 실질적 진입 0건.
+→ 독립적인 4H 스윙 전략(Strategy D) 추가로 crypto desk 재활성화 도모.
+
+### 백테스트 결과 (coin_strategy_v3.py / v4.py)
+| 항목 | 값 |
+|------|-----|
+| 대상 | KRW-ETH, 2025-2026 (약 13개월) |
+| 승률 | 61.1% |
+| 평균 PnL | +2.72%/trade |
+| Sharpe | 2.33 |
+| MDD | -7.08% |
+| n | 18 |
+| 슬리피지 0.30% 생존 | Sharpe 1.90 |
+| 2026Q2 issue | 5건 WR 20% (분배형 장세 — 레짐 필터로 제거 불가) |
+| RSI_max 70 완화 | Q2 3건 필터 가능 (vol_ratio 3.38-4.37x, RSI 62-73) |
+
+### 전략 파라미터
+- 유니버스: KRW-ETH 단독
+- 타임프레임: 4H (240분봉)
+- 진입: close > 20봉 최고가 + vol ≥ 2.5x + RSI 50-70 + close > EMA20 + BTC EMA200 상승장
+- 청산: TP +7% / SL -3% / trail(peak≥4%: giveback 3.5%, floor 1.5%) / max 20봉 (80h)
+
+### 수정 내용 (커밋 d0ad809)
+
+**market_gateway.py** — `get_upbit_4h_candles()` 추가
+```python
+def get_upbit_4h_candles(market, count=25):
+    return get_upbit_minute_candles(market, unit=240, count=count)
+```
+
+**crypto_desk_agent.py** — EMA/RSI 헬퍼 + `_check_eth4h_breakout()` + payload 추가
+```python
+# payload에 **_check_eth4h_breakout() 병합
+# 조건: BTC 4H close > EMA200 + ETH 4H 신고점 + vol≥2.5x + RSI 50-70 + EMA20
+```
+
+**recommendation_engine.py** — `eth_4h_breakout=True` 시 probe_longs 직접 반환
+```python
+if payload.get("eth_4h_breakout"):
+    return {"action": "probe_longs", "symbol": "KRW-ETH",
+            "strategy_id": "crypto.eth_4h_breakout", "size": "1.00x", ...}
+# candidate_symbols=[] → hot-path 차단 우회 (4H 신호는 사이클 직접 진입 허용)
+```
+
+**state_store.py** — `_crypto_eth4h_trail_rules()` + 전용 청산 분기
+```python
+# _position_thresholds()
+'eth_4h_breakout' in focus: target 7.0%, stop -3.0%, max 36000 cycles (80h)
+
+# _crypto_eth4h_trail_rules()
+peak >= 7%: giveback 4.0%, floor 4.0%
+peak >= 4%: giveback 3.5%, floor 1.5%
+peak >= 2%: giveback 2.0%, floor 0.0%
+
+# 청산 분기: is_range_scalp 다음, 일반 추세추종 전
+# 15m 노이즈 기반 조기청산(no_lift_exit, trend_exit) 비적용
+```
+
+**execution_agent.py** — `_infer_strategy_id()`에 eth_4h_breakout 패턴 등록
+
+### 아키텍처 핵심
+- candidate_symbols=[] → `candidate_meta` 비어있음 → hot-path 차단 코드(lines 1584-1633) 미적용
+- signal_freshness=1.0 명시 → stale_signal_block 차단 없음
+- btc_corr_15m=0.85 명시 → high_corr_cap 계산에 반영
+
+### 배포
+Oracle VM 재시작 완료 (2026-05-19 06:25 UTC), 사이클 정상 동작 확인.
+
+---
+
 ## 0. Claude - 2026-05-19 (Strategy B: 60일 신고점 돌파 전략 실전 적용)
 
 ### 배경
