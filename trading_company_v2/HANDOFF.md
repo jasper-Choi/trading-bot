@@ -1,5 +1,43 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-19 (Korea 피라미드 수익 하한선 잠금 재활성화)
+
+### 배경
+5/14 단 하루 -106,900원 (KIS 1천만 기준 paper):
+- 141080 -4.03% x0.10 = -40,300원 (즉시 stop)
+- 032500 피라미드 -3.12% x0.20 = -62,400원 (2분 만에 stop)
+- 218410 피라미드 -2.23% x0.20 = -44,600원 (2분 만에 stop)
+피라미드(0.20x = 기존 2배 사이즈)가 고점에 진입 후 즉시 반전 → 수익이 손실로 전환.
+
+### 수정 내용 (커밋 bb63e47)
+
+**수익 하한선 잠금 (profit-floor lock)**
+피라미드 진입 전에 기존 포지션의 `peak_pnl_pct`를 강제 상향:
+```python
+_required_peak = position.pnl_pct + trail_giveback + 0.2
+if position.peak_pnl_pct < _required_peak:
+    position.peak_pnl_pct = _required_peak
+# → protect_level >= current_pnl + 0.2% 보장
+# → 피라미드 실패해도 기존 포지션은 현재 수익 이상에서 청산
+```
+
+**사이즈 축소**: 0.20x → **0.10x** (기존 포지션과 동일 사이즈)
+
+**재활성화**: `korea.pyramid`를 `_PERMANENTLY_DISABLED`, `_RETIRED_STRATEGY_IDS`에서 제거
+
+### 현재 손익 현황 (paper, KIS 1천만 + Upbit 200만 기준)
+| 날짜 | 손익 |
+|------|------|
+| 5/12 | +31,724원 |
+| 5/13 | +18,834원 |
+| 5/14 | **-106,900원** (피라미드 문제) |
+| 5/15 | -4,086원 |
+| 5/18 | -27,350원 |
+| 5/19 | -40,422원 |
+| **누적** | **-128,200원** |
+
+---
+
 ## 0. Claude - 2026-05-19 (stream=0 cycle-path 진입 차단)
 
 ### 배경
