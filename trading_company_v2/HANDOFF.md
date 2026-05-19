@@ -1,5 +1,47 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-19 (execution_agent dict 속성 접근 + korea_stock_desk empty 크래시 수정)
+
+### 배경
+재배포 후 `execution_agent: error: 'dict' object has no attribute 'desk'` 발생.
+`safe_run()`이 무음으로 삼켜 `orders=[]`로 복귀.
+동시에 한국 장 외 시간에 `korea_stock_desk_agent: error: max_workers must be greater than 0` 크래시.
+
+---
+
+### 버그 4: open_positions dict 속성 접근 오류 — execution_agent.py (커밋 015393e)
+
+**문제**: `self.open_positions: list[dict]`이지만 lines 856-875에서
+`p.desk`, `p.focus`, `p.entry_profile`, `p.status` 속성 접근 사용.
+→ `AttributeError: 'dict' object has no attribute 'desk'`
+→ `safe_run()` 삼킴 → 모든 사이클 `orders=[]`.
+
+**수정**: 해당 구간 전체를 `p.get("desk")`, `p.get("focus", "")` 등 dict 접근으로 변경.
+
+---
+
+### 버그 5: top15 빈 리스트 시 max_workers=0 — korea_stock_desk_agent.py (커밋 015393e)
+
+**문제**: 한국 장 외 시간 / 갭 후보 없을 때 `top15=[]`
+→ `ThreadPoolExecutor(max_workers=min(8, 0))` → `ValueError: max_workers must be greater than 0`.
+
+**수정**: `max(1, min(8, len(top15)))` + 빈 리스트 가드 `if top15 else []`.
+
+---
+
+### 최종 상태 (배포 완료 - 2026-05-19 00:00 UTC)
+- `execution_agent`: `orders=2` 정상 복구 확인 (KRW-AKT selective_probe + korea pre_market_watch)
+- `korea_stock_desk_agent`: `reason: Full universe scan + sentiment...` 정상
+- 업비트: `paper` 모드 확인 (`EXECUTION_MODE=paper`, `UPBIT_ALLOW_LIVE=false`)
+- market_data_agent: `57 crypto leaders` 포착 (신규 상장 코인 자동 포함 활성)
+
+### 다음 세션 확인사항
+- 실전 전환 전 paper PnL 추적 (selective_probe WR 목표 ≥48%)
+- `no_lift_exit` 패턴 개선: `stream=0` 시 cycle-path 진입 차단 고려
+- Korea 장중 orders 발화 여부 (09:00 KST 이후)
+
+---
+
 ## 0. Claude - 2026-05-18 (orders=[] 근본 원인 3개 수정)
 
 ### 배경
