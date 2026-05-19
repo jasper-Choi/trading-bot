@@ -1,5 +1,46 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-19 (전략 코드 전체 리셋: Strategy B + D만 유지)
+
+### 배경
+기존 코드에 미검증 전략이 대거 누적되어 진입 0건 지속.
+모든 전략 코드를 리셋하고 백테스트 통과 전략(B, D)만 남김.
+새 전략은 코인 + 주식 모두 백테스트 통과 후에만 코드에 추가.
+
+### 수정 내용 (커밋 3159af1)
+
+**crypto_desk_agent.py**: 796 → 163 lines
+- 18마켓 병렬 스캐너, 복잡한 combined_score 전체 제거
+- ETH 4H 신고점 돌파 체크 (_check_eth4h_breakout) + BTC 방향성만 유지
+
+**korea_stock_desk_agent.py**: 577 → 146 lines
+- Path A (gap-up), Path C (reversal), Path D (close drive), Path E (gap fill), Path F (pullback MA) 전체 제거
+- Path B (60일 신고점 돌파) + 수급 점수만 유지
+
+**recommendation_engine.py**: 2,951 → 311 lines
+- build_crypto_plan: STRESSED → eth_4h_breakout → watchlist_only (3단계)
+- build_korea_plan: 시간 체크 → STRESSED → new_high_breakout → stand_by (5단계)
+- build_us_plan: 기존 그대로 유지
+
+### 규칙
+새 전략 추가 절차:
+1. 백테스트 스크립트 작성 (Desktop/backtest/)
+2. 코인 + 한국 주식 모두 테스트
+3. 통과 기준: Sharpe ≥ 1.2 / WR ≥ 48% / MDD ≥ -12%
+4. 통과 후 코드 추가
+
+### 백테스트 큐 (우선순위 순)
+1. Ross Cameron — First Pullback (인트라데이 첫 눌림목)
+2. MONGTATA 에어본 — 평균회귀
+3. Linda Raschke — Holy Grail (ADX+EMA pullback)
+4. ICT — CHoCH/BOS/FVG
+5. Mark Minervini — VCP (Volatility Contraction Pattern)
+6. Emma — 스캘핑 (Keltner+Supertrend+MACD)
+7. Moritz Neo — 마이크로 스캘핑
+8. 이미지 기반 — 자동 추세선 돌파
+
+---
+
 ## 0. Claude - 2026-05-19 (Strategy D: ETH 4H 신고점 돌파 전략 실전 적용)
 
 ### 배경
