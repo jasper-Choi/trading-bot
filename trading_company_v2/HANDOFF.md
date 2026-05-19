@@ -1,5 +1,68 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-19 (Strategy B: 60일 신고점 돌파 전략 실전 적용)
+
+### 배경
+기존 Korea 전략 (probe_longs gap-up 탐색)의 기대 수익률이 -0.28%/trade로 음수.
+전략 방향 전체 재설계 결정 → 백테스트 3개 후보 동시 테스트 → Strategy B 채택.
+
+### 백테스트 결과 (korea_wide_backtest.py)
+| 항목 | 값 |
+|------|-----|
+| 대상 | 152종목 (전 섹터), 2022-2025 (3년) |
+| 승률 | 84.6% |
+| 연간 수익 | +89.5% |
+| Sharpe | 6.16 |
+| MDD | -4.0% |
+| Walk-forward OOS diff | 3.5% (과적합 아님) |
+| 슬리피지 0.30% 생존 | annual +80.5%, Sharpe 5.35 |
+
+### 전략 파라미터
+- 진입 조건: 60일 신고점 + 거래량 ≥ 20일 평균 2배 + RSI 55-80 → 3조건 이상 충족
+- 청산: target +10%, stop -4%, trail trigger 5% (peak≥5%: 4% giveback, peak≥10%: 6% giveback)
+- 최대 보유: 20 거래일 (2700 cycles)
+
+### 수정 내용 (커밋 2d18633)
+
+**korea_stock_desk_agent.py** — Path B 파라미터 교체
+```
+fetch count: 42 → 65 (60일 데이터 확보)
+min candles: 22 → 62
+breakout_period: 20 → 60
+vol_surge_mult: 2.5 → 2.0
+rsi_max: 78 → 80
+confirmed_count threshold: >=2 → >=3
++ focus_tag='new_high_breakout' 추가 (state_store 라우팅용)
+```
+
+**state_store.py** — Strategy B 전용 trail + threshold
+```python
+# _korea_newhi_trail_rules()
+peak >= 10%: giveback 6%, floor 6%
+peak >= 5%:  giveback 4%, floor 2%
+peak < 5%:   trail 없음 (hard stop -4%만 작동)
+
+# _position_thresholds()
+'new_high_breakout' in focus: target 10%, stop -4%, max 2700 cycles
+```
+
+**execution_agent.py** — focus_tag → position focus 전파
+```python
+# _apply_korea_candidate_snapshot
+elif "breakout" in base_focus:
+    if snapshot.get("focus_tag") == "new_high_breakout":
+        focus = "new_high_breakout: {name} ({symbol}) 60-day new high breakout"
+        entry_profile = "new_high_breakout"
+        strategy_id = "korea.new_high_breakout"
+
+# _infer_strategy_id: 'new_high_breakout' 패턴 추가
+```
+
+### 배포
+Oracle VM 재시작 완료 (2026-05-19)
+
+---
+
 ## 0. Claude - 2026-05-19 (Korea 피라미드 수익 하한선 잠금 재활성화)
 
 ### 배경
