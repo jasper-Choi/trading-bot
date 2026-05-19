@@ -119,17 +119,15 @@ class ExecutionAgent(BaseAgent):
         # 2026-05-14: quarantined after live paper peak=0 loss streak.
         "crypto.ranging_momentum_leader",
         "crypto.ema_bounce",
-        # 2026-05-14: Korea pyramid add-ons created outsized losses after the
-        # base opening-drive entries were already valid. Keep the strategy off
-        # and do not let its retired trades poison current entry quality.
-        "korea.pyramid",
+        # korea.pyramid: re-enabled 2026-05-19 with profit-floor lock mechanism
+        # (peak_pnl_pct raised before pyramid entry → base profit protected)
     })
 
     _RETIRED_STRATEGY_IDS: frozenset[str] = frozenset({
         "crypto.candidate_rotation",
         "crypto.ranging_momentum_leader",
         "crypto.ema_bounce",
-        "korea.pyramid",
+        # korea.pyramid: re-enabled 2026-05-19
     })
 
     def _is_retired_strategy_trade(self, item: dict) -> bool:
@@ -138,7 +136,7 @@ class ExecutionAgent(BaseAgent):
         focus = str(item.get("focus", "") or "").lower()
         if strategy_id in self._RETIRED_STRATEGY_IDS:
             return True
-        return item.get("desk") == "korea" and ("pyramid" in entry_profile or "pyramid:" in focus)
+        return False
 
     def _strategy_disabled(self, strategy_id: str) -> dict | None:
         if strategy_id in self._PERMANENTLY_DISABLED:

@@ -931,7 +931,7 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         bucket["avg_size"] = round(float(bucket.pop("_size_sum", 0.0)) / count, 4)
         strategy_id = str(bucket["strategy_id"])
         is_crypto_strategy = strategy_id.startswith("crypto.")
-        is_retired_strategy = strategy_id in {"korea.pyramid"}
+        is_retired_strategy = strategy_id in {"crypto.candidate_rotation", "crypto.ranging_momentum_leader", "crypto.ema_bounce"}
         catastrophic_peak0 = (
             is_crypto_strategy
             and count >= 5          # 2→5: 2~4건은 통계 의미 없음, 재진입 기회 부여
@@ -1270,10 +1270,14 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     _close_position(position, "stale_exit")
                 else:
                     # ── 피라미딩 트리거 ──────────────────────────────────────
-                    # 브레이크아웃/갭업 종목이 peak +3% 이상 도달 시 0.20x 추가 진입
+                    # 브레이크아웃/갭업 종목이 peak +3% 이상 도달 시 0.10x 추가 진입
+                    # 2026-05-19: profit-floor lock 적용
+                    #   - 피라미드 진입 전 기존 포지션의 peak_pnl_pct를 강제 상향
+                    #   - 목적: 피라미드 실패시에도 기존 수익이 손실로 전환되지 않도록
+                    #   - 방법: peak = max(current_peak, current_pnl + trail_giveback + 0.2)
+                    #     → protect_level = max(floor, new_peak - giveback) >= current_pnl + 0.2
                     _pyramid_ok = (
-                        False
-                        and not getattr(position, "is_pyramided", False)
+                        not getattr(position, "is_pyramided", False)
                         and "open_reversal" not in pos_focus
                         and "opening_drive" not in pos_focus
                         and "close_drive" not in pos_focus
@@ -1289,13 +1293,27 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                             if p.desk == "korea" and p.status == "open"
                         )
                         if _total_korea < 4:
+                            # ── 수익 하한선 잠금 (profit-floor lock) ────────────
+                            # 피라미드 진입 전에 기존 포지션의 trail stop을 현재 수익 위로 올림
+                            # trail_giveback at current peak (via _korea_trail_rules)
+                            _pf_giveback, _pf_floor = _korea_trail_rules(peak_pnl)
+                            # 새 peak_pnl = max(현재peak, 현재pnl + giveback + 0.2%)
+                            # 이렇게 하면: protect_level = max(floor, new_peak - giveback)
+                            #             >= current_pnl + 0.2%
+                            _required_peak = position.pnl_pct + _pf_giveback + 0.2
+                            if position.peak_pnl_pct < _required_peak:
+                                _log.info(
+                                    "Korea pyramid profit-floor lock: %s peak %.2f%% → %.2f%% (pnl=%.2f%%)",
+                                    position.symbol, position.peak_pnl_pct, _required_peak, position.pnl_pct,
+                                )
+                                position.peak_pnl_pct = _required_peak
                             position.is_pyramided = True
                             pyr = PaperPositionRecord(
                                 desk="korea",
                                 symbol=position.symbol,
                                 status="open",
                                 action="probe_longs",
-                                size="0.20x",
+                                size="0.10x",
                                 opened_at=utcnow_iso(),
                                 entry_price=position.current_price,
                                 current_price=position.current_price,
@@ -1310,8 +1328,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                             )
                             db.add(pyr)
                             _log.info(
-                                "Korea pyramid: %s peak=%.1f%% → +0.20x @ %.0f",
+                                "Korea pyramid: %s peak=%.1f%% → +0.10x @ %.0f (profit-floor locked at %.2f%%)",
                                 position.symbol, peak_pnl, position.current_price,
+                                position.pnl_pct,
                             )
                 continue
             # ── US / 기타 데스크 청산 ──
