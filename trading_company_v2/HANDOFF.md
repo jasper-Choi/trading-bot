@@ -1,5 +1,37 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-19 (stream=0 cycle-path 진입 차단)
+
+### 배경
+사이클 진입 포지션이 시작하자마자 음수(-0.55%, -0.92%, -0.23%)로 떨어지고
+`peak_pnl=0.0` → `no_lift_exit` 패턴. 전부 공통점: **`stream=0.00`** (WebSocket 틱 없음).
+
+실전 데이터 결과:
+| 코인 | stream | peak_pnl | 결과 | 청산 이유 |
+|------|--------|----------|------|-----------|
+| KRW-ONDO | 0.00 | 0.0 | -0.92% | no_lift_exit |
+| KRW-BTC | 0.00 | 0.0 | -0.23% | flat_no_lift_exit |
+| KRW-AKT | 0.00 | 0.0 | -0.55% | (open) |
+| KRW-ONT | 0.00 | 0.0 | 방금 오픈 | (open) |
+
+**stream=0 사이클 진입 = 100% 손실** (과거 설계 주석 "저거래량 시간대에도 허용"이 잘못된 가정)
+
+### 수정 — execution_agent.py (커밋 f602ae8)
+
+`_crypto_cycle_entry_override_ok` 맨 앞에 조기 차단 추가:
+```python
+if meta_stream <= 0.0:
+    return False, "stream=0 cycle override blocked (no tick activity, all stream=0 entries historically lose)"
+```
+
+WebSocket 틱이 없으면 실시간 모멘텀 확인 불가 → cycle 진입 비허용.
+틱이 있을 때 (hot-path)만 자동 진입 또는 stream > 0 시간대에만 cycle override 허용.
+
+### 현재 오픈 포지션 처리
+KRW-AKT, KRW-ONT (stream=0로 진입된 포지션) → 기존 `no_lift_exit` 로직이 10분 후 자동 청산.
+
+---
+
 ## 0. Claude - 2026-05-19 (execution_agent dict 속성 접근 + korea_stock_desk empty 크래시 수정)
 
 ### 배경
@@ -37,7 +69,6 @@
 
 ### 다음 세션 확인사항
 - 실전 전환 전 paper PnL 추적 (selective_probe WR 목표 ≥48%)
-- `no_lift_exit` 패턴 개선: `stream=0` 시 cycle-path 진입 차단 고려
 - Korea 장중 orders 발화 여부 (09:00 KST 이후)
 
 ---
