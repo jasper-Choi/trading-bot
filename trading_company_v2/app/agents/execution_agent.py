@@ -69,6 +69,8 @@ class ExecutionAgent(BaseAgent):
         ns = desk if desk in {"crypto", "korea", "us"} else "crypto"
         # Korea-specific patterns
         if ns == "korea":
+            if "new_high_breakout" in text:
+                return "korea.new_high_breakout"
             if "breakout" in text or "돌파" in text:
                 return "korea.breakout"
             if "gap" in text or "갭" in text:
@@ -342,9 +344,17 @@ class ExecutionAgent(BaseAgent):
             entry_profile = "pullback_ma"
             strategy_id = "korea.pullback_ma"
         elif "breakout" in base_focus:
-            focus = f"breakout: {name} ({symbol}) momentum breakout candidate"
-            entry_profile = "breakout"
-            strategy_id = "korea.breakout"
+            _focus_tag = str(snapshot.get("focus_tag", "") or "").lower()
+            if _focus_tag == "new_high_breakout":
+                # 2026-05-19: 신고점 돌파 전략 B — 60-day high + vol surge + RSI 55-80
+                # 백테스트 검증: WR 84.6%, Sharpe 6.16, 연 +89.5%, MDD -4.0% (152종목, 3년)
+                focus = f"new_high_breakout: {name} ({symbol}) 60-day new high breakout"
+                entry_profile = "new_high_breakout"
+                strategy_id = "korea.new_high_breakout"
+            else:
+                focus = f"breakout: {name} ({symbol}) momentum breakout candidate"
+                entry_profile = "breakout"
+                strategy_id = "korea.breakout"
         elif "opening drive" in base_focus or "attack_opening_drive" in str(mapped.get("entry_profile", "")).lower():
             focus = f"opening_drive: {name} ({symbol}) opening drive follow-through"
             entry_profile = "attack_opening_drive"

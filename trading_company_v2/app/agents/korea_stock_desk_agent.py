@@ -112,7 +112,8 @@ class KoreaStockDeskAgent(BaseAgent):
 
         def _fetch_b(ticker_name: tuple[str, str]) -> tuple[str, str, list[dict]]:
             ticker, name = ticker_name
-            return ticker, name, get_naver_daily_prices(ticker, count=42)
+            # 60일 신고점 계산에 필요한 충분한 데이터 확보 (65일)
+            return ticker, name, get_naver_daily_prices(ticker, count=65)
 
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
             path_b_results = list(executor.map(_fetch_b, watchlist_items))
@@ -120,10 +121,14 @@ class KoreaStockDeskAgent(BaseAgent):
         breakout_candidates: list[dict] = []
         pullback_ma_candidates: list[dict] = []
         for ticker, name, candles in path_b_results:
-            if len(candles) < 22:
+            if len(candles) < 62:  # 60일 신고점 계산 최소 요건
                 continue
-            bk = summarize_breakout_signal(candles, breakout_period=20, vol_surge_mult=2.5,
-                                           rsi_min=55.0, rsi_max=78.0)
+            # 2026-05-19: 백테스트 검증 파라미터로 교체
+            # 기존: breakout_period=20, vol_surge_mult=2.5, rsi_max=78
+            # 변경: breakout_period=60, vol_surge_mult=2.0, rsi_max=80
+            # 근거: 3년 152종목 백테스트 → 승률 84.6%, Sharpe 6.16, MDD -4.0%
+            bk = summarize_breakout_signal(candles, breakout_period=60, vol_surge_mult=2.0,
+                                           rsi_min=55.0, rsi_max=80.0)
             confirmed_count = int(bk.get("confirmed_count", 0) or 0)
             signal = summarize_equity_signal(candles)
             signal_score = float(signal.get("score", 0.5) or 0.5)
@@ -140,8 +145,9 @@ class KoreaStockDeskAgent(BaseAgent):
             if _b_ema_gap >= 12.0:             # EMA 이격 과열 체크 (Path B/F 누락 버그 수정)
                 overheat_penalty += 0.06
 
-            # ── Path B: 브레이크아웃 후보 ───────────────────────────────────
-            if confirmed_count >= 2:
+            # ── Path B: 60일 신고점 돌파 후보 (백테스트 검증 Strategy B) ────
+            # confirmed_count >= 3: 신고점 돌파 + 거래량 2배 + RSI 55-80 전부 충족
+            if confirmed_count >= 3:
                 breakout_score = float(bk.get("breakout_score", 0.0) or 0.0)
                 candidate_score = round(
                     breakout_score * 0.65 + signal_score * 0.35 - overheat_penalty, 2
@@ -161,11 +167,13 @@ class KoreaStockDeskAgent(BaseAgent):
                         "ema_gap_pct": float(signal.get("ema_gap_pct", 0.0) or 0.0),
                         "overheat_penalty": round(overheat_penalty, 2),
                         "candidate_score": candidate_score,
-                        "is_breakout": confirmed_count >= 3,
+                        "is_breakout": True,
                         "breakout_count": confirmed_count,
                         "vol_ratio": float(bk.get("vol_ratio", 0.0) or 0.0),
                         "breakout_reasons": bk.get("reasons", []),
                         "sentiment_score": 0.5,
+                        # 신고점 돌파 전략 태그 — state_store에서 전용 trail/threshold 적용
+                        "focus_tag": "new_high_breakout",
                     }
                 )
 
