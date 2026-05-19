@@ -527,6 +527,11 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
         # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
         return 3.0, -0.8, 360
+    if desk == "korea" and action == "probe_longs":
+        # 2026-05-19: stop -1.5% → -1.0% (avgLoss 축소 → 손익비 개선)
+        # 실데이터 근거: avgLoss=-1.85% vs avgWin=+1.07% → 손익비 0.58 (손익분기 63% WR 필요)
+        # stop 타이트하게 → avgLoss ~-1.0% 목표 → 손익분기 WR = 1.0/(1.07+1.0) = 48%
+        return 25.0, -1.0, 2700
     if desk == "crypto" and "dip_bounce" in focus:
         # BTC 급락 반등: 빠른 진입/빠른 이탈 — target 1.2%, stop -0.7%, max 20min
         return 1.2, -0.7, 60
@@ -575,11 +580,11 @@ def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
     hard target 없이 트레일링만으로 청산 — 상승 추세 최대한 탑승.
     protect_level = max(floor, peak - giveback)
 
-    peak >= 15% → giveback 3.5%, floor 10%  (대세 상승)
-    peak >=  8% → giveback 3.0%, floor  5%
-    peak >=  4% → giveback 2.5%, floor  2.0%
-    peak >=  2% → giveback 1.2%, floor  1.0%  (중소형 수익 보호)
-    peak >= 1.5% → giveback 0.8%, floor  0.5%  (작은 수익도 보호)
+    peak >= 15% → giveback 3.5%, floor 10%   (대세 상승)
+    peak >=  8% → giveback 2.5%, floor  5.5%
+    peak >=  4% → giveback 1.5%, floor  3.0%  (2026-05-19: 2.5→3.0 상향)
+    peak >=  2% → giveback 0.9%, floor  1.5%  (2026-05-19: 1.2→1.5 상향, 수익보호 강화)
+    peak >= 1.5% → giveback 0.6%, floor  0.7%  (작은 수익도 보호)
     peak <  1.5% → 트레일 없음
     """
     if peak_pnl >= 15.0:
@@ -587,9 +592,9 @@ def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
     if peak_pnl >= 8.0:
         return 2.5, 5.5
     if peak_pnl >= 4.0:
-        return 1.5, 2.5
+        return 1.5, 3.0  # floor 2.5 → 3.0: peak=4% 도달 시 3.0% 확보
     if peak_pnl >= 2.0:
-        return 0.9, 1.2
+        return 0.9, 1.5  # floor 1.2 → 1.5: peak=2% 도달 시 1.5% 확보 (기존 1.2%)
     if peak_pnl >= 1.5:
         return 0.6, 0.7
     return 0.0, 0.0
