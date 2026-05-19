@@ -1100,6 +1100,7 @@ class ExecutionAgent(BaseAgent):
         meta_ob = float(meta.get("orderbook_bid_ask_ratio", 0.0) or 0.0)
         meta_micro3 = float(meta.get("micro_move_3_pct", 0.0) or 0.0)
         meta_ema_gap = float(meta.get("ema_gap_pct", 0.0) or 0.0)
+        meta_stream = float(meta.get("stream_score", 0.0) or 0.0)
         meta_rsi = meta.get("rsi")
         try:
             meta_rsi_f = float(meta_rsi) if meta_rsi is not None else 50.0
@@ -1107,6 +1108,10 @@ class ExecutionAgent(BaseAgent):
             meta_rsi_f = 50.0
         meta_rsi_bearish_div = bool(meta.get("rsi_bearish_divergence", False))
         meta_choch_bearish = bool(meta.get("choch_bearish", False))
+        # stream=0.00 진입 차단: 실전 데이터에서 stream=0 사이클 진입은 peak_pnl=0 → 100% 손실
+        # WebSocket 틱이 전혀 없으면 진입 모멘텀 확인 불가 → cycle override 비허용
+        if meta_stream <= 0.0:
+            return False, f"stream=0 cycle override blocked (no tick activity, all stream=0 entries historically lose)"
         # ADX 조건 완화: adx_trend_strong(DI+>DI-)가 False여도 ADX≥35+CHoCH+추세구조면 허용
         # 이유: 강한 추세 구간에서 단기 DI-우위(pullback 중)로 인해 adx_trend_strong=False가 되지만
         #      ADX 수치 자체가 높고 CHoCH+trend 구조가 확인되면 사이클 진입 허용
@@ -1130,7 +1135,7 @@ class ExecutionAgent(BaseAgent):
         ):
             return True, (
                 f"adx_trend cycle ok combined={meta_combined:.2f} "
-                f"ema_gap={meta_ema_gap:.1f}% ob={meta_ob:.2f}x adx={meta_adx_val:.0f} regime={self.regime}"
+                f"ema_gap={meta_ema_gap:.1f}% ob={meta_ob:.2f}x adx={meta_adx_val:.0f} stream={meta_stream:.2f} regime={self.regime}"
             )
 
         # TRENDING regime에서는 adx_trend 경로만 허용 (아래 RANGING 전용 경로 차단)
