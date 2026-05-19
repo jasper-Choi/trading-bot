@@ -1,0 +1,178 @@
+{
+  "universe_size": 152,
+  "trade_count": 807,
+  "win_rate": 84.6,
+  "avg_win": 6.52,
+  "avg_loss": -4.06,
+  "pl_ratio": 1.6,
+  "ev_per_trade": 4.891,
+  "annual_return": 89.5,
+  "total_return": 1184.1,
+  "mdd": -4.0,
+  "sharpe": 6.16,
+  "final_capital": 128413376,
+  "exit_reasons": {
+    "stop": 119,
+    "trail": 330,
+    "target": 347,
+    "timeout": 8,
+    "end": 3
+  },
+  "sector_stats": {
+    "제약": {
+      "trades": 111,
+      "wr": 83.8,
+      "avg_pnl": 5.07
+    },
+    "기타": {
+      "trades": 72,
+      "wr": 87.5,
+      "avg_pnl": 5.54
+    },
+    "반도체": {
+      "trades": 62,
+      "wr": 85.5,
+      "avg_pnl": 5.57
+    },
+    "금융": {
+      "trades": 53,
+      "wr": 86.8,
+      "avg_pnl": 4.57
+    },
+    "바이오": {
+      "trades": 46,
+      "wr": 89.1,
+      "avg_pnl": 6.12
+    },
+    "식품": {
+      "trades": 39,
+      "wr": 87.2,
+      "avg_pnl": 3.03
+    },
+    "화학": {
+      "trades": 35,
+      "wr": 77.1,
+      "avg_pnl": 3.77
+    },
+    "방산": {
+      "trades": 34,
+      "wr": 76.5,
+      "avg_pnl": 4.91
+    },
+    "엔터": {
+      "trades": 31,
+      "wr": 74.2,
+      "avg_pnl": 3.54
+    },
+    "산업재": {
+      "trades": 30,
+      "wr": 100.0,
+      "avg_pnl": 7.0
+    },
+    "에너지": {
+      "trades": 30,
+      "wr": 90.0,
+      "avg_pnl": 4.72
+    },
+    "조선": {
+      "trades": 27,
+      "wr": 85.2,
+      "avg_pnl": 5.42
+    },
+    "소비재": {
+      "trades": 25,
+      "wr": 76.0,
+      "avg_pnl": 3.16
+    },
+    "철강": {
+      "trades": 20,
+      "wr": 80.0,
+      "avg_pnl": 4.91
+    },
+    "배터리": {
+      "trades": 19,
+      "wr": 94.7,
+      "avg_pnl": 7.13
+    },
+    "전기": {
+      "trades": 18,
+      "wr": 83.3,
+      "avg_pnl": 5.15
+    },
+    "여행": {
+      "trades": 16,
+      "wr": 81.2,
+      "avg_pnl": 2.92
+    },
+    "건설": {
+      "trades": 16,
+      "wr": 93.8,
+      "avg_pnl": 4.97
+    },
+    "IT": {
+      "trades": 16,
+      "wr": 75.0,
+      "avg_pnl": 5.49
+    },
+    "로봇": {
+      "trades": 15,
+      "wr": 100.0,
+      "avg_pnl": 8.55
+    },
+    "게임": {
+      "trades": 14,
+      "wr": 64.3,
+      "avg_pnl": 2.37
+    },
+    "신재생": {
+      "trades": 13,
+      "wr": 92.3,
+      "avg_pnl": 5.08
+    },
+    "지주": {
+      "trades": 12,
+      "wr": 83.3,
+      "avg_pnl": 3.97
+    },
+    "전자": {
+      "trades": 12,
+      "wr": 91.7,
+      "avg_pnl": 5.84
+    },
+    "자동차": {
+      "trades": 10,
+      "wr": 90.0,
+      "avg_pnl": 4.03
+    },
+    "통신": {
+      "trades": 8,
+      "wr": 62.5,
+      "avg_pnl": 1.49
+    },
+    "해운": {
+      "trades": 7,
+      "wr": 71.4,
+      "avg_pnl": 3.35
+    },
+    "항공": {
+      "trades": 7,
+      "wr": 71.4,
+      "avg_pnl": 1.66
+    },
+    "통신장비": {
+      "trades": 4,
+      "wr": 75.0,
+      "avg_pnl": 4.21
+    },
+    "의료": {
+      "trades": 3,
+      "wr": 100.0,
+      "avg_pnl": 5.21
+    },
+    "디스플레이": {
+      "trades": 2,
+      "wr": 100.0,
+      "avg_pnl": 3.75
+    }
+  }
+}

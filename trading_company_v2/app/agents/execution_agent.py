@@ -80,6 +80,8 @@ class ExecutionAgent(BaseAgent):
         if ns == "us":
             return f"us.{entry_profile or action or 'unknown'}"
         # Crypto patterns
+        if "eth_4h_breakout" in text:
+            return "crypto.eth_4h_breakout"
         if "smart_money_flow" in text:
             return "crypto.smart_money_flow"
         if "ranging_strength_follow" in text:

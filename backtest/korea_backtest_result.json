@@ -1,0 +1,68 @@
+[
+  {
+    "strategy": "A_gap_momentum",
+    "trade_count": 256,
+    "win_rate": 59.8,
+    "avg_win": 4.42,
+    "avg_loss": -2.63,
+    "pl_ratio": 1.68,
+    "ev_per_trade": 1.586,
+    "annual_return": 22.1,
+    "total_return": 121.8,
+    "mdd": -8.8,
+    "sharpe": 1.37,
+    "final_capital": 22182284,
+    "pass": {
+      "sharpe": false,
+      "win_rate": true,
+      "pl_ratio": false,
+      "mdd": true,
+      "trade_count": true
+    },
+    "overall_pass": false
+  },
+  {
+    "strategy": "B_new_high",
+    "trade_count": 609,
+    "win_rate": 84.7,
+    "avg_win": 6.69,
+    "avg_loss": -4.07,
+    "pl_ratio": 1.64,
+    "ev_per_trade": 5.044,
+    "annual_return": 79.0,
+    "total_return": 921.6,
+    "mdd": -2.6,
+    "sharpe": 5.63,
+    "final_capital": 102162679,
+    "pass": {
+      "sharpe": true,
+      "win_rate": true,
+      "pl_ratio": false,
+      "mdd": true,
+      "trade_count": true
+    },
+    "overall_pass": false
+  },
+  {
+    "strategy": "C_ma20_pullback",
+    "trade_count": 713,
+    "win_rate": 73.8,
+    "avg_win": 3.58,
+    "avg_loss": -2.62,
+    "pl_ratio": 1.37,
+    "ev_per_trade": 1.957,
+    "annual_return": 51.0,
+    "total_return": 418.5,
+    "mdd": -3.5,
+    "sharpe": 4.07,
+    "final_capital": 51850393,
+    "pass": {
+      "sharpe": true,
+      "win_rate": true,
+      "pl_ratio": false,
+      "mdd": true,
+      "trade_count": true
+    },
+    "overall_pass": false
+  }
+]

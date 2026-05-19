@@ -1,0 +1,15 @@
+{
+  "v3_eth_base": {
+    "sharpe": 2.33,
+    "wr": 61.1,
+    "mdd": -7.08,
+    "q2_wr": 20.0
+  },
+  "v4_combined": {
+    "sharpe": 2.26,
+    "wr": 61.1,
+    "mdd": -7.17,
+    "q2_wr": 20.0
+  },
+  "recommendation": "combined"
+}

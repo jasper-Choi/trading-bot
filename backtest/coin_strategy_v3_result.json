@@ -1,0 +1,36 @@
+{
+  "best_vol_mult": 2.5,
+  "best_sharpe": 2.33,
+  "final": {
+    "KRW-ETH": {
+      "trades": 18,
+      "wr": 61.1,
+      "avg_pnl": 2.721,
+      "total_krw": 489788,
+      "sharpe": 2.33,
+      "mdd": -7.08,
+      "avg_win": 6.085,
+      "avg_loss": -2.566
+    },
+    "KRW-DOGE": {
+      "trades": 14,
+      "wr": 35.7,
+      "avg_pnl": -0.217,
+      "total_krw": -30315,
+      "sharpe": -0.18,
+      "mdd": -16.93,
+      "avg_win": 5.212,
+      "avg_loss": -3.232
+    },
+    "KRW-SOL": {
+      "trades": 13,
+      "wr": 53.8,
+      "avg_pnl": 1.449,
+      "total_krw": 188351,
+      "sharpe": 1.1,
+      "mdd": -8.15,
+      "avg_win": 5.476,
+      "avg_loss": -3.249
+    }
+  }
+}

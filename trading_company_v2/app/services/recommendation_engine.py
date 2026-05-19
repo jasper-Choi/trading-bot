@@ -328,6 +328,35 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             "notes": reasons + ["Stress regime blocks aggressive crypto entries."],
         }
 
+    # ── ETH 4H 신고점 돌파 전략 (Strategy D, 2026-05-19) ──────────────────────
+    # 백테스트 검증: Sharpe 2.33, WR 61.1%, MDD -7.08%, n=18 (2025-2026)
+    # 조건: BTC EMA200 상승장 + ETH 4H close > 20봉 최고가 + vol ≥ 2.5x + RSI 50-70 + EMA20
+    # STRESSED 레짐에서만 차단, TRENDING/RANGING 모두 허용
+    if payload.get("eth_4h_breakout"):
+        _vol_4h = float(payload.get("eth_4h_vol_ratio", 0.0) or 0.0)
+        _rsi_4h = float(payload.get("eth_4h_rsi", 0.0) or 0.0)
+        _btc_bull = bool(payload.get("btc_4h_regime_bull", False))
+        _brk_lvl = float(payload.get("eth_4h_breakout_level", 0.0) or 0.0)
+        return {
+            "action": "probe_longs",
+            "size": "1.00x",
+            "focus": f"eth_4h_breakout: KRW-ETH 4H 신고점 돌파 vol={_vol_4h:.1f}x RSI={_rsi_4h:.0f}",
+            "symbol": "KRW-ETH",
+            "candidate_symbols": [],
+            "candidate_markets": [],
+            "focus_tag": "eth_4h_breakout",
+            "strategy_id": "crypto.eth_4h_breakout",
+            "entry_profile": "eth_4h_breakout",
+            "signal_freshness": 1.0,
+            "btc_corr_15m": 0.85,
+            "notes": [
+                f"4H close > 20봉 최고가 {_brk_lvl:,.0f}원",
+                f"vol_ratio {_vol_4h:.2f}x (조건 ≥2.5x) / RSI {_rsi_4h:.1f} (조건 50-70)",
+                f"BTC 4H EMA200 레짐: {'상승장 ✓' if _btc_bull else '하락장 ✗'}",
+                "백테스트: Sharpe 2.33 / WR 61.1% / MDD -7.08% (n=18, 2025-2026)",
+            ],
+        }
+
     # ── BTC 급락 반등 (Sharp Dip Bounce) ─────────────────────────────────────
     # BTC 30분 -2.5% 이상 급락 + RSI≤32 → 과매도 반등 기대 (승률 63~68%)
     # 평균회귀 전략 — 추세 무관하게 작동, DEFENSE 스탠스만 차단

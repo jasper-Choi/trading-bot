@@ -15,6 +15,7 @@ from app.services.market_gateway import (
     get_krw_crypto_candidates,
     get_upbit_15m_candles,
     get_upbit_1m_candles,
+    get_upbit_4h_candles,
     get_upbit_orderbook,
 )
 from app.services.signal_engine import (
@@ -76,6 +77,116 @@ def _freshness_factor(age_minutes: float) -> tuple[float, str]:
         factor = max(0.82, 1.0 - ((age_minutes - 2.0) / stale_limit) * 0.18)
         return round(factor, 3), f"aging 1m signal ({age_minutes:.1f}m)"
     return 0.68, f"stale 1m signal ({age_minutes:.1f}m)"
+
+
+def _ema(values: list[float], period: int) -> float:
+    """지수이동평균 (EMA)."""
+    if not values:
+        return 0.0
+    if len(values) < period:
+        return sum(values) / len(values)
+    k = 2.0 / (period + 1)
+    ema = sum(values[:period]) / period
+    for v in values[period:]:
+        ema = v * k + ema * (1.0 - k)
+    return ema
+
+
+def _rsi(closes: list[float], period: int = 14) -> float | None:
+    """RSI — Wilder 평활법."""
+    if len(closes) < period + 2:
+        return None
+    gains: list[float] = []
+    losses: list[float] = []
+    for i in range(1, len(closes)):
+        delta = closes[i] - closes[i - 1]
+        gains.append(max(delta, 0.0))
+        losses.append(max(-delta, 0.0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss <= 0.0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return round(100.0 - 100.0 / (1.0 + rs), 1)
+
+
+def _check_eth4h_breakout() -> dict:
+    """ETH 4H 신고점 돌파 신호 감지 — Strategy D 백테스트 검증 (Sharpe 2.33, WR 61.1%).
+
+    진입 조건:
+      1. BTC 4H close > EMA200  (상승장 레짐 필터)
+      2. ETH 4H close > max(prev 20봉 최고가)  (신고점 돌파)
+      3. ETH 4H vol >= 2.5x × 20봉 평균 거래량  (거래량 급등)
+      4. RSI(14) 50–70  (과열 아닌 모멘텀)
+      5. ETH 4H close > EMA20  (추세 방향 확인)
+
+    Returns dict with keys: eth_4h_breakout, btc_4h_regime_bull,
+      eth_4h_vol_ratio, eth_4h_rsi, eth_4h_breakout_level.
+    """
+    result: dict = {
+        "eth_4h_breakout": False,
+        "btc_4h_regime_bull": False,
+        "eth_4h_vol_ratio": 0.0,
+        "eth_4h_rsi": 0.0,
+        "eth_4h_breakout_level": 0.0,
+    }
+    try:
+        # ── 1. BTC 4H EMA200 레짐 ──────────────────────────────────────────
+        btc_4h = get_upbit_4h_candles("KRW-BTC", count=210)
+        if len(btc_4h) < 200:
+            return result
+        btc_closes = [float(c.get("close") or 0.0) for c in btc_4h]
+        btc_ema200 = _ema(btc_closes, 200)
+        btc_bull = btc_closes[-1] > btc_ema200 > 0.0
+        result["btc_4h_regime_bull"] = btc_bull
+        if not btc_bull:
+            return result
+
+        # ── 2-5. ETH 4H 신호 ──────────────────────────────────────────────
+        eth_4h = get_upbit_4h_candles("KRW-ETH", count=25)
+        if len(eth_4h) < 22:
+            return result
+
+        closes = [float(c.get("close") or 0.0) for c in eth_4h]
+        highs = [float(c.get("high") or 0.0) for c in eth_4h]
+        volumes = [float(c.get("volume") or 0.0) for c in eth_4h]
+
+        # 신고점 돌파: 현재 봉 close > 이전 20봉 최고가
+        prev_high_max = max(highs[-21:-1]) if len(highs) >= 21 else 0.0
+        if closes[-1] <= prev_high_max or prev_high_max <= 0.0:
+            return result
+        result["eth_4h_breakout_level"] = round(prev_high_max, 0)
+
+        # 거래량 급등: 현재 vol >= 2.5x × 이전 20봉 평균
+        prev_vols = volumes[-21:-1]
+        vol_ma = sum(prev_vols) / len(prev_vols) if prev_vols else 0.0
+        if vol_ma <= 0.0:
+            return result
+        vol_ratio = volumes[-1] / vol_ma
+        result["eth_4h_vol_ratio"] = round(vol_ratio, 2)
+        if vol_ratio < 2.5:
+            return result
+
+        # RSI(14) 50–70
+        rsi_val = _rsi(closes, 14)
+        if rsi_val is None:
+            return result
+        result["eth_4h_rsi"] = rsi_val
+        if not (50.0 <= rsi_val <= 70.0):
+            return result
+
+        # EMA20 상향 돌파 확인
+        ema20 = _ema(closes, 20)
+        if closes[-1] <= ema20 or ema20 <= 0.0:
+            return result
+
+        result["eth_4h_breakout"] = True
+    except Exception:
+        pass
+    return result
 
 
 class CryptoDeskAgent(BaseAgent):
@@ -678,5 +789,8 @@ class CryptoDeskAgent(BaseAgent):
                 "dip_change_30m": _dip_change_30m,
                 "dip_rsi_btc": _dip_rsi_btc,
                 "dip_bounce_symbol": _dip_bounce_symbol,
+                # ETH 4H 신고점 돌파 전략 (Strategy D, 2026-05-19)
+                # 백테스트: Sharpe 2.33, WR 61.1%, MDD -7.08%, n=18
+                **_check_eth4h_breakout(),
             },
         )

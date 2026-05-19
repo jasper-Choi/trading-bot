@@ -486,6 +486,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "crypto" and "neo_micro_scalp" in focus:
         # Small-size micro-compound path. It should prove itself quickly.
         return 0.90, -0.35, 45
+    if desk == "crypto" and "eth_4h_breakout" in focus:
+        # ETH 4H 신고점 돌파 전략 백테스트 검증값 (2026-05-19)
+        # 코인 전략 v4: Sharpe 2.33, WR 61.1%, MDD -7.08%, n=18
+        # TP +7.0%, SL -3.0%, trail_trigger +4% / max 20봉 (80h)
+        # @ ~8s/cycle: 80h × 3600s / 8s = 36000 cycles
+        return 7.0, -3.0, 36000
     if desk == "crypto":
         # Trend mode: cut failed ignitions fast, let winners run with trailing.
         return 10.0, -2.0, 180
@@ -576,6 +582,26 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
         return 0.20, 0.05  # 0.30→0.20 giveback: peak=0.40% → floor 0.20% (was 0.10%)
     if peak_pnl >= 0.25:
         return 0.15, 0.00  # 신규 tier: 소폭 수익이라도 원금 보호 시작
+    return 0.0, 0.0
+
+
+def _crypto_eth4h_trail_rules(peak_pnl: float) -> tuple[float, float]:
+    """ETH 4H 신고점 돌파 전략 전용 트레일 — 백테스트 검증값 (2026-05-19).
+
+    Strategy D: TP +7%, SL -3%, trail_trigger +4%, giveback -3.5%
+    protect_level = max(floor, peak - giveback)
+
+    peak >= 7.0% → giveback 4.0%, floor 4.0%  (TP 구간: 수익 최대 보호)
+    peak >= 4.0% → giveback 3.5%, floor 1.5%  (trail_trigger 구간: 핵심 보호)
+    peak >= 2.0% → giveback 2.0%, floor 0.0%  (초기 수익 원금 보호)
+    peak <  2.0% → 트레일 없음 (SL -3.0%만 작동)
+    """
+    if peak_pnl >= 7.0:
+        return 4.0, 4.0
+    if peak_pnl >= 4.0:
+        return 3.5, 1.5
+    if peak_pnl >= 2.0:
+        return 2.0, 0.0
     return 0.0, 0.0
 
 
@@ -1259,6 +1285,21 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "range_scalp_trail")
                     elif position.cycles_open >= max_cycles:
                         _close_position(position, "range_scalp_timeout")
+                    continue
+                elif "eth_4h_breakout" in pos_focus:
+                    # ── ETH 4H 신고점 돌파 전략 청산 (Strategy D, 2026-05-19) ──
+                    # 4H 타임프레임 포지션 — 15m 노이즈 기반 조기청산 비적용
+                    # TP +7%, SL -3%, trail_trigger +4% / max 20봉 (80h)
+                    trail_giveback, profit_floor = _crypto_eth4h_trail_rules(peak_pnl)
+                    protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+                    if position.pnl_pct >= target_pct:
+                        _close_position(position, "target_hit")
+                    elif position.pnl_pct <= stop_pct:
+                        _close_position(position, "stop_hit")
+                    elif trail_giveback and position.pnl_pct <= protect_level:
+                        _close_position(position, "eth4h_trail")
+                    elif position.cycles_open >= max_cycles:
+                        _close_position(position, "time_exit")
                     continue
                 # ── 추세추종 청산 로직 (기존) ──
                 trail_giveback, profit_floor = _crypto_trail_rules(peak_pnl)

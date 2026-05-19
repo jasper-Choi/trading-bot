@@ -1,0 +1,152 @@
+{
+  "year_breakdown": {
+    "2022": {
+      "trades": 112,
+      "wr": 79.5,
+      "avg_win": 6.27,
+      "avg_loss": -4.13
+    },
+    "2023": {
+      "trades": 209,
+      "wr": 84.2,
+      "avg_win": 6.79,
+      "avg_loss": -4.01
+    },
+    "2024": {
+      "trades": 231,
+      "wr": 85.7,
+      "avg_win": 6.11,
+      "avg_loss": -4.13
+    },
+    "2025": {
+      "trades": 255,
+      "wr": 86.3,
+      "avg_win": 6.77,
+      "avg_loss": -3.99
+    }
+  },
+  "walk_forward": {
+    "IS_wr": 82.6,
+    "OOS_wr": 86.0,
+    "diff": 3.5
+  },
+  "param_sensitivity": [
+    {
+      "label": "BASE (60/2.0/-4.0)",
+      "trades": 807,
+      "win_rate": 84.6,
+      "avg_win": 6.52,
+      "avg_loss": -4.06,
+      "pl_ratio": 1.6,
+      "ev": 4.891,
+      "annual": 89.5,
+      "mdd": -4.0,
+      "sharpe": 6.16,
+      "final": 128413376
+    },
+    {
+      "label": "lookback=30",
+      "trades": 899,
+      "win_rate": 84.5,
+      "avg_win": 6.54,
+      "avg_loss": -4.01,
+      "pl_ratio": 1.63,
+      "ev": 4.907,
+      "annual": 94.5,
+      "mdd": -3.4,
+      "sharpe": 6.32,
+      "final": 142351399
+    },
+    {
+      "label": "lookback=90",
+      "trades": 717,
+      "win_rate": 84.7,
+      "avg_win": 6.53,
+      "avg_loss": -4.11,
+      "pl_ratio": 1.59,
+      "ev": 4.9,
+      "annual": 84.5,
+      "mdd": -4.1,
+      "sharpe": 5.65,
+      "final": 115408226
+    },
+    {
+      "label": "vol_mult=1.5",
+      "trades": 866,
+      "win_rate": 81.4,
+      "avg_win": 6.22,
+      "avg_loss": -4.08,
+      "pl_ratio": 1.53,
+      "ev": 4.306,
+      "annual": 87.1,
+      "mdd": -3.6,
+      "sharpe": 5.99,
+      "final": 121869407
+    },
+    {
+      "label": "vol_mult=3.0",
+      "trades": 571,
+      "win_rate": 86.7,
+      "avg_win": 7.12,
+      "avg_loss": -4.06,
+      "pl_ratio": 1.76,
+      "ev": 5.635,
+      "annual": 80.9,
+      "mdd": -6.1,
+      "sharpe": 5.45,
+      "final": 106529123
+    },
+    {
+      "label": "stop=-2.5",
+      "trades": 1138,
+      "win_rate": 85.2,
+      "avg_win": 5.97,
+      "avg_loss": -2.64,
+      "pl_ratio": 2.26,
+      "ev": 4.699,
+      "annual": 103.5,
+      "mdd": -3.9,
+      "sharpe": 7.31,
+      "final": 170419805
+    },
+    {
+      "label": "stop=-6.0",
+      "trades": 493,
+      "win_rate": 77.9,
+      "avg_win": 8.01,
+      "avg_loss": -5.4,
+      "pl_ratio": 1.48,
+      "ev": 5.041,
+      "annual": 70.7,
+      "mdd": -7.0,
+      "sharpe": 4.24,
+      "final": 84572001
+    },
+    {
+      "label": "trail_tight(3/3)",
+      "trades": 1037,
+      "win_rate": 87.7,
+      "avg_win": 5.79,
+      "avg_loss": -3.68,
+      "pl_ratio": 1.57,
+      "ev": 4.624,
+      "annual": 98.3,
+      "mdd": -3.6,
+      "sharpe": 6.8,
+      "final": 153865473
+    },
+    {
+      "label": "trail_loose(8/6)",
+      "trades": 533,
+      "win_rate": 73.7,
+      "avg_win": 8.14,
+      "avg_loss": -4.0,
+      "pl_ratio": 2.03,
+      "ev": 4.95,
+      "annual": 73.0,
+      "mdd": -8.8,
+      "sharpe": 4.07,
+      "final": 89158592
+    }
+  ]
+}

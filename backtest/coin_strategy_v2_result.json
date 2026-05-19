@@ -1,0 +1,44 @@
+{
+  "strategy_D": {
+    "KRW-BTC": {
+      "trades": 29,
+      "wr": 51.7,
+      "avg_pnl": 0.117,
+      "total_krw": 34024,
+      "sharpe": 0.23,
+      "mdd": -12.78,
+      "avg_win": 2.341,
+      "avg_loss": -2.265
+    },
+    "KRW-ETH": {
+      "trades": 31,
+      "wr": 45.2,
+      "avg_pnl": 0.981,
+      "total_krw": 303957,
+      "sharpe": 1.17,
+      "mdd": -12.83,
+      "avg_win": 5.409,
+      "avg_loss": -2.667
+    },
+    "KRW-DOGE": {
+      "trades": 27,
+      "wr": 37.0,
+      "avg_pnl": 0.064,
+      "total_krw": 17272,
+      "sharpe": 0.06,
+      "mdd": -22.34,
+      "avg_win": 6.188,
+      "avg_loss": -3.538
+    },
+    "KRW-SOL": {
+      "trades": 32,
+      "wr": 31.2,
+      "avg_pnl": -0.785,
+      "total_krw": -251123,
+      "sharpe": -1.1,
+      "mdd": -35.27,
+      "avg_win": 4.673,
+      "avg_loss": -3.266
+    }
+  }
+}

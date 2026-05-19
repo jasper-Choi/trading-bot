@@ -251,6 +251,11 @@ def get_upbit_1m_candles(market: str, count: int = 80) -> list[dict[str, Any]]:
     return get_upbit_minute_candles(market, unit=1, count=count)
 
 
+def get_upbit_4h_candles(market: str, count: int = 25) -> list[dict[str, Any]]:
+    """4시간봉 캔들 (240분봉)."""
+    return get_upbit_minute_candles(market, unit=240, count=count)
+
+
 def get_upbit_orderbook(market: str) -> dict[str, Any]:
     try:
         resp = requests.get(
