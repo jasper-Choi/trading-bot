@@ -1274,8 +1274,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     # 2026-05-19: profit-floor lock 적용
                     #   - 피라미드 진입 전 기존 포지션의 peak_pnl_pct를 강제 상향
                     #   - 목적: 피라미드 실패시에도 기존 수익이 손실로 전환되지 않도록
-                    #   - 방법: peak = max(current_peak, current_pnl + trail_giveback + 0.2)
-                    #     → protect_level = max(floor, new_peak - giveback) >= current_pnl + 0.2
+                    #   - 방법: peak = max(current_peak, current_pnl + trail_giveback - 0.10)
+                    #     → protect_level = max(floor, new_peak - giveback) = current_pnl - 0.10%
+                    #     → trail fires on 0.10% drop; combined = (pnl-0.10%) - pyramid_stop(1.5%) > 0 when pnl>=1.6%
                     _pyramid_ok = (
                         not getattr(position, "is_pyramided", False)
                         and "open_reversal" not in pos_focus
@@ -1297,10 +1298,11 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                             # 피라미드 진입 전에 기존 포지션의 trail stop을 현재 수익 위로 올림
                             # trail_giveback at current peak (via _korea_trail_rules)
                             _pf_giveback, _pf_floor = _korea_trail_rules(peak_pnl)
-                            # 새 peak_pnl = max(현재peak, 현재pnl + giveback + 0.2%)
+                            # 새 peak_pnl = max(현재peak, 현재pnl + giveback - 0.10%)
                             # 이렇게 하면: protect_level = max(floor, new_peak - giveback)
-                            #             >= current_pnl + 0.2%
-                            _required_peak = position.pnl_pct + _pf_giveback + 0.2
+                            #             = current_pnl - 0.10%  → 0.10% 하락시 trail 발동
+                            #             합산 = (pnl-0.10%) - pyramid_stop(1.5%) > 0 ✓
+                            _required_peak = position.pnl_pct + _pf_giveback - 0.10
                             if position.peak_pnl_pct < _required_peak:
                                 _log.info(
                                     "Korea pyramid profit-floor lock: %s peak %.2f%% → %.2f%% (pnl=%.2f%%)",
