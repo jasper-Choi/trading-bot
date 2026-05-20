@@ -1,5 +1,59 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-20 (S13 신규 전략 추가 + DB 리셋 + 백테스트 탐색)
+
+### 작업 내용
+
+**백테스트 탐색 결과**
+- S1 Cameron, S3 Raschke, S4 ICT, S5 Minervini, S6 Emma, S7 Moritz, S8 Trendline — 모두 FAIL
+- S11 Williams %R — crypto P&L 1.41 (기준 1.5 미달), FAIL
+- S12 Consecutive Down Days — crypto WR 35.9% (기준 48% 미달), FAIL
+- S14 Volume Breakout — Korea WR 30%대 구조적 FAIL
+- **S13 Dual RSI ✅ PASS** — crypto Sh 7.28 WR 51.2% MDD -8.7%, Korea Sh 6.36 WR 58.6% MDD -8.0%
+
+**S13 Dual RSI 전략 구현 (커밋 7b990d6)**
+
+진입 조건: `RSI(2) < 10` + `RSI(14) < 40` + `close > EMA200` + `close < EMA20`
+- S9(RSI2만)보다 더 엄격한 필터 → WR+, Sharpe+ 대폭 개선
+- S13 신호 시 S9보다 우선 처리; S9는 RSI(14)≥40일 때 계속 작동
+
+| 파일 | 변경 |
+|------|------|
+| `app/agents/crypto_desk_agent.py` | `_check_rsi2_mean_reversion_crypto()` — RSI(14) 계산 추가, `dual_rsi_long` 플래그 |
+| `app/agents/korea_stock_desk_agent.py` | S9 탐지 시 RSI(14) 계산, `dual_rsi: bool` 필드 추가 |
+| `app/services/recommendation_engine.py` | S13 섹션 추가 (S9 앞, 우선순위 높음) |
+| `app/services/strategy_monitor.py` | WR 임계값, shadow 전략에 S13 등록 |
+| `app/core/state_store.py` | S13 포지션 임계값 추가 + 중요 버그 수정 |
+
+**중요 버그 수정** (`state_store._position_thresholds`):
+- S9(crypto), S10(crypto) 임계값이 `if desk=="crypto":` 캐치올 이후에 위치 → 절대 도달 불가
+- S9/S10/S13 crypto 전용 규칙을 캐치올 앞으로 이동
+- 수정 전: crypto rsi2_mean_reversion SL=-2.0% (잘못된 값)
+- 수정 후: crypto rsi2_mean_reversion SL=-1.4% ✅, crypto nday_pullback SL=-1.2% ✅
+
+**DB 리셋**
+- 로컬 + Oracle VM 모두 거래 이력 전체 삭제 (company_state 보존)
+- 대상: paper_positions(46/48), paper_orders(4830/37711), cycle_journal(1628/24577),
+  shadow_signals(1/559), live_order_log(16/464) 등
+
+**현재 전략 포트폴리오 (검증된 것만)**
+
+| ID | 전략 | 타입 | 상태 |
+|----|------|------|------|
+| D | ETH 4H 신고점 돌파 | 돌파 | 활성 |
+| B | 60일 신고점 돌파 | 돌파 | 활성 |
+| S9 | RSI(2) Connors | 평균회귀 | Shadow (30거래 대기) |
+| S10 | N-Day Pullback | 평균회귀 | Shadow (30거래 대기) |
+| S13 | Dual RSI 이중 확인 | 평균회귀 | Shadow (30거래 대기) |
+| S2 | MONGTATA | 평균회귀 | ⚠️ 재검증 필요 |
+
+**다음 백테스트 아이디어** (아직 미시도)
+- N-bar Inside Consolidation Breakout (압축 후 돌파)
+- RSI(14) < 30 + Price at 52-week low bounce (저점 반등)
+- Weekly chart momentum: 주봉 기반 전략
+
+---
+
 ## 0. Claude - 2026-05-20 (운영 체크리스트 10항목 완료)
 
 ### 완료된 작업
