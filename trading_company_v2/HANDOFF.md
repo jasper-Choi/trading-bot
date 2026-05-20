@@ -1,5 +1,51 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-20 (S17 Bear Market Oversold Bounce 신규 전략)
+
+### 작업 내용
+
+**S17 Bear Market Oversold Bounce ✅ PASS (2026-05-20 신규)**
+
+백테스트 결과 (2022-2026, 4코인, fee 0.10%):
+- **Sharpe 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15 ✅**
+- 354/972개 조합 PASS
+
+진입 조건 (EMA200 아래 하락장 전용):
+1. `close < EMA200 × 0.97` — EMA200 아래 3% 이상
+2. `RSI(2) < 5` — 극단 단기 과매도
+3. `RSI(14) < 25` — 중기 과매도 확인
+4. `close < EMA20 × 0.975` — 단기 추세 하락 확인
+
+파라미터: TP=+4%, SL=-0.8%, HOLD=5일, Size=0.50x (하락장 경감, VIX fear 시 0.35x)
+
+**기존 전략과 상호배타**: D/S15/S2/S9/S10/S13은 `close > EMA200` 필터 → 하락장에서 전혀 발동 안됨.
+S17은 `close < EMA200` 조건 → 하락장에서만 발동. 두 그룹이 자연스럽게 상호배타적.
+
+**배경**: BTC EMA50(112M) < EMA200(124M) 데드크로스 → 기존 전략 전부 블락. S17은 이 상황에서 신호 발동 가능.
+
+| 파일 | 변경 |
+|------|------|
+| `Desktop/backtest/backtest_s17_bear_oversold.py` | 백테스트 스크립트 (972조합, 354 PASS) |
+| `app/agents/crypto_desk_agent.py` | `_check_bear_oversold_bounce_crypto()` 추가 |
+| `app/services/recommendation_engine.py` | S17 섹션 추가 (S10 다음, watchlist 앞) |
+| `app/core/state_store.py` | S17 임계값(4%/-0.8%/900c) + 청산 브랜치 추가 |
+| `app/services/strategy_monitor.py` | WR threshold(0.60) + shadow 등록 |
+
+**현재 전략 포트폴리오 (검증된 것만)**
+
+| ID | 전략 | 타입 | 시장 | EMA200 조건 | 상태 |
+|----|------|------|------|------------|------|
+| D | ETH 4H 신고점 돌파 | 돌파/추세 | Crypto | 위 필요 | 활성 |
+| S15 | Momentum Breakout | 돌파/추세 | Crypto | 위 필요 | Shadow |
+| S17 | Bear Oversold Bounce | 평균회귀 | Crypto | **아래 필요** | Shadow |
+| B | 60일 신고점 돌파 | 돌파 | Korea | — | 활성 |
+| S9 | RSI(2) Connors | 평균회귀 | Crypto+Korea | 위 필요 | Shadow |
+| S10 | N-Day Pullback | 평균회귀 | Crypto+Korea | 위 필요 | Shadow |
+| S13 | Dual RSI 이중 확인 | 평균회귀 | Crypto+Korea | 위 필요 | Shadow |
+| S2 | MONGTATA | 평균회귀 | Crypto+Korea | 위 필요 | ⚠️ 재검증 |
+
+---
+
 ## 0. Claude - 2026-05-20 (S15 Momentum Breakout 신규 전략 + 파라미터 완화)
 
 ### 작업 내용
