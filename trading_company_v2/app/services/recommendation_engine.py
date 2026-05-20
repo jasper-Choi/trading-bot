@@ -52,14 +52,41 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             ],
         }
 
-    # ── 3. 신호 없음 → 관망 ───────────────────────────────────────────────
+    # ── 3. Strategy S2: MONGTATA 에어본 (평균회귀) ────────────────────────
+    # 백테스트 검증: Sharpe 6.66, WR 50.0%, MDD -9.7% (코인 일봉)
+    # 조건: price > EMA200 + close < lower_BB + close < EMA20×0.975
+    if payload.get("mongtata_long"):
+        _symbol = str(payload.get("mongtata_symbol", "KRW-BTC") or "KRW-BTC")
+        _ema20 = float(payload.get("mongtata_ema20", 0.0) or 0.0)
+        _lower_bb = float(payload.get("mongtata_lower_bb", 0.0) or 0.0)
+        _dev_pct = float(payload.get("mongtata_deviation_pct", 0.0) or 0.0)
+        return {
+            "action": "probe_longs",
+            "size": "0.80x",
+            "focus": f"mongtata_airborne: {_symbol} EMA20 대비 {_dev_pct:.1f}% 이탈 (하단 BB 이하)",
+            "symbol": _symbol,
+            "candidate_symbols": [],
+            "candidate_markets": [],
+            "focus_tag": "mongtata_airborne",
+            "strategy_id": "crypto.mongtata_airborne",
+            "entry_profile": "mongtata_airborne",
+            "signal_freshness": 1.0,
+            "notes": [
+                f"close < lower_BB={_lower_bb:,.0f}원 / EMA20={_ema20:,.0f}원",
+                f"EMA20 대비 이탈 {_dev_pct:.2f}% (조건 < -2.5%)",
+                "EMA200 상승장 레짐 필터 통과",
+                "백테스트: Sharpe 6.66 / WR 50.0% / MDD -9.7% (코인 일봉)",
+            ],
+        }
+
+    # ── 4. 신호 없음 → 관망 ───────────────────────────────────────────────
     return {
         "action": "watchlist_only",
         "size": "0.00x",
-        "focus": f"No validated crypto signal. BTC bias={desk_bias}. Watching ETH 4H.",
+        "focus": f"No validated crypto signal. BTC bias={desk_bias}. Watching ETH 4H / MONGTATA.",
         "symbol": lead_market,
         "candidate_symbols": [],
-        "notes": reasons[:3] + ["Strategy D (ETH 4H breakout) not triggered."],
+        "notes": reasons[:3] + ["Strategy D (ETH 4H breakout) not triggered.", "Strategy S2 (MONGTATA) not triggered."],
     }
 
 
@@ -176,16 +203,45 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 5. 신호 없음 → 관망 ───────────────────────────────────────────────
+    # ── 5. Strategy S2: MONGTATA 에어본 (평균회귀) ───────────────────────
+    # 백테스트 검증: Sharpe 8.60, WR 56.5%, MDD -5.9% (주식 3년)
+    mongtata_candidates = payload.get("mongtata_airborne_candidates", []) or []
+    if mongtata_candidates and stance != "DEFENSE":
+        mt_leader = mongtata_candidates[0]
+        mt_ticker = str(mt_leader.get("ticker", ""))
+        mt_name = str(mt_leader.get("name", mt_ticker))
+        mt_dev = float(mt_leader.get("deviation_pct", 0.0) or 0.0)
+        mt_ema20 = float(mt_leader.get("ema20", 0.0) or 0.0)
+        mt_lower_bb = float(mt_leader.get("lower_bb", 0.0) or 0.0)
+        mt_symbols = [str(c.get("ticker", "")).strip() for c in mongtata_candidates if c.get("ticker")]
+        return {
+            "action": "probe_longs",
+            "size": "0.50x",
+            "focus": f"mongtata_airborne: {mt_name} EMA20 대비 {mt_dev:.1f}% 이탈",
+            "symbol": mt_ticker,
+            "candidate_symbols": mt_symbols[:3],
+            "focus_tag": "mongtata_airborne",
+            "strategy_id": "korea.mongtata_airborne",
+            "entry_profile": "mongtata_airborne",
+            "notes": [
+                f"close < lower_BB={mt_lower_bb:,.0f}원 / EMA20={mt_ema20:,.0f}원 (이탈 {mt_dev:.2f}%)",
+                f"총 {len(mongtata_candidates)}개 종목 신호 발생",
+                "EMA200 상승장 레짐 필터 통과",
+                "백테스트: Sharpe 8.60 / WR 56.5% / MDD -5.9%",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 6. 신호 없음 → 관망 ───────────────────────────────────────────────
     return {
         "action": "stand_by",
         "size": "0.00x",
-        "focus": "No 60-day new high breakout detected. Strategy B not triggered.",
+        "focus": "No signal. Strategy B (60일 신고점) / Strategy S2 (MONGTATA) not triggered.",
         "symbol": candidate_symbols[0] if candidate_symbols else "",
         "candidate_symbols": candidate_symbols,
         "notes": [
-            f"confirmed={breakout_confirmed_count} / partial={breakout_partial_count}",
-            "Waiting for Strategy B (60일 신고점 돌파) signal.",
+            f"confirmed={breakout_confirmed_count} / partial={breakout_partial_count} / mongtata={len(mongtata_candidates)}",
+            "Waiting for Strategy B or S2 signal.",
         ],
         "quality_score": quality_score,
     }

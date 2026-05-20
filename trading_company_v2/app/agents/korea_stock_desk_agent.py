@@ -14,6 +14,28 @@ _FETCH_WORKERS = 12
 _UNIVERSE_SCAN_LIMIT = 80
 
 
+def _ema(values: list[float], period: int) -> float:
+    """지수이동평균 (EMA)."""
+    if not values:
+        return 0.0
+    if len(values) < period:
+        return sum(values) / len(values)
+    k = 2.0 / (period + 1)
+    ema = sum(values[:period]) / period
+    for v in values[period:]:
+        ema = v * k + ema * (1.0 - k)
+    return ema
+
+
+def _std_last(values: list[float], period: int) -> float:
+    """Population std of the last `period` values."""
+    if len(values) < period:
+        return 0.0
+    window = values[-period:]
+    mean = sum(window) / period
+    return (sum((v - mean) ** 2 for v in window) / period) ** 0.5
+
+
 class KoreaStockDeskAgent(BaseAgent):
     def __init__(self):
         super().__init__("korea_stock_desk_agent")
@@ -30,8 +52,8 @@ class KoreaStockDeskAgent(BaseAgent):
 
         def _fetch(ticker_name: tuple[str, str]) -> tuple[str, str, list[dict]]:
             ticker, name = ticker_name
-            # 60일 신고점 계산에 필요한 충분한 데이터 확보 (65일)
-            return ticker, name, get_naver_daily_prices(ticker, count=65)
+            # 220일: EMA200 계산(Strategy S2) + 60일 신고점(Strategy B) 모두 지원
+            return ticker, name, get_naver_daily_prices(ticker, count=220)
 
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
             results = list(executor.map(_fetch, watchlist_items))
@@ -111,6 +133,39 @@ class KoreaStockDeskAgent(BaseAgent):
 
         breakout_candidates.sort(key=lambda c: c["candidate_score"], reverse=True)
 
+        # ── Strategy S2: MONGTATA 에어본 (평균회귀) ─────────────────────────────
+        # 백테스트 검증: Sharpe 8.60, WR 56.5%, MDD -5.9% (주식 3년)
+        # 조건: close > EMA200 (상승장 레짐) + close < lower_BB (EMA20−2σ) + close < EMA20×0.975
+        mongtata_candidates: list[dict] = []
+        for ticker, name, candles in results:
+            if len(candles) < 205:
+                continue
+            try:
+                closes = [float(c.get("close") or 0.0) for c in candles]
+                if not closes or closes[-1] <= 0:
+                    continue
+                ema200 = _ema(closes, 200)
+                if closes[-1] <= ema200 or ema200 <= 0:
+                    continue
+                ema20 = _ema(closes, 20)
+                std20 = _std_last(closes, 20)
+                if ema20 <= 0 or std20 <= 0:
+                    continue
+                lower_bb = ema20 - 2.0 * std20
+                deviation_pct = round((closes[-1] - ema20) / ema20 * 100, 2)
+                if closes[-1] < lower_bb and closes[-1] < ema20 * 0.975:
+                    mongtata_candidates.append({
+                        "ticker": ticker,
+                        "name": name,
+                        "current_price": closes[-1],
+                        "ema20": round(ema20, 0),
+                        "lower_bb": round(lower_bb, 0),
+                        "deviation_pct": deviation_pct,
+                        "focus_tag": "mongtata_airborne",
+                    })
+            except Exception:
+                continue
+
         breakout_confirmed_count = sum(
             1 for c in breakout_candidates if int(c.get("breakout_count", 0) or 0) >= 4
         )
@@ -123,6 +178,8 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.40
         elif breakout_partial_count >= 1:
             score += 0.20
+        elif mongtata_candidates:
+            score += 0.25
         if breakout_candidates:
             top_sd = float(breakout_candidates[0].get("supply_demand_score", 0.0) or 0.0)
             if top_sd >= 0.7:
@@ -133,8 +190,9 @@ class KoreaStockDeskAgent(BaseAgent):
             name=self.name,
             score=max(score, 0.2),
             reason=(
-                f"Strategy B 60일신고점 스캔: {breakout_confirmed_count}개 confirmed / "
-                f"{breakout_partial_count}개 partial (universe {len(universe)}종목)"
+                f"Strategy B 60일신고점: {breakout_confirmed_count}confirmed/{breakout_partial_count}partial "
+                f"| Strategy S2 MONGTATA: {len(mongtata_candidates)}개 "
+                f"(universe {len(universe)}종목)"
             ),
             payload={
                 "new_high_breakout_candidates": breakout_candidates[:5],
@@ -142,5 +200,8 @@ class KoreaStockDeskAgent(BaseAgent):
                 "breakout_partial_count": breakout_partial_count,
                 "universe_size": len(universe),
                 "quality_score": score,
+                # Strategy S2 MONGTATA 에어본
+                "mongtata_airborne_candidates": mongtata_candidates[:3],
+                "mongtata_airborne_count": len(mongtata_candidates),
             },
         )

@@ -71,6 +71,8 @@ class ExecutionAgent(BaseAgent):
         if ns == "korea":
             if "new_high_breakout" in text:
                 return "korea.new_high_breakout"
+            if "mongtata_airborne" in text:
+                return "korea.mongtata_airborne"
             if "breakout" in text or "돌파" in text:
                 return "korea.breakout"
             if "gap" in text or "갭" in text:
@@ -82,6 +84,8 @@ class ExecutionAgent(BaseAgent):
         # Crypto patterns
         if "eth_4h_breakout" in text:
             return "crypto.eth_4h_breakout"
+        if "mongtata_airborne" in text:
+            return "crypto.mongtata_airborne"
         if "smart_money_flow" in text:
             return "crypto.smart_money_flow"
         if "ranging_strength_follow" in text:

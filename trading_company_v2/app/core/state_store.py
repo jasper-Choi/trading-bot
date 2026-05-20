@@ -533,6 +533,11 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
         # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
         return 3.0, -0.8, 360
+    if desk == "korea" and "mongtata_airborne" in focus:
+        # 2026-05-20: 백테스트 검증 전략 S2 MONGTATA 에어본 (평균회귀)
+        # 주식 3년: Sharpe 8.60, WR 56.5%, MDD -5.9%
+        # target +10%, stop -3%, 최대 10 거래일 (2700 cycles @ 20s/cycle)
+        return 10.0, -3.0, 2700
     if desk == "korea" and "new_high_breakout" in focus:
         # 2026-05-19: 백테스트 검증 전략 B (신고점 돌파)
         # 3년 152종목: 승률 84.6%, 연 +89.5%, Sharpe 6.16, MDD -4.0%
@@ -619,6 +624,26 @@ def _korea_newhi_trail_rules(peak_pnl: float) -> tuple[float, float]:
         return 6.0, 6.0
     if peak_pnl >= 5.0:
         return 4.0, 2.0
+    return 0.0, 0.0
+
+
+def _mongtata_trail_rules(peak_pnl: float) -> tuple[float, float]:
+    """MONGTATA 에어본(평균회귀) 전용 트레일 — 백테스트 검증값 (2026-05-20).
+
+    Strategy S2: TP +10%, SL -3%, 최대 10 거래일
+    protect_level = max(floor, peak - giveback)
+
+    peak >= 8% → giveback 4%, floor 5%  (대형 반등 수익 보호)
+    peak >= 5% → giveback 3%, floor 3%  (핵심 수익 보호)
+    peak >= 2% → giveback 1.5%, floor 0% (원금 보호 시작)
+    peak <  2% → 트레일 없음 (SL -3.0%만 작동)
+    """
+    if peak_pnl >= 8.0:
+        return 4.0, 5.0
+    if peak_pnl >= 5.0:
+        return 3.0, 3.0
+    if peak_pnl >= 2.0:
+        return 1.5, 0.0
     return 0.0, 0.0
 
 
@@ -1324,9 +1349,11 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             # ── Korea 주식 청산 (stock_backtest_v3: 트레일링 스탑 포함) ──
             if position.desk == "korea":
                 peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
-                # 신고점 돌파 전략은 전용 trail 규칙 사용 (백테스트 검증값)
+                # 전략별 전용 trail 규칙 사용 (백테스트 검증값)
                 if "new_high_breakout" in pos_focus:
                     trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
+                elif "mongtata_airborne" in pos_focus:
+                    trail_giveback, profit_floor = _mongtata_trail_rules(peak_pnl)
                 else:
                     trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
                 protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0

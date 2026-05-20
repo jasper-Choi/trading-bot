@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
-from app.services.market_gateway import get_upbit_15m_candles, get_upbit_4h_candles
+from app.services.market_gateway import get_upbit_15m_candles, get_upbit_4h_candles, get_upbit_daily_candles
 
 
 def _ema(values: list[float], period: int) -> float:
@@ -115,6 +115,75 @@ def _check_eth4h_breakout() -> dict:
     return result
 
 
+def _std(values: list[float], period: int) -> list[float]:
+    """Rolling standard deviation (population)."""
+    result = [0.0] * len(values)
+    for i in range(period - 1, len(values)):
+        window = values[i - period + 1 : i + 1]
+        mean = sum(window) / period
+        variance = sum((v - mean) ** 2 for v in window) / period
+        result[i] = variance ** 0.5
+    return result
+
+
+def _check_mongtata_airborne_crypto() -> dict:
+    """MONGTATA 에어본 (평균회귀) 신호 — Strategy S2 백테스트 검증.
+
+    Daily 캔들 기준:
+      1. price > EMA200  (상승장 레짐 필터)
+      2. close < lower Bollinger Band (EMA20 - 2σ)
+      3. close < EMA20 × 0.975  (EMA20 대비 2.5% 이상 하락)
+
+    백테스트 결과 (Upbit daily, 2022-2026):
+      Crypto: Sharpe 6.66, WR 50.0%, PR 2.94, MDD -9.7%
+      Stocks: Sharpe 8.60, WR 56.5%, PR 2.64, MDD -5.9%
+
+    Returns dict with keys: mongtata_long, mongtata_symbol,
+      mongtata_ema20, mongtata_lower_bb, mongtata_deviation_pct.
+    """
+    result: dict = {
+        "mongtata_long": False,
+        "mongtata_symbol": "",
+        "mongtata_ema20": 0.0,
+        "mongtata_lower_bb": 0.0,
+        "mongtata_deviation_pct": 0.0,
+    }
+    # BTC → ETH → SOL 순서로 신호 탐색 (첫 번째 신호만 반환)
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL"):
+        try:
+            daily = get_upbit_daily_candles(market, count=220)
+            if len(daily) < 205:
+                continue
+            closes = [float(c.get("close") or 0.0) for c in daily]
+            if not closes or closes[-1] <= 0:
+                continue
+
+            ema200 = _ema(closes, 200)
+            # 레짐 필터: price > EMA200
+            if closes[-1] <= ema200 or ema200 <= 0:
+                continue
+
+            ema20 = _ema(closes, 20)
+            std20 = _std(closes, 20)
+            if ema20 <= 0 or std20[-1] <= 0:
+                continue
+
+            lower_bb = ema20 - 2.0 * std20[-1]
+            deviation_pct = round((closes[-1] - ema20) / ema20 * 100, 2)
+
+            # 진입 조건
+            if closes[-1] < lower_bb and closes[-1] < ema20 * 0.975:
+                result["mongtata_long"] = True
+                result["mongtata_symbol"] = market
+                result["mongtata_ema20"] = round(ema20, 0)
+                result["mongtata_lower_bb"] = round(lower_bb, 0)
+                result["mongtata_deviation_pct"] = deviation_pct
+                return result
+        except Exception:
+            continue
+    return result
+
+
 class CryptoDeskAgent(BaseAgent):
     def __init__(self):
         super().__init__("crypto_desk_agent")
@@ -140,24 +209,38 @@ class CryptoDeskAgent(BaseAgent):
         # ── Strategy D: ETH 4H 신고점 돌파 ─────────────────────────────────
         eth4h = _check_eth4h_breakout()
 
+        # ── Strategy S2: MONGTATA 에어본 (평균회귀) ──────────────────────────
+        mongtata = _check_mongtata_airborne_crypto()
+
+        _has_signal = eth4h["eth_4h_breakout"] or mongtata["mongtata_long"]
+        _lead = (
+            "KRW-ETH" if eth4h["eth_4h_breakout"]
+            else mongtata["mongtata_symbol"] if mongtata["mongtata_long"]
+            else "KRW-BTC"
+        )
+
         return AgentResult(
             name=self.name,
-            score=0.7 if eth4h["eth_4h_breakout"] else 0.4,
+            score=0.75 if eth4h["eth_4h_breakout"] else (0.65 if mongtata["mongtata_long"] else 0.4),
             reason=(
-                f"ETH 4H breakout={'✓' if eth4h['eth_4h_breakout'] else '✗'} "
-                f"BTC bias={btc_bias} change30m={btc_change_30m:+.2f}%"
+                f"ETH4H={'✓' if eth4h['eth_4h_breakout'] else '✗'} "
+                f"MONGTATA={'✓ ' + mongtata['mongtata_symbol'] if mongtata['mongtata_long'] else '✗'} "
+                f"BTC={btc_bias}"
             ),
             payload={
                 "desk_bias": btc_bias,
                 "btc_change_30m": btc_change_30m,
-                "lead_market": "KRW-ETH" if eth4h["eth_4h_breakout"] else "KRW-BTC",
+                "lead_market": _lead,
                 "candidate_symbols": [],
                 "candidate_markets": [],
                 "reasons": [
                     f"BTC 30min change={btc_change_30m:+.2f}%",
-                    f"ETH 4H breakout={'confirmed ✓' if eth4h['eth_4h_breakout'] else 'not triggered'}",
+                    f"ETH 4H breakout={'confirmed' if eth4h['eth_4h_breakout'] else 'not triggered'}",
+                    f"MONGTATA={'confirmed ' + mongtata['mongtata_symbol'] if mongtata['mongtata_long'] else 'not triggered'}",
                 ],
                 # Strategy D fields
                 **eth4h,
+                # Strategy S2 fields
+                **mongtata,
             },
         )

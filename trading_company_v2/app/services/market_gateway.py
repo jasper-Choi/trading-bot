@@ -256,6 +256,49 @@ def get_upbit_4h_candles(market: str, count: int = 25) -> list[dict[str, Any]]:
     return get_upbit_minute_candles(market, unit=240, count=count)
 
 
+def get_upbit_daily_candles(market: str, count: int = 220) -> list[dict[str, Any]]:
+    """일봉 캔들 (최대 200개/요청, 자동 페이지네이션으로 count개 확보).
+
+    MONGTATA 에어본 전략에 사용 — EMA200 레짐 필터 위해 최소 220개 필요.
+    """
+    url = "https://api.upbit.com/v1/candles/days"
+    all_rows: list[dict] = []
+    to_param: str | None = None
+    remaining = count
+    try:
+        while remaining > 0:
+            params: dict[str, Any] = {"market": market, "count": min(remaining, 200)}
+            if to_param:
+                params["to"] = to_param
+            resp = requests.get(url, params=params, timeout=REQUEST_TIMEOUT)
+            resp.raise_for_status()
+            rows = resp.json()
+            if not rows:
+                break
+            all_rows.extend(rows)
+            remaining -= len(rows)
+            if len(rows) < 200:
+                break
+            to_param = rows[-1].get("candle_date_time_utc")
+            if not to_param:
+                break
+    except RequestException:
+        pass
+    # Upbit returns newest-first → reverse to oldest-first
+    all_rows.sort(key=lambda r: r.get("candle_date_time_utc", ""))
+    return [
+        {
+            "date": row.get("candle_date_time_kst"),
+            "open": float(row.get("opening_price") or 0),
+            "high": float(row.get("high_price") or 0),
+            "low": float(row.get("low_price") or 0),
+            "close": float(row.get("trade_price") or 0),
+            "volume": float(row.get("candle_acc_trade_volume") or 0),
+        }
+        for row in all_rows
+    ]
+
+
 def get_upbit_orderbook(market: str) -> dict[str, Any]:
     try:
         resp = requests.get(
