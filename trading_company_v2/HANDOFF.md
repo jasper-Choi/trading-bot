@@ -1,5 +1,64 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-21 (VIX 수정 + 레짐/스탠스 개편 + S15/S17 사이즈 튜닝 + 시간 기반 청산)
+
+### 작업 내용
+
+**1. VIX 데이터 수신 버그 수정 (`app/services/market_gateway.py`)**
+- Stooq URL: `^VIX` → `.us` 접미사 제거 (인덱스 티커는 `.us` 없이)
+- Yahoo Finance URL 인코딩: `_url_quote(ticker.upper(), safe="")` → `%5E` 처리
+- VIX=unknown 시 US 레짐 폴백: up_count≥3 → risk_on, down_count≥3 → risk_off, else neutral
+- 결과: VIX=18.06 정상 수신 확인 ✅
+
+**2. 레짐/스탠스 로직 개편 (`app/orchestrator.py`)**
+- `_determine_stance`: VIX fear/panic → DEFENSE 강제
+- `_determine_regime`: VIX panic → STRESSED 강제, 크립토 신호 없음 → RANGING
+- 콜 사이트에서 `_vix_regime_ctx`, `_any_crypto_signal` 전달
+
+**3. S15/S17 포지션 사이즈 조정 (`app/services/recommendation_engine.py`)**
+- S15: `1.00x → 0.80x` (정상), `0.50x → 0.40x` (VIX fear/US risk_off)
+- S17: `0.50x → 0.75x` (정상), `0.35x → 0.50x` (VIX fear/US risk_off)
+- 근거: S17 고품질 신호(WR=60%, Sh=10.60) → 사이즈 확대로 기대수익 증가
+
+**4. 시간 기반 청산 추가 (`app/core/state_store.py`)**
+- S15: 15일 경과 → time_exit, 7일 경과+PnL<-0.30% → momentum_no_lift
+- S17: 5일 경과 → time_exit (기존 cycle 기반 보완)
+- `minutes_open = (now - opened_at).total_seconds() / 60` (사이클 주기 독립)
+
+**5. S17 Walk-Forward 검증 (`Desktop/backtest/backtest_s17_walkforward.py`)**
+- Train(2022-2023): 0거래 (하락장에서 RSI<25 조건 불충족 — 정상)
+- Test(2024-2026): n=15, WR=60%, Sh=10.60, MDD=-8.9% ✅
+- 결론: 레짐 특화 전략은 시간 기반 walk-forward 무효 (Train에 해당 레짐 없음)
+
+**6. S18 EMA200 회복구간 백테스트 → 포기 (`Desktop/backtest/backtest_s18_recovery_zone.py`)**
+- A型(과매도 리바운드): 19440조합 전부 실패, 최고 Sh=-0.15
+- B型(회복 모멘텀): 최고 Sh=2.27이지만 WR=43.8% (기준 50% 미달)
+- 진단: EMA200 아래 랜덤 진입 기대값 5일=+0.075% < 수수료 0.2% → 엣지 없음
+- 결론: EMA200 아래 구간 공략 전략 포기 (의도적 갭이 맞음)
+
+| 파일 | 변경 |
+|------|------|
+| `app/services/market_gateway.py` | VIX URL 수정 + US regime 폴백 |
+| `app/orchestrator.py` | stance/regime VIX 연동 |
+| `app/services/recommendation_engine.py` | S15/S17 사이즈 조정 |
+| `app/core/state_store.py` | 시간 기반 청산 추가 |
+| `Desktop/backtest/backtest_s17_walkforward.py` | S17 walk-forward 스크립트 |
+| `Desktop/backtest/backtest_s18_recovery_zone.py` | S18 분석 스크립트 (실패) |
+
+**현재 봇 상태 (2026-05-21 기준)**
+- 사이클: ~55초 간격 정상 가동 중
+- VIX=18.06, US regime=risk_off
+- 크립토: 전략 신호 없음 (BTC RSI 고점, EMA200 위 — S17 비활성, S15 돌파 조건 미충족)
+- 한국 주식: 장중 신호 미발생 (갭업 후보 0개 — B전략 조건 미충족)
+- 실거래: 비활성 (`UPBIT_ALLOW_LIVE=false`)
+
+**다음 우선과제**
+1. Korea 데스크 장 시작 직후 신호 발생 확인 (오늘 09:00 KST)
+2. S15/S17 첫 실거래 shadow 트레이드 발생 대기
+3. US 주식 데스크 추가 검토 (현재 크립토/한국 2개 데스크)
+
+---
+
 ## 0. Claude - 2026-05-20 (S17 Bear Market Oversold Bounce 신규 전략)
 
 ### 작업 내용
