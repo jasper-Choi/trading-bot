@@ -1390,6 +1390,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     # ── S15 Momentum Breakout 청산 (2026-05-20) ──
                     # Daily 타임프레임: TP +7%, SL -2%, max 15 거래일
                     # ETH4H trail 재활용 (동일 TP 7%, 유사 모멘텀 구조)
+                    # 시간 기반 청산: cycle_interval 설정에 무관하게 wall-clock 기준
+                    _S15_MAX_MINUTES = 15 * 24 * 60  # 15 거래일 = 21600분
+                    _S15_NOLIFT_MINUTES = 7 * 24 * 60  # 7일 후에도 미발진이면 조기 청산
                     trail_giveback, profit_floor = _crypto_eth4h_trail_rules(peak_pnl)
                     protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
                     if position.pnl_pct >= target_pct:
@@ -1398,18 +1401,26 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "stop_hit")
                     elif trail_giveback and position.pnl_pct <= protect_level:
                         _close_position(position, "momentum_trail")
-                    elif position.cycles_open >= max_cycles:
+                    elif minutes_open >= _S15_MAX_MINUTES:
+                        # 15일 하드 상한 (cycle_interval 독립)
                         _close_position(position, "time_exit")
+                    elif (minutes_open >= _S15_NOLIFT_MINUTES
+                          and peak_pnl < 1.0
+                          and position.pnl_pct < -0.30):
+                        # 7일 경과 후에도 고점 +1% 미달 + 현재 손실 — 모멘텀 전제 붕괴
+                        _close_position(position, "momentum_no_lift")
                     continue
                 elif "bear_oversold" in pos_focus:
                     # ── S17 Bear Market Oversold Bounce 청산 (2026-05-20) ──
                     # Daily: TP +4%, SL -0.8%, max 5일
                     # 타이트한 TP/SL — 트레일 없이 목표가/손절가 도달 즉시 청산
+                    # 시간 기반 상한: cycle_interval 독립 (5일 = 7200분)
+                    _S17_MAX_MINUTES = 5 * 24 * 60  # 5 거래일 = 7200분
                     if position.pnl_pct >= target_pct:
                         _close_position(position, "target_hit")
                     elif position.pnl_pct <= stop_pct:
                         _close_position(position, "stop_hit")
-                    elif position.cycles_open >= max_cycles:
+                    elif minutes_open >= _S17_MAX_MINUTES or position.cycles_open >= max_cycles:
                         _close_position(position, "time_exit")
                     continue
                 # ── 추세추종 청산 로직 (기존) ──

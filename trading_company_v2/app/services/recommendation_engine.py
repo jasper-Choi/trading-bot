@@ -77,8 +77,8 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         _sym  = str(payload.get("momentum_breakout_symbol", "KRW-BTC") or "KRW-BTC")
         _vrat = float(payload.get("momentum_breakout_vol_ratio", 0.0) or 0.0)
         _h10  = float(payload.get("momentum_breakout_high10", 0.0) or 0.0)
-        # VIX 공포 구간이면 사이즈 축소
-        _size = "0.50x" if _vix_fear or _us_risk_off else "1.00x"
+        # VIX 공포 구간이면 사이즈 축소; 기본 0.80x (walk-forward MDD -48.7% 리스크 반영)
+        _size = "0.40x" if _vix_fear or _us_risk_off else "0.80x"
         return {
             "action": "probe_longs",
             "size": _size,
@@ -209,8 +209,9 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         _bo_r2   = float(payload.get("bear_oversold_rsi2", 0.0) or 0.0)
         _bo_r14  = float(payload.get("bear_oversold_rsi14", 0.0) or 0.0)
         _bo_gap  = float(payload.get("bear_oversold_ema200_gap_pct", 0.0) or 0.0)
-        # 하락장 기본 0.50x, VIX fear 구간 0.35x로 추가 축소
-        _bo_size = "0.35x" if _vix_fear or _us_risk_off else "0.50x"
+        # 하락장 기본 0.75x (Sh=10.60, WR=60%, MDD=-8.9% — 포트폴리오 최고 품질)
+        # VIX fear/US risk_off 구간 0.50x로 축소
+        _bo_size = "0.50x" if _vix_fear or _us_risk_off else "0.75x"
         return {
             "action": "probe_longs",
             "size": _bo_size,
@@ -227,7 +228,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
                 f"RSI(2)={_bo_r2:.1f} (조건 <5) / RSI(14)={_bo_r14:.1f} (조건 <25)",
                 f"EMA200 아래 -{_bo_gap:.1f}% / EMA20×0.975 이하 — 하락장 극단 과매도",
                 "백테스트: Sharpe 10.60 / WR 60% / P/L 3.63 / MDD -8.9% (n=15, 2022-2026)",
-                f"하락장 경감 사이즈: {_bo_size} (TP+4% / SL-0.8% / 최대 5일)",
+                f"사이즈: {_bo_size} (TP+4% / SL-0.8% / 최대 5일 / VIX fear=0.50x)",
             ],
         }
 
