@@ -73,6 +73,10 @@ class ExecutionAgent(BaseAgent):
                 return "korea.new_high_breakout"
             if "mongtata_airborne" in text:
                 return "korea.mongtata_airborne"
+            if "rsi2_mean_reversion" in text:
+                return "korea.rsi2_mean_reversion"
+            if "nday_pullback" in text:
+                return "korea.nday_pullback"
             if "breakout" in text or "돌파" in text:
                 return "korea.breakout"
             if "gap" in text or "갭" in text:
@@ -86,6 +90,10 @@ class ExecutionAgent(BaseAgent):
             return "crypto.eth_4h_breakout"
         if "mongtata_airborne" in text:
             return "crypto.mongtata_airborne"
+        if "rsi2_mean_reversion" in text:
+            return "crypto.rsi2_mean_reversion"
+        if "nday_pullback" in text:
+            return "crypto.nday_pullback"
         if "smart_money_flow" in text:
             return "crypto.smart_money_flow"
         if "ranging_strength_follow" in text:

@@ -79,14 +79,62 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             ],
         }
 
-    # ── 4. 신호 없음 → 관망 ───────────────────────────────────────────────
+    # ── 4. Strategy S9: RSI(2) Connors 평균회귀 ──────────────────────────
+    # 백테스트: Sharpe 3.06, WR 48.1%, MDD -6.2%
+    if payload.get("rsi2_long"):
+        _sym = str(payload.get("rsi2_symbol", "KRW-BTC") or "KRW-BTC")
+        _rsi2 = float(payload.get("rsi2_value", 0.0) or 0.0)
+        _dev = float(payload.get("rsi2_deviation_pct", 0.0) or 0.0)
+        return {
+            "action": "probe_longs",
+            "size": "0.80x",
+            "focus": f"rsi2_mean_reversion: {_sym} RSI(2)={_rsi2:.1f} EMA20 대비 {_dev:.1f}%",
+            "symbol": _sym,
+            "candidate_symbols": [],
+            "candidate_markets": [],
+            "focus_tag": "rsi2_mean_reversion",
+            "strategy_id": "crypto.rsi2_mean_reversion",
+            "entry_profile": "rsi2_mean_reversion",
+            "signal_freshness": 1.0,
+            "notes": [
+                f"RSI(2)={_rsi2:.1f} (조건 <10) / EMA20 이탈 {_dev:.2f}%",
+                "EMA200 상승장 레짐 통과",
+                "백테스트: Sharpe 3.06 / WR 48.1% / MDD -6.2%",
+            ],
+        }
+
+    # ── 5. Strategy S10: N-Day Consecutive Pullback ────────────────────
+    # 백테스트: Sharpe 4.78, WR 55.8%, MDD -7.7%
+    if payload.get("nday_long"):
+        _sym = str(payload.get("nday_symbol", "KRW-BTC") or "KRW-BTC")
+        _consec = int(payload.get("nday_consec_down", 3) or 3)
+        _dev = float(payload.get("nday_deviation_pct", 0.0) or 0.0)
+        return {
+            "action": "probe_longs",
+            "size": "0.80x",
+            "focus": f"nday_pullback: {_sym} {_consec}일 연속 하락 EMA5 이탈 {_dev:.1f}%",
+            "symbol": _sym,
+            "candidate_symbols": [],
+            "candidate_markets": [],
+            "focus_tag": "nday_pullback",
+            "strategy_id": "crypto.nday_pullback",
+            "entry_profile": "nday_pullback",
+            "signal_freshness": 1.0,
+            "notes": [
+                f"{_consec}일 연속 하락 / EMA5 이탈 {_dev:.2f}%",
+                "EMA200 상승장 레짐 통과",
+                "백테스트: Sharpe 4.78 / WR 55.8% / MDD -7.7%",
+            ],
+        }
+
+    # ── 6. 신호 없음 → 관망 ───────────────────────────────────────────────
     return {
         "action": "watchlist_only",
         "size": "0.00x",
-        "focus": f"No validated crypto signal. BTC bias={desk_bias}. Watching ETH 4H / MONGTATA.",
+        "focus": f"No validated crypto signal. BTC bias={desk_bias}.",
         "symbol": lead_market,
         "candidate_symbols": [],
-        "notes": reasons[:3] + ["Strategy D (ETH 4H breakout) not triggered.", "Strategy S2 (MONGTATA) not triggered."],
+        "notes": reasons[:3] + ["D/S2/S9/S10 not triggered."],
     }
 
 
@@ -232,16 +280,60 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 6. 신호 없음 → 관망 ───────────────────────────────────────────────
+    # ── 6. Strategy S9: RSI(2) Connors 평균회귀 ─────────────────────────
+    rsi2_candidates = payload.get("rsi2_candidates", []) or []
+    if rsi2_candidates and stance != "DEFENSE":
+        r = rsi2_candidates[0]
+        r_syms = [c.get("ticker", "") for c in rsi2_candidates if c.get("ticker")]
+        return {
+            "action": "probe_longs",
+            "size": "0.50x",
+            "focus": f"rsi2_mean_reversion: {r.get('name', r.get('ticker', ''))} RSI(2)={r.get('rsi2', 0):.1f}",
+            "symbol": r.get("ticker", ""),
+            "candidate_symbols": r_syms[:3],
+            "focus_tag": "rsi2_mean_reversion",
+            "strategy_id": "korea.rsi2_mean_reversion",
+            "entry_profile": "rsi2_mean_reversion",
+            "notes": [
+                f"RSI(2)={r.get('rsi2', 0):.1f} / EMA20 이탈 {r.get('deviation_pct', 0):.2f}%",
+                f"총 {len(rsi2_candidates)}개 신호",
+                "백테스트: Sharpe 6.74 / WR 58.1% / MDD -7.3%",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 7. Strategy S10: N-Day Pullback ──────────────────────────────────
+    nday_candidates = payload.get("nday_candidates", []) or []
+    if nday_candidates and stance != "DEFENSE":
+        n = nday_candidates[0]
+        n_syms = [c.get("ticker", "") for c in nday_candidates if c.get("ticker")]
+        return {
+            "action": "probe_longs",
+            "size": "0.50x",
+            "focus": f"nday_pullback: {n.get('name', n.get('ticker', ''))} EMA5 이탈 {n.get('deviation_pct', 0):.1f}%",
+            "symbol": n.get("ticker", ""),
+            "candidate_symbols": n_syms[:3],
+            "focus_tag": "nday_pullback",
+            "strategy_id": "korea.nday_pullback",
+            "entry_profile": "nday_pullback",
+            "notes": [
+                f"3일 연속 하락 / EMA5 이탈 {n.get('deviation_pct', 0):.2f}%",
+                f"총 {len(nday_candidates)}개 신호",
+                "백테스트: Sharpe 4.52 / WR 54.1% / MDD -12.1%",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 8. 신호 없음 → 관망 ───────────────────────────────────────────────
     return {
         "action": "stand_by",
         "size": "0.00x",
-        "focus": "No signal. Strategy B (60일 신고점) / Strategy S2 (MONGTATA) not triggered.",
+        "focus": "No signal. B/S2/S9/S10 not triggered.",
         "symbol": candidate_symbols[0] if candidate_symbols else "",
         "candidate_symbols": candidate_symbols,
         "notes": [
-            f"confirmed={breakout_confirmed_count} / partial={breakout_partial_count} / mongtata={len(mongtata_candidates)}",
-            "Waiting for Strategy B or S2 signal.",
+            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S2={len(mongtata_candidates)} S9={len(rsi2_candidates)} S10={len(nday_candidates)}",
+            "Waiting for B/S2/S9/S10 signal.",
         ],
         "quality_score": quality_score,
     }

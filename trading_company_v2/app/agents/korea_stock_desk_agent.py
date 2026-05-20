@@ -27,6 +27,26 @@ def _ema(values: list[float], period: int) -> float:
     return ema
 
 
+def _rsi(closes: list[float], period: int = 14) -> float | None:
+    """RSI — Wilder 평활법."""
+    if len(closes) < period + 2:
+        return None
+    gains: list[float] = []
+    losses: list[float] = []
+    for i in range(1, len(closes)):
+        delta = closes[i] - closes[i - 1]
+        gains.append(max(delta, 0.0))
+        losses.append(max(-delta, 0.0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss <= 0.0:
+        return 100.0
+    return round(100.0 - 100.0 / (1.0 + avg_gain / avg_loss), 1)
+
+
 def _std_last(values: list[float], period: int) -> float:
     """Population std of the last `period` values."""
     if len(values) < period:
@@ -135,8 +155,17 @@ class KoreaStockDeskAgent(BaseAgent):
 
         # ── Strategy S2: MONGTATA 에어본 (평균회귀) ─────────────────────────────
         # 백테스트 검증: Sharpe 8.60, WR 56.5%, MDD -5.9% (주식 3년)
-        # 조건: close > EMA200 (상승장 레짐) + close < lower_BB (EMA20−2σ) + close < EMA20×0.975
+        # 조건: close > EMA200 + close < lower_BB (EMA20−2σ) + close < EMA20×0.975
         mongtata_candidates: list[dict] = []
+        # ── Strategy S9: RSI(2) Connors 평균회귀 ────────────────────────────
+        # 백테스트 검증: Sharpe 6.74, WR 58.1%, MDD -7.3% (주식 3년)
+        # 조건: close > EMA200 + RSI(2) < 10 + close < EMA20×0.975
+        rsi2_candidates: list[dict] = []
+        # ── Strategy S10: N-Day Consecutive Pullback ─────────────────────────
+        # 백테스트 검증: Sharpe 4.52, WR 54.1%, MDD -12.1% (주식 3년)
+        # 조건: close > EMA200 + 3일 연속 하락 + close < EMA5
+        nday_candidates: list[dict] = []
+
         for ticker, name, candles in results:
             if len(candles) < 205:
                 continue
@@ -163,6 +192,34 @@ class KoreaStockDeskAgent(BaseAgent):
                         "deviation_pct": deviation_pct,
                         "focus_tag": "mongtata_airborne",
                     })
+
+                # ── S9: RSI(2) < 10 + EMA20*0.975 ──────────────────────────
+                rsi2_val = _rsi(closes, 2)
+                if (rsi2_val is not None and rsi2_val < 10.0
+                        and closes[-1] < ema20 * 0.975):
+                    rsi2_candidates.append({
+                        "ticker": ticker,
+                        "name": name,
+                        "current_price": closes[-1],
+                        "rsi2": rsi2_val,
+                        "ema20": round(ema20, 0),
+                        "deviation_pct": round((closes[-1] - ema20) / ema20 * 100, 2),
+                        "focus_tag": "rsi2_mean_reversion",
+                    })
+
+                # ── S10: 3일 연속 하락 + close < EMA5 ───────────────────────
+                ema5 = _ema(closes[-10:], 5)
+                consec = (len(closes) >= 4 and
+                          closes[-1] < closes[-2] < closes[-3] < closes[-4])
+                if consec and closes[-1] < ema5 and ema5 > 0:
+                    nday_candidates.append({
+                        "ticker": ticker,
+                        "name": name,
+                        "current_price": closes[-1],
+                        "ema5": round(ema5, 0),
+                        "deviation_pct": round((closes[-1] - ema5) / ema5 * 100, 2),
+                        "focus_tag": "nday_pullback",
+                    })
             except Exception:
                 continue
 
@@ -178,7 +235,7 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.40
         elif breakout_partial_count >= 1:
             score += 0.20
-        elif mongtata_candidates:
+        elif mongtata_candidates or rsi2_candidates or nday_candidates:
             score += 0.25
         if breakout_candidates:
             top_sd = float(breakout_candidates[0].get("supply_demand_score", 0.0) or 0.0)
@@ -190,8 +247,8 @@ class KoreaStockDeskAgent(BaseAgent):
             name=self.name,
             score=max(score, 0.2),
             reason=(
-                f"Strategy B 60일신고점: {breakout_confirmed_count}confirmed/{breakout_partial_count}partial "
-                f"| Strategy S2 MONGTATA: {len(mongtata_candidates)}개 "
+                f"B:{breakout_confirmed_count}c/{breakout_partial_count}p "
+                f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} S10:{len(nday_candidates)} "
                 f"(universe {len(universe)}종목)"
             ),
             payload={
@@ -200,8 +257,14 @@ class KoreaStockDeskAgent(BaseAgent):
                 "breakout_partial_count": breakout_partial_count,
                 "universe_size": len(universe),
                 "quality_score": score,
-                # Strategy S2 MONGTATA 에어본
+                # Strategy S2 MONGTATA
                 "mongtata_airborne_candidates": mongtata_candidates[:3],
                 "mongtata_airborne_count": len(mongtata_candidates),
+                # Strategy S9 RSI(2)
+                "rsi2_candidates": rsi2_candidates[:3],
+                "rsi2_count": len(rsi2_candidates),
+                # Strategy S10 N-Day Pullback
+                "nday_candidates": nday_candidates[:3],
+                "nday_count": len(nday_candidates),
             },
         )

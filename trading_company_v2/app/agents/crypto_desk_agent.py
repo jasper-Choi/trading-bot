@@ -126,6 +126,133 @@ def _std(values: list[float], period: int) -> list[float]:
     return result
 
 
+def _rsi(closes: list[float], period: int = 14) -> float | None:
+    """RSI — Wilder 평활법 (2-period 용도로도 사용)."""
+    if len(closes) < period + 2:
+        return None
+    gains: list[float] = []
+    losses: list[float] = []
+    for i in range(1, len(closes)):
+        delta = closes[i] - closes[i - 1]
+        gains.append(max(delta, 0.0))
+        losses.append(max(-delta, 0.0))
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+    if avg_loss <= 0.0:
+        return 100.0
+    return round(100.0 - 100.0 / (1.0 + avg_gain / avg_loss), 1)
+
+
+def _sma(values: list[float], period: int) -> float:
+    """단순이동평균."""
+    if len(values) < period:
+        return 0.0
+    return sum(values[-period:]) / period
+
+
+def _check_rsi2_mean_reversion_crypto() -> dict:
+    """Strategy S9: RSI(2) Connors 평균회귀 — 백테스트 검증 (2026-05-20).
+
+    Daily 캔들 기준:
+      1. close > EMA200 (상승장 레짐 필터)
+      2. RSI(2) < 10  (극도 과매도)
+      3. close < EMA20 × 0.975 (EMA20 대비 2.5% 이상 하락)
+
+    백테스트 결과:
+      Crypto: Sharpe 3.06, WR 48.1%, P/L 1.64, MDD -6.2%
+      Stocks: Sharpe 6.74, WR 58.1%, P/L 1.94, MDD -7.3%
+    """
+    result: dict = {
+        "rsi2_long": False,
+        "rsi2_symbol": "",
+        "rsi2_value": 0.0,
+        "rsi2_ema20": 0.0,
+        "rsi2_deviation_pct": 0.0,
+    }
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL"):
+        try:
+            daily = get_upbit_daily_candles(market, count=220)
+            if len(daily) < 205:
+                continue
+            closes = [float(c.get("close") or 0.0) for c in daily]
+            if not closes or closes[-1] <= 0:
+                continue
+            ema200 = _ema(closes, 200)
+            if closes[-1] <= ema200 or ema200 <= 0:
+                continue
+            ema20 = _ema(closes, 20)
+            if ema20 <= 0:
+                continue
+            rsi2_val = _rsi(closes, 2)
+            if rsi2_val is None:
+                continue
+            deviation_pct = round((closes[-1] - ema20) / ema20 * 100, 2)
+            if rsi2_val < 10.0 and closes[-1] < ema20 * 0.975:
+                result["rsi2_long"] = True
+                result["rsi2_symbol"] = market
+                result["rsi2_value"] = rsi2_val
+                result["rsi2_ema20"] = round(ema20, 0)
+                result["rsi2_deviation_pct"] = deviation_pct
+                return result
+        except Exception:
+            continue
+    return result
+
+
+def _check_nday_pullback_crypto() -> dict:
+    """Strategy S10: N-Day Consecutive Pullback 평균회귀 — 백테스트 검증 (2026-05-20).
+
+    Daily 캔들 기준:
+      1. close > EMA200 (상승장 레짐 필터)
+      2. 3일 연속 하락 마감
+      3. close < EMA5 (단기 하락 추세 확인)
+
+    백테스트 결과:
+      Crypto: Sharpe 4.78, WR 55.8%, P/L 1.73, MDD -7.7%
+      Stocks: Sharpe 4.52, WR 54.1%, P/L 1.69, MDD -12.1%
+    """
+    result: dict = {
+        "nday_long": False,
+        "nday_symbol": "",
+        "nday_consec_down": 0,
+        "nday_ema5": 0.0,
+        "nday_deviation_pct": 0.0,
+    }
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL"):
+        try:
+            daily = get_upbit_daily_candles(market, count=220)
+            if len(daily) < 210:
+                continue
+            closes = [float(c.get("close") or 0.0) for c in daily]
+            if not closes or closes[-1] <= 0:
+                continue
+            ema200 = _ema(closes, 200)
+            if closes[-1] <= ema200 or ema200 <= 0:
+                continue
+            ema5 = _ema(closes[-10:], 5)
+            if ema5 <= 0:
+                continue
+            # 3일 연속 하락
+            consec = sum(
+                1 for i in range(-3, 0)
+                if closes[i] < closes[i - 1]
+            )
+            deviation_pct = round((closes[-1] - ema5) / ema5 * 100, 2)
+            if consec >= 3 and closes[-1] < ema5:
+                result["nday_long"] = True
+                result["nday_symbol"] = market
+                result["nday_consec_down"] = consec
+                result["nday_ema5"] = round(ema5, 0)
+                result["nday_deviation_pct"] = deviation_pct
+                return result
+        except Exception:
+            continue
+    return result
+
+
 def _check_mongtata_airborne_crypto() -> dict:
     """MONGTATA 에어본 (평균회귀) 신호 — Strategy S2 백테스트 검증.
 
@@ -212,19 +339,36 @@ class CryptoDeskAgent(BaseAgent):
         # ── Strategy S2: MONGTATA 에어본 (평균회귀) ──────────────────────────
         mongtata = _check_mongtata_airborne_crypto()
 
-        _has_signal = eth4h["eth_4h_breakout"] or mongtata["mongtata_long"]
+        # ── Strategy S9: RSI(2) Connors 평균회귀 ────────────────────────────
+        rsi2 = _check_rsi2_mean_reversion_crypto()
+
+        # ── Strategy S10: N-Day Consecutive Pullback ─────────────────────────
+        nday = _check_nday_pullback_crypto()
+
+        # 우선순위: D(추세) > S2(BB) > S9(RSI2) > S10(NDayPullback)
         _lead = (
             "KRW-ETH" if eth4h["eth_4h_breakout"]
             else mongtata["mongtata_symbol"] if mongtata["mongtata_long"]
+            else rsi2["rsi2_symbol"] if rsi2["rsi2_long"]
+            else nday["nday_symbol"] if nday["nday_long"]
             else "KRW-BTC"
+        )
+        _score = (
+            0.75 if eth4h["eth_4h_breakout"]
+            else 0.65 if mongtata["mongtata_long"]
+            else 0.62 if rsi2["rsi2_long"]
+            else 0.60 if nday["nday_long"]
+            else 0.4
         )
 
         return AgentResult(
             name=self.name,
-            score=0.75 if eth4h["eth_4h_breakout"] else (0.65 if mongtata["mongtata_long"] else 0.4),
+            score=_score,
             reason=(
                 f"ETH4H={'✓' if eth4h['eth_4h_breakout'] else '✗'} "
                 f"MONGTATA={'✓ ' + mongtata['mongtata_symbol'] if mongtata['mongtata_long'] else '✗'} "
+                f"RSI2={'✓ ' + rsi2['rsi2_symbol'] if rsi2['rsi2_long'] else '✗'} "
+                f"NDAY={'✓ ' + nday['nday_symbol'] if nday['nday_long'] else '✗'} "
                 f"BTC={btc_bias}"
             ),
             payload={
@@ -237,10 +381,16 @@ class CryptoDeskAgent(BaseAgent):
                     f"BTC 30min change={btc_change_30m:+.2f}%",
                     f"ETH 4H breakout={'confirmed' if eth4h['eth_4h_breakout'] else 'not triggered'}",
                     f"MONGTATA={'confirmed ' + mongtata['mongtata_symbol'] if mongtata['mongtata_long'] else 'not triggered'}",
+                    f"RSI2={'confirmed ' + rsi2['rsi2_symbol'] if rsi2['rsi2_long'] else 'not triggered'}",
+                    f"NDayPullback={'confirmed ' + nday['nday_symbol'] if nday['nday_long'] else 'not triggered'}",
                 ],
                 # Strategy D fields
                 **eth4h,
                 # Strategy S2 fields
                 **mongtata,
+                # Strategy S9 fields
+                **rsi2,
+                # Strategy S10 fields
+                **nday,
             },
         )

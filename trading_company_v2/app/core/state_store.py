@@ -533,6 +533,20 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
         # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
         return 3.0, -0.8, 360
+    if desk == "crypto" and "rsi2_mean_reversion" in focus:
+        # S9 RSI(2) Connors: Sharpe 3.06, WR 48.1%, MDD -6.2%
+        # stop -1.5%, TP +10%, max 10 거래일
+        return 10.0, -1.5, 2700
+    if desk == "crypto" and "nday_pullback" in focus:
+        # S10 N-Day Pullback: Sharpe 4.78, WR 55.8%, MDD -7.7%
+        # stop -1.5%, TP +10%, max 10 거래일
+        return 10.0, -1.5, 2700
+    if desk == "korea" and "rsi2_mean_reversion" in focus:
+        # S9 Korea: Sharpe 6.74, WR 58.1%, MDD -7.3%
+        return 10.0, -1.5, 2700
+    if desk == "korea" and "nday_pullback" in focus:
+        # S10 Korea: Sharpe 4.52, WR 54.1%, MDD -12.1%
+        return 10.0, -1.5, 2700
     if desk == "korea" and "mongtata_airborne" in focus:
         # 2026-05-20: 백테스트 검증 전략 S2 MONGTATA 에어본 (평균회귀)
         # 주식 3년: Sharpe 8.60, WR 56.5%, MDD -5.9%
@@ -624,6 +638,25 @@ def _korea_newhi_trail_rules(peak_pnl: float) -> tuple[float, float]:
         return 6.0, 6.0
     if peak_pnl >= 5.0:
         return 4.0, 2.0
+    return 0.0, 0.0
+
+
+def _mean_reversion_trail_rules(peak_pnl: float) -> tuple[float, float]:
+    """S9/S10 평균회귀 공용 트레일 — 백테스트 검증 (2026-05-20).
+
+    S9 RSI(2): stop -1.5%, TP 10%, 최대 10 거래일
+    S10 NDayPullback: stop -1.5%, TP 10%, 최대 10 거래일
+
+    peak >= 6% → giveback 3%, floor 4%
+    peak >= 3% → giveback 2%, floor 2%
+    peak >= 1.5% → giveback 1%, floor 0%
+    """
+    if peak_pnl >= 6.0:
+        return 3.0, 4.0
+    if peak_pnl >= 3.0:
+        return 2.0, 2.0
+    if peak_pnl >= 1.5:
+        return 1.0, 0.0
     return 0.0, 0.0
 
 
@@ -1354,6 +1387,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
                 elif "mongtata_airborne" in pos_focus:
                     trail_giveback, profit_floor = _mongtata_trail_rules(peak_pnl)
+                elif "rsi2_mean_reversion" in pos_focus or "nday_pullback" in pos_focus:
+                    trail_giveback, profit_floor = _mean_reversion_trail_rules(peak_pnl)
                 else:
                     trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
                 protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
