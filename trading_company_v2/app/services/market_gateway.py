@@ -33,6 +33,49 @@ US_CORE_TICKERS = ["SPY", "QQQ", "NVDA", "AAPL", "MSFT", "TSLA"]
 LAST_US_DATA_STATUS: dict[str, Any] = {"provider": "none", "ok": False, "message": "not requested yet"}
 US_CACHE_PATH = Path(settings.db_path).resolve().parent / "us_daily_cache.json"
 
+# ── Naver data-failure tracking ──────────────────────────────────────────────
+# 연속 실패 횟수를 추적하고 임계값 초과 시 Telegram 알림 발송.
+# 순환 임포트를 피하기 위해 notifier는 첫 경고 시점에 lazy-import.
+_naver_failure_count: int = 0       # 연속 0-candle / 파싱실패 횟수
+_NAVER_FAIL_ALERT_THRESHOLD: int = 5  # 연속 N회 실패 시 알림 발송
+_NAVER_FAIL_LAST_ALERTED: int = 0   # 마지막 알림 발송 시점의 실패 횟수 (중복 방지)
+
+def _naver_record_failure(ticker: str) -> None:
+    """연속 실패 카운터 증가 + 임계값 초과 시 Telegram 경고."""
+    global _naver_failure_count, _NAVER_FAIL_LAST_ALERTED
+    _naver_failure_count += 1
+    # 임계값의 배수마다 한 번씩 알림 (1차: 5회, 2차: 10회, ...)
+    if _naver_failure_count >= _NAVER_FAIL_ALERT_THRESHOLD and (
+        _naver_failure_count // _NAVER_FAIL_ALERT_THRESHOLD
+        > _NAVER_FAIL_LAST_ALERTED // _NAVER_FAIL_ALERT_THRESHOLD
+    ):
+        _NAVER_FAIL_LAST_ALERTED = _naver_failure_count
+        _log.error(
+            "naver_daily_prices: %d consecutive failures (last ticker=%s) — Telegram alert fired",
+            _naver_failure_count, ticker,
+        )
+        try:
+            from app.notifier import notifier  # lazy import — avoids circular dep
+            notifier.send_ops_alert(
+                "Naver data failure",
+                [
+                    f"연속 실패: {_naver_failure_count}회 (최근 ticker={ticker})",
+                    "get_naver_daily_prices()가 빈 캔들을 반환하고 있습니다.",
+                    "Naver finance 스크래핑 차단 또는 HTML 구조 변경 가능성 확인 요망.",
+                ],
+            )
+        except Exception as _e:
+            _log.warning("naver_failure_alert: notifier call failed: %s", _e)
+
+
+def _naver_record_success() -> None:
+    """성공 시 연속 실패 카운터 리셋."""
+    global _naver_failure_count, _NAVER_FAIL_LAST_ALERTED
+    if _naver_failure_count > 0:
+        _naver_failure_count = 0
+        _NAVER_FAIL_LAST_ALERTED = 0
+
+
 NAVER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -503,7 +546,13 @@ def get_naver_daily_prices(ticker: str, count: int = 20) -> list[dict[str, Any]]
             break
 
     candles.reverse()
-    return candles[:count]
+    result = candles[:count]
+    # 실패 감지: 최소 5개 캔들도 반환되지 않으면 데이터 소스 이상으로 간주
+    if len(result) < 5:
+        _naver_record_failure(ticker)
+    else:
+        _naver_record_success()
+    return result
 
 
 def get_us_daily_prices(ticker: str, count: int = 60) -> list[dict[str, Any]]:
