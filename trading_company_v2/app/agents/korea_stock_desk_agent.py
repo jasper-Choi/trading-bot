@@ -193,18 +193,22 @@ class KoreaStockDeskAgent(BaseAgent):
                         "focus_tag": "mongtata_airborne",
                     })
 
-                # ── S9: RSI(2) < 10 + EMA20*0.975 ──────────────────────────
+                # ── S9/S13: RSI(2) < 10 + EMA20*0.975 ─────────────────────
                 rsi2_val = _rsi(closes, 2)
                 if (rsi2_val is not None and rsi2_val < 10.0
                         and closes[-1] < ema20 * 0.975):
+                    rsi14_val = _rsi(closes, 14)
+                    dual = (rsi14_val is not None and rsi14_val < 40.0)
                     rsi2_candidates.append({
                         "ticker": ticker,
                         "name": name,
                         "current_price": closes[-1],
                         "rsi2": rsi2_val,
+                        "rsi14": round(rsi14_val or 0.0, 1),
                         "ema20": round(ema20, 0),
                         "deviation_pct": round((closes[-1] - ema20) / ema20 * 100, 2),
                         "focus_tag": "rsi2_mean_reversion",
+                        "dual_rsi": dual,  # S13: RSI(14)<40 추가 확인
                     })
 
                 # ── S10: 3일 연속 하락 + close < EMA5 ───────────────────────

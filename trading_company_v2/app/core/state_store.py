@@ -492,6 +492,22 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # TP +7.0%, SL -3.0%, trail_trigger +4% / max 20봉 (80h)
         # @ ~8s/cycle: 80h × 3600s / 8s = 36000 cycles
         return 7.0, -3.0, 36000
+    if desk == "crypto" and "dual_rsi" in focus:
+        # S13 Dual RSI 이중 확인 (2026-05-20):
+        # Crypto: Sh 7.28, WR 51.2%, PnL 3.20, MDD -8.7% | Korea: Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
+        # 진입 조건: RSI(2)<10 + RSI(14)<40 + close>EMA200 + close<EMA20
+        # stop -1.4% (S9와 동일 — 같은 자산군, 같은 수수료 구조)
+        return 10.0, -1.4, 2700
+    if desk == "crypto" and "rsi2_mean_reversion" in focus:
+        # S9 RSI(2) Connors (fee-adjusted 2026-05-20):
+        # Crypto: Sh 2.76, WR 48.1%, PnL 1.58, MDD -6.3% | Stocks: Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
+        # stop -1.4% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
+        return 10.0, -1.4, 2700
+    if desk == "crypto" and "nday_pullback" in focus:
+        # S10 N-Day Pullback (fee-adjusted 2026-05-20):
+        # Crypto: Sh 5.21, WR 55.8%, PnL 1.91, MDD -6.7% | Stocks: Sh 3.52, WR 51.0%, PnL 1.64, MDD -13.6%
+        # stop -1.2% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
+        return 10.0, -1.2, 2700
     if desk == "crypto":
         # Trend mode: cut failed ignitions fast, let winners run with trailing.
         return 10.0, -2.0, 180
@@ -533,16 +549,10 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
         # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
         return 3.0, -0.8, 360
-    if desk == "crypto" and "rsi2_mean_reversion" in focus:
-        # S9 RSI(2) Connors (fee-adjusted 2026-05-20):
-        # Crypto: Sh 2.76, WR 48.1%, PnL 1.58, MDD -6.3% | Stocks: Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
-        # stop -1.4% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
+    if desk == "korea" and "dual_rsi" in focus:
+        # S13 Dual RSI Korea (2026-05-20):
+        # Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
         return 10.0, -1.4, 2700
-    if desk == "crypto" and "nday_pullback" in focus:
-        # S10 N-Day Pullback (fee-adjusted 2026-05-20):
-        # Crypto: Sh 5.21, WR 55.8%, PnL 1.91, MDD -6.7% | Stocks: Sh 3.52, WR 51.0%, PnL 1.64, MDD -13.6%
-        # stop -1.2% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
-        return 10.0, -1.2, 2700
     if desk == "korea" and "rsi2_mean_reversion" in focus:
         # S9 Korea (fee-adjusted 2026-05-20): Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
         # stop -1.4% (tightened from -1.5% to maintain P&L≥1.5 after 0.25% round-trip fee)
@@ -1392,7 +1402,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
                 elif "mongtata_airborne" in pos_focus:
                     trail_giveback, profit_floor = _mongtata_trail_rules(peak_pnl)
-                elif "rsi2_mean_reversion" in pos_focus or "nday_pullback" in pos_focus:
+                elif "rsi2_mean_reversion" in pos_focus or "nday_pullback" in pos_focus or "dual_rsi" in pos_focus:
                     trail_giveback, profit_floor = _mean_reversion_trail_rules(peak_pnl)
                 else:
                     trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
@@ -1491,6 +1501,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             "crypto.rsi2_mean_reversion",
             "crypto.nday_pullback",
             "crypto.mongtata_airborne",
+            "crypto.dual_rsi",    # S13 — 동일 평균회귀 계열
         })
         _open_crypto_mr_count = sum(
             1 for p in open_positions

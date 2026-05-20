@@ -88,7 +88,33 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             ],
         }
 
-    # ── 4. Strategy S9: RSI(2) Connors 평균회귀 ──────────────────────────
+    # ── 4. Strategy S13: Dual RSI 이중 확인 평균회귀 (S9보다 우선) ─────────
+    # 백테스트: Sharpe 7.28, WR 51.2%, MDD -8.7% (RSI2<10 + RSI14<40)
+    if (payload.get("dual_rsi_long") and payload.get("rsi2_long")
+            and not _is_paused("crypto.dual_rsi")):
+        _sym = str(payload.get("rsi2_symbol", "KRW-BTC") or "KRW-BTC")
+        _rsi2 = float(payload.get("rsi2_value", 0.0) or 0.0)
+        _rsi14 = float(payload.get("dual_rsi_rsi14", 0.0) or 0.0)
+        _dev = float(payload.get("rsi2_deviation_pct", 0.0) or 0.0)
+        return {
+            "action": "probe_longs",
+            "size": "0.80x",
+            "focus": f"dual_rsi: {_sym} RSI(2)={_rsi2:.1f} RSI(14)={_rsi14:.1f} EMA20 {_dev:.1f}%",
+            "symbol": _sym,
+            "candidate_symbols": [],
+            "candidate_markets": [],
+            "focus_tag": "dual_rsi",
+            "strategy_id": "crypto.dual_rsi",
+            "entry_profile": "dual_rsi",
+            "signal_freshness": 1.0,
+            "notes": [
+                f"RSI(2)={_rsi2:.1f} (조건 <10) + RSI(14)={_rsi14:.1f} (조건 <40)",
+                f"EMA20 이탈 {_dev:.2f}% / EMA200 상승장 레짐 통과",
+                "백테스트: Sharpe 7.28 / WR 51.2% / MDD -8.7% (2026-05-20)",
+            ],
+        }
+
+    # ── 4b. Strategy S9: RSI(2) Connors 평균회귀 ─────────────────────────
     # 백테스트: Sharpe 3.06, WR 48.1%, MDD -6.2%
     if payload.get("rsi2_long") and not _is_paused("crypto.rsi2_mean_reversion"):
         _sym = str(payload.get("rsi2_symbol", "KRW-BTC") or "KRW-BTC")
@@ -143,7 +169,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         "focus": f"No validated crypto signal. BTC bias={desk_bias}.",
         "symbol": lead_market,
         "candidate_symbols": [],
-        "notes": reasons[:3] + ["D/S2/S9/S10 not triggered."],
+        "notes": reasons[:3] + ["D/S2/S9/S10/S13 not triggered."],
     }
 
 
@@ -289,8 +315,31 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 6. Strategy S9: RSI(2) Connors 평균회귀 ─────────────────────────
+    # ── 6. Strategy S13: Dual RSI 이중 확인 (S9보다 우선) ───────────────
+    # 백테스트: Sharpe 6.36, WR 58.6%, MDD -8.0%
     rsi2_candidates = payload.get("rsi2_candidates", []) or []
+    dual_rsi_candidates = [c for c in rsi2_candidates if c.get("dual_rsi")]
+    if dual_rsi_candidates and stance != "DEFENSE" and not _is_paused("korea.dual_rsi"):
+        r = dual_rsi_candidates[0]
+        r_syms = [c.get("ticker", "") for c in dual_rsi_candidates if c.get("ticker")]
+        return {
+            "action": "probe_longs",
+            "size": "0.50x",
+            "focus": f"dual_rsi: {r.get('name', r.get('ticker', ''))} RSI(2)={r.get('rsi2', 0):.1f} RSI(14)={r.get('rsi14', 0):.1f}",
+            "symbol": r.get("ticker", ""),
+            "candidate_symbols": r_syms[:3],
+            "focus_tag": "dual_rsi",
+            "strategy_id": "korea.dual_rsi",
+            "entry_profile": "dual_rsi",
+            "notes": [
+                f"RSI(2)={r.get('rsi2', 0):.1f} (조건 <10) + RSI(14)={r.get('rsi14', 0):.1f} (조건 <40)",
+                f"EMA20 이탈 {r.get('deviation_pct', 0):.2f}% / 총 {len(dual_rsi_candidates)}개 신호",
+                "백테스트: Sharpe 6.36 / WR 58.6% / MDD -8.0% (2026-05-20)",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 6b. Strategy S9: RSI(2) Connors 평균회귀 ────────────────────────
     if rsi2_candidates and stance != "DEFENSE" and not _is_paused("korea.rsi2_mean_reversion"):
         r = rsi2_candidates[0]
         r_syms = [c.get("ticker", "") for c in rsi2_candidates if c.get("ticker")]
@@ -341,8 +390,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         "symbol": candidate_symbols[0] if candidate_symbols else "",
         "candidate_symbols": candidate_symbols,
         "notes": [
-            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S2={len(mongtata_candidates)} S9={len(rsi2_candidates)} S10={len(nday_candidates)}",
-            "Waiting for B/S2/S9/S10 signal.",
+            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)}",
+            "Waiting for B/S2/S9/S10/S13 signal.",
         ],
         "quality_score": quality_score,
     }

@@ -154,16 +154,14 @@ def _sma(values: list[float], period: int) -> float:
 
 
 def _check_rsi2_mean_reversion_crypto() -> dict:
-    """Strategy S9: RSI(2) Connors 평균회귀 — 백테스트 검증 (2026-05-20).
+    """Strategy S9 / S13: RSI(2) 평균회귀 — 백테스트 검증 (2026-05-20).
 
-    Daily 캔들 기준:
-      1. close > EMA200 (상승장 레짐 필터)
-      2. RSI(2) < 10  (극도 과매도)
-      3. close < EMA20 × 0.975 (EMA20 대비 2.5% 이상 하락)
+    S9  (rsi2_long):      RSI(2) < 10 + close < EMA20×0.975 + close > EMA200
+    S13 (dual_rsi_long):  S9 조건 전체 + RSI(14) < 40 (중기 과매도 이중 확인)
 
-    백테스트 결과:
-      Crypto: Sharpe 3.06, WR 48.1%, P/L 1.64, MDD -6.2%
-      Stocks: Sharpe 6.74, WR 58.1%, P/L 1.94, MDD -7.3%
+    S13 백테스트: Crypto Sharpe 7.28, WR 51.2%, P/L 3.20, MDD -8.7% ✅
+                  Korea  Sharpe 6.36, WR 58.6%, P/L 2.00, MDD -8.0% ✅
+    S9  백테스트: Crypto Sharpe 3.06, WR 48.1%, P/L 1.64, MDD -6.2%
     """
     result: dict = {
         "rsi2_long": False,
@@ -171,6 +169,8 @@ def _check_rsi2_mean_reversion_crypto() -> dict:
         "rsi2_value": 0.0,
         "rsi2_ema20": 0.0,
         "rsi2_deviation_pct": 0.0,
+        "dual_rsi_long": False,   # S13: RSI(2)<10 AND RSI(14)<40
+        "dual_rsi_rsi14": 0.0,
     }
     for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL"):
         try:
@@ -191,11 +191,16 @@ def _check_rsi2_mean_reversion_crypto() -> dict:
                 continue
             deviation_pct = round((closes[-1] - ema20) / ema20 * 100, 2)
             if rsi2_val < 10.0 and closes[-1] < ema20 * 0.975:
+                # S9 조건 충족 — S13도 충족하는지 추가 확인
+                rsi14_val = _rsi(closes, 14)
+                dual = (rsi14_val is not None and rsi14_val < 40.0)
                 result["rsi2_long"] = True
                 result["rsi2_symbol"] = market
                 result["rsi2_value"] = rsi2_val
                 result["rsi2_ema20"] = round(ema20, 0)
                 result["rsi2_deviation_pct"] = deviation_pct
+                result["dual_rsi_long"] = dual
+                result["dual_rsi_rsi14"] = round(rsi14_val or 0.0, 1)
                 return result
         except Exception:
             continue

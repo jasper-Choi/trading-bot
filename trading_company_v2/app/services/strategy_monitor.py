@@ -23,10 +23,12 @@ _STRATEGY_WR_THRESHOLDS: dict[str, float] = {
     "crypto.mongtata_airborne":   0.56,   # S2 — ⚠️ under re-validation, soft threshold
     "crypto.rsi2_mean_reversion": 0.481,  # S9 (fee-adjusted)
     "crypto.nday_pullback":       0.558,  # S10 (fee-adjusted)
+    "crypto.dual_rsi":            0.512,  # S13 Dual RSI (fee-adjusted 2026-05-20)
     "korea.new_high_breakout":    0.846,  # B breakout
     "korea.mongtata_airborne":    0.509,  # S2 Korea (soft, under review)
     "korea.rsi2_mean_reversion":  0.581,  # S9 Korea (fee-adjusted)
     "korea.nday_pullback":        0.510,  # S10 Korea (fee-adjusted)
+    "korea.dual_rsi":             0.586,  # S13 Korea Dual RSI (fee-adjusted 2026-05-20)
 }
 
 # Auto-pause triggers when live WR drops this many percentage points below backtest
@@ -199,6 +201,8 @@ _SHADOW_STRATEGIES: frozenset[str] = frozenset({
     "crypto.nday_pullback",         # S10 — deployed 2026-05-20
     "korea.rsi2_mean_reversion",    # S9 Korea — deployed 2026-05-20
     "korea.nday_pullback",          # S10 Korea — deployed 2026-05-20
+    "crypto.dual_rsi",              # S13 — deployed 2026-05-20
+    "korea.dual_rsi",               # S13 Korea — deployed 2026-05-20
 })
 _SHADOW_MIN_TRADES: int = 30
 
