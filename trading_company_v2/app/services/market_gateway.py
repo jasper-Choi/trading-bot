@@ -33,6 +33,25 @@ US_CORE_TICKERS = ["SPY", "QQQ", "NVDA", "AAPL", "MSFT", "TSLA"]
 LAST_US_DATA_STATUS: dict[str, Any] = {"provider": "none", "ok": False, "message": "not requested yet"}
 US_CACHE_PATH = Path(settings.db_path).resolve().parent / "us_daily_cache.json"
 
+# ── US Market Context — 확장 티커 목록 ────────────────────────────────────────
+# 지수, VIX, 섹터 ETF, 메가캡 — get_us_market_context() 에서 사용
+_US_CONTEXT_TICKERS: dict[str, str] = {
+    # 지수
+    "SPY": "S&P500", "QQQ": "NASDAQ", "DIA": "DOW", "IWM": "Russell2000",
+    # 공포지수
+    "^VIX": "VIX",
+    # 섹터 ETF
+    "XLK": "Tech", "XLF": "Finance", "XLE": "Energy",
+    "XLV": "Healthcare", "XLY": "ConsumerDisc", "XLC": "Comm", "XLI": "Industrial",
+    # 메가캡
+    "NVDA": "Nvidia", "AAPL": "Apple", "MSFT": "Microsoft",
+    "TSLA": "Tesla", "META": "Meta", "AMZN": "Amazon", "GOOGL": "Google",
+}
+# 15분 캐시 — 사이클마다 재조회 방지
+_US_CONTEXT_CACHE: dict[str, Any] = {}
+_US_CONTEXT_CACHE_TS: float = 0.0
+_US_CONTEXT_TTL: float = 15 * 60  # 15분
+
 # ── Naver data-failure tracking ──────────────────────────────────────────────
 # 연속 실패 횟수를 추적하고 임계값 초과 시 Telegram 알림 발송.
 # 순환 임포트를 피하기 위해 notifier는 첫 경고 시점에 lazy-import.
@@ -747,3 +766,116 @@ def get_us_core_snapshot(tickers: list[str] | None = None) -> list[dict[str, Any
 
 def get_us_data_status() -> dict[str, Any]:
     return dict(LAST_US_DATA_STATUS)
+
+
+def get_us_market_context(force: bool = False) -> dict[str, Any]:
+    """미국 시장 컨텍스트 — 전 에이전트 공유 (15분 캐시).
+
+    Returns:
+        indices   : SPY/QQQ/DIA/IWM 등락률
+        vix       : VIX 레벨 + 변화율 + 레짐(calm/neutral/elevated/fear/panic)
+        sectors   : 섹터별 등락률 + 상위/하위 섹터
+        megacaps  : NVDA/AAPL/MSFT/TSLA/META/AMZN/GOOGL 등락률
+        us_regime : "risk_on" / "neutral" / "risk_off"
+        summary   : 한 줄 요약 문자열
+    """
+    import time as _time
+
+    global _US_CONTEXT_CACHE, _US_CONTEXT_CACHE_TS
+    now_ts = _time.time()
+    if not force and _US_CONTEXT_CACHE and (now_ts - _US_CONTEXT_CACHE_TS) < _US_CONTEXT_TTL:
+        return dict(_US_CONTEXT_CACHE)
+
+    # ── 전 티커 일봉 조회 ────────────────────────────────────────────────────
+    raw: dict[str, dict] = {}
+    for sym in _US_CONTEXT_TICKERS:
+        try:
+            candles = get_us_daily_prices(sym, count=5)
+            if len(candles) >= 2:
+                c0 = float(candles[-1]["close"])
+                c1 = float(candles[-2]["close"])
+                chg = round((c0 - c1) / c1 * 100, 2) if c1 else 0.0
+                raw[sym] = {"price": c0, "chg": chg}
+        except Exception:
+            pass
+
+    def _chg(sym: str) -> float:
+        return float((raw.get(sym) or {}).get("chg", 0.0))
+
+    def _price(sym: str) -> float:
+        return float((raw.get(sym) or {}).get("price", 0.0))
+
+    # ── VIX 레짐 ─────────────────────────────────────────────────────────────
+    vix_level = _price("^VIX")
+    vix_chg   = _chg("^VIX")
+    if vix_level <= 0:
+        vix_regime = "unknown"
+    elif vix_level < 15:
+        vix_regime = "calm"       # 극단적 공포 없음 — risk-on
+    elif vix_level < 20:
+        vix_regime = "neutral"
+    elif vix_level < 25:
+        vix_regime = "elevated"   # 주의
+    elif vix_level < 30:
+        vix_regime = "fear"       # 공포 — 포지션 축소
+    else:
+        vix_regime = "panic"      # 패닉 — 진입 차단
+
+    # ── 섹터 분석 ─────────────────────────────────────────────────────────────
+    sector_keys = ["XLK", "XLF", "XLE", "XLV", "XLY", "XLC", "XLI"]
+    sector_map  = {_US_CONTEXT_TICKERS[k]: _chg(k) for k in sector_keys if k in raw}
+    sector_leader  = max(sector_map, key=sector_map.get) if sector_map else ""
+    sector_laggard = min(sector_map, key=sector_map.get) if sector_map else ""
+
+    # ── US 레짐 판단 ──────────────────────────────────────────────────────────
+    spy_chg = _chg("SPY")
+    qqq_chg = _chg("QQQ")
+    up_count   = sum(1 for s in ["SPY","QQQ","DIA","IWM"] if _chg(s) > 0)
+    down_count = sum(1 for s in ["SPY","QQQ","DIA","IWM"] if _chg(s) < 0)
+    if up_count >= 3 and vix_chg <= 0 and vix_regime in ("calm", "neutral"):
+        us_regime = "risk_on"
+    elif down_count >= 3 or vix_regime in ("fear", "panic"):
+        us_regime = "risk_off"
+    else:
+        us_regime = "neutral"
+
+    # ── 한 줄 요약 ───────────────────────────────────────────────────────────
+    vix_str = f"VIX={vix_level:.1f}({vix_regime})" if vix_level > 0 else "VIX=n/a"
+    summary = (
+        f"US {us_regime.upper()}: "
+        f"SPY{spy_chg:+.1f}% QQQ{qqq_chg:+.1f}% {vix_str} "
+        f"↑{sector_leader} ↓{sector_laggard}"
+    )
+
+    ctx = {
+        # 지수
+        "spy_chg":  spy_chg,
+        "qqq_chg":  qqq_chg,
+        "dia_chg":  _chg("DIA"),
+        "iwm_chg":  _chg("IWM"),
+        # VIX
+        "vix":       vix_level,
+        "vix_chg":   vix_chg,
+        "vix_regime": vix_regime,   # calm/neutral/elevated/fear/panic
+        # 섹터
+        "sectors":        sector_map,           # {"Tech": +1.2, "Finance": -0.3, ...}
+        "sector_leader":  sector_leader,
+        "sector_laggard": sector_laggard,
+        "tech_leading":   bool(_chg("XLK") > spy_chg),
+        # 메가캡
+        "nvda_chg":  _chg("NVDA"),
+        "aapl_chg":  _chg("AAPL"),
+        "msft_chg":  _chg("MSFT"),
+        "tsla_chg":  _chg("TSLA"),
+        "meta_chg":  _chg("META"),
+        "amzn_chg":  _chg("AMZN"),
+        "googl_chg": _chg("GOOGL"),
+        # 종합
+        "us_regime": us_regime,     # risk_on / neutral / risk_off
+        "summary":   summary,
+        "raw":       raw,           # 원시 가격 데이터 (디버그용)
+    }
+
+    _US_CONTEXT_CACHE    = ctx
+    _US_CONTEXT_CACHE_TS = now_ts
+    return ctx

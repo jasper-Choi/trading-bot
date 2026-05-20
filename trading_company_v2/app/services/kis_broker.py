@@ -21,6 +21,7 @@ KIS_HASHKEY_PATH = "/uapi/hashkey"
 KIS_ORDER_CASH_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_DAILY_CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+KIS_MINUTE_CHART_PATH = "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
 REQUEST_TIMEOUT = 8
 _TOKEN_CACHE: dict[str, Any] = {"access_token": "", "expires_at": None}
 _TOKEN_CACHE_FILE = DATA_DIR / "kis_access_token_cache.json"
@@ -620,3 +621,60 @@ def _safe_float(value: Any) -> float:
         return float(value or 0.0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def get_minute_candles(ticker: str, count: int = 30) -> list[dict[str, Any]]:
+    """KIS API 주식 분봉 조회 (FHKST03010200).
+
+    KIS는 최근 30거래일치 분봉을 제공. 실시간 S16 패닉셀 감지에 사용.
+
+    Args:
+        ticker : 종목코드 (예: "005930")
+        count  : 반환할 최대 봉 수 (기본 30)
+
+    Returns:
+        [{
+            "time":   "HHMMSS",
+            "date":   "YYYYMMDD",
+            "open":   float,
+            "high":   float,
+            "low":    float,
+            "close":  float,
+            "volume": float,
+        }, ...]  — 오래된 것부터 정렬
+    """
+    try:
+        now_kst = datetime.now(tz=__import__("zoneinfo").ZoneInfo("Asia/Seoul"))
+        time_str = now_kst.strftime("%H%M%S")
+        response = _request(
+            "GET",
+            KIS_MINUTE_CHART_PATH,
+            params={
+                "FID_ETC_CLS_CODE": "",
+                "FID_COND_MRKT_DIV_CODE": "J",
+                "FID_INPUT_ISCD": ticker,
+                "FID_INPUT_HOUR_1": time_str,
+                "FID_PW_DATA_INCU_YN": "Y",
+            },
+            tr_id="FHKST03010200",
+        )
+        rows = response.get("output2") or []
+        candles: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                candles.append({
+                    "time":   str(row.get("stck_cntg_hour") or ""),
+                    "date":   str(row.get("stck_bsop_date") or ""),
+                    "open":   _safe_float(row.get("stck_oprc")),
+                    "high":   _safe_float(row.get("stck_hgpr")),
+                    "low":    _safe_float(row.get("stck_lwpr")),
+                    "close":  _safe_float(row.get("stck_prpr")),
+                    "volume": _safe_float(row.get("acml_vol")),
+                })
+            except Exception:
+                continue
+        # KIS 응답은 최신→과거 순 — 뒤집어서 오래된→최신 순으로 반환
+        candles.reverse()
+        return candles[-count:]
+    except Exception:
+        return []

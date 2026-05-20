@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
-from app.services.market_gateway import get_upbit_15m_candles, get_upbit_4h_candles, get_upbit_daily_candles
+from app.services.market_gateway import get_upbit_15m_candles, get_upbit_4h_candles, get_upbit_daily_candles, get_us_market_context
 
 
 def _ema(values: list[float], period: int) -> float:
@@ -426,6 +426,13 @@ class CryptoDeskAgent(BaseAgent):
         # ── Strategy S10: N-Day Consecutive Pullback ─────────────────────────
         nday = _check_nday_pullback_crypto()
 
+        # ── 미국 시장 컨텍스트 (15분 캐시 — 재조회 비용 없음) ────────────────
+        us_ctx: dict = {}
+        try:
+            us_ctx = get_us_market_context()
+        except Exception:
+            pass
+
         # 우선순위: D(ETH4H추세) > S15(모멘텀돌파) > S2(BB) > S9(RSI2) > S10(NDayPullback)
         _lead = (
             "KRW-ETH" if eth4h["eth_4h_breakout"]
@@ -479,5 +486,15 @@ class CryptoDeskAgent(BaseAgent):
                 **rsi2,
                 # Strategy S10 fields
                 **nday,
+                # ── 미국 시장 컨텍스트 (다른 에이전트/엔진에서 참조) ──
+                "us_regime":   us_ctx.get("us_regime", "unknown"),
+                "vix":         us_ctx.get("vix", 0.0),
+                "vix_regime":  us_ctx.get("vix_regime", "unknown"),
+                "spy_chg":     us_ctx.get("spy_chg", 0.0),
+                "qqq_chg":     us_ctx.get("qqq_chg", 0.0),
+                "us_summary":  us_ctx.get("summary", ""),
+                "us_sectors":  us_ctx.get("sectors", {}),
+                "sector_leader":  us_ctx.get("sector_leader", ""),
+                "sector_laggard": us_ctx.get("sector_laggard", ""),
             },
         )

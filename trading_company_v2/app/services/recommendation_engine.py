@@ -21,16 +21,24 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     desk_bias = str(payload.get("desk_bias", "balanced") or "balanced")
     reasons = [str(r) for r in (payload.get("reasons", []) or [])]
 
-    # ── 1. 스트레스 레짐 차단 ──────────────────────────────────────────────
-    if regime == "STRESSED":
+    # ── 1. 스트레스 레짐 / VIX 패닉 차단 ─────────────────────────────────
+    vix_regime = str(payload.get("vix_regime", "") or "")
+    us_regime  = str(payload.get("us_regime", "") or "")
+    vix_val    = float(payload.get("vix", 0.0) or 0.0)
+    if regime == "STRESSED" or vix_regime == "panic":
+        block_reason = "Stress regime" if regime == "STRESSED" else f"VIX panic ({vix_val:.1f})"
         return {
             "action": "capital_preservation",
             "size": "0.00x",
-            "focus": "High-stress regime. Preserve crypto capital.",
+            "focus": f"{block_reason}. Preserve crypto capital.",
             "symbol": lead_market,
             "candidate_symbols": [],
-            "notes": reasons + ["Stress regime blocks aggressive crypto entries."],
+            "notes": reasons + [f"{block_reason} blocks aggressive crypto entries."],
         }
+
+    # VIX 공포 구간 → 사이즈 제한 플래그
+    _vix_fear = vix_regime in ("fear",)
+    _us_risk_off = us_regime == "risk_off"
 
     # ── 2. Strategy D: ETH 4H 신고점 돌파 ─────────────────────────────────
     # 백테스트 검증: Sharpe 2.33, WR 61.1%, MDD -7.08%, n=18 (2025-2026)
@@ -69,9 +77,11 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         _sym  = str(payload.get("momentum_breakout_symbol", "KRW-BTC") or "KRW-BTC")
         _vrat = float(payload.get("momentum_breakout_vol_ratio", 0.0) or 0.0)
         _h10  = float(payload.get("momentum_breakout_high10", 0.0) or 0.0)
+        # VIX 공포 구간이면 사이즈 축소
+        _size = "0.50x" if _vix_fear or _us_risk_off else "1.00x"
         return {
             "action": "probe_longs",
-            "size": "1.00x",
+            "size": _size,
             "focus": f"momentum_breakout: {_sym} 10일 신고가 돌파 vol={_vrat:.1f}x",
             "symbol": _sym,
             "candidate_symbols": [],
@@ -233,15 +243,24 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
+    # ── 1b. US 컨텍스트 (Korea plan 내 공통 참조) ──────────────────────────
+    _k_vix_regime = str(payload.get("vix_regime", "") or "")
+    _k_us_regime  = str(payload.get("us_regime", "") or "")
+    _k_vix_val    = float(payload.get("vix", 0.0) or 0.0)
+    _k_spy_chg    = float(payload.get("spy_chg", 0.0) or 0.0)
+    _k_vix_fear   = _k_vix_regime in ("fear", "panic")
+    _k_us_risk_off = _k_us_regime == "risk_off"
+
     # ── 2. 스트레스 레짐 차단 ──────────────────────────────────────────────
-    if regime == "STRESSED":
+    if regime == "STRESSED" or _k_vix_regime == "panic":
+        _k_block = "Stress regime" if regime == "STRESSED" else f"VIX panic ({_k_vix_val:.1f})"
         return {
             "action": "capital_preservation",
             "size": "0.00x",
-            "focus": "Stress regime. No new Korea stock exposure.",
+            "focus": f"{_k_block}. No new Korea stock exposure.",
             "symbol": candidate_symbols[0] if candidate_symbols else "",
             "candidate_symbols": candidate_symbols,
-            "notes": ["Risk committee blocked fresh Korea entries in stress mode."],
+            "notes": [f"Risk committee blocked fresh Korea entries in {_k_block} mode."],
             "quality_score": quality_score,
         }
 
@@ -267,9 +286,13 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 ],
                 "quality_score": quality_score,
             }
+        # VIX fear/US risk-off이면 사이즈 한 단계 축소
+        _bk_base_size = "0.70x" if stance == "OFFENSE" else "0.50x"
+        _bk_size = "0.35x" if (_k_vix_fear or _k_us_risk_off) else _bk_base_size
+        _us_note = f"US {_k_us_regime} / VIX={_k_vix_val:.1f}({_k_vix_regime}) SPY{_k_spy_chg:+.1f}%"
         return {
             "action": "probe_longs",
-            "size": "0.70x" if stance == "OFFENSE" else "0.50x",
+            "size": _bk_size,
             "focus": f"new_high_breakout: {bk_name} 60일 신고점 돌파 확인",
             "symbol": bk_ticker,
             "candidate_symbols": candidate_symbols[:3],
@@ -280,6 +303,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"confirmed {breakout_confirmed_count}종목 / score {bk_score:.2f}",
                 f"vol_ratio {bk_leader.get('vol_ratio', 0):.1f}x / RSI {bk_leader.get('rsi', 'n/a')}",
                 "백테스트: Sharpe 6.16 / WR 84.6% / MDD -4.0%",
+                _us_note,
             ] + list(bk_leader.get("breakout_reasons", []))[:2],
             "quality_score": quality_score,
         }

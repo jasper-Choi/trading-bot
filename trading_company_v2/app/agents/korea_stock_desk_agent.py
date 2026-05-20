@@ -6,7 +6,7 @@ from app.agents.base import BaseAgent
 from app.core.models import AgentResult
 from app.services.korea_supply_demand import get_institutional_tickers, get_supply_demand_score
 from app.services.korea_universe import get_korea_universe
-from app.services.market_gateway import get_naver_daily_prices
+from app.services.market_gateway import get_naver_daily_prices, get_us_market_context
 from app.services.signal_engine import summarize_breakout_signal, summarize_equity_signal
 
 _FETCH_WORKERS = 12
@@ -54,6 +54,90 @@ def _std_last(values: list[float], period: int) -> float:
     window = values[-period:]
     mean = sum(window) / period
     return (sum((v - mean) ** 2 for v in window) / period) ** 0.5
+
+
+def _check_close_panic_reversal(existing_candidates: list[dict]) -> list[dict]:
+    """Strategy S16: 장 막판(15:20~15:29) 패닉셀 감지 — 포워드 테스트용 신호 수집.
+
+    KIS 분봉 API로 15:20 대비 현재가 낙폭을 계산.
+    - 조건: 15:20 이후 -2% 이상 하락 + EMA200 상승 추세 종목
+    - 현재는 신호 기록 전용 (실거래 미집행) — 데이터 누적 후 판단
+
+    Args:
+        existing_candidates: 이미 스캔된 종목 목록 (ticker/name 포함)
+
+    Returns:
+        [{ticker, name, drop_pct, price_1520, price_now, ema200_bull}, ...]
+    """
+    from datetime import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+    except Exception:
+        return []
+
+    # 15:20~15:29 구간만 실행
+    h, m = now_kst.hour, now_kst.minute
+    if not (h == 15 and 20 <= m <= 29):
+        return []
+
+    try:
+        from app.services.kis_broker import get_minute_candles
+    except Exception:
+        return []
+
+    # 스캔 대상: 기존 후보 종목 + 고정 주요 종목
+    _ANCHOR_TICKERS = [
+        ("005930", "삼성전자"), ("000660", "SK하이닉스"),
+        ("035420", "NAVER"),    ("051910", "LG화학"),
+        ("006400", "삼성SDI"),  ("035720", "카카오"),
+    ]
+    seen: set[str] = set()
+    scan_list: list[tuple[str, str]] = []
+    for c in existing_candidates:
+        t = str(c.get("ticker", "")).strip()
+        n = str(c.get("name", t)).strip()
+        if t and t not in seen:
+            scan_list.append((t, n))
+            seen.add(t)
+    for t, n in _ANCHOR_TICKERS:
+        if t not in seen:
+            scan_list.append((t, n))
+            seen.add(t)
+
+    results: list[dict] = []
+    for ticker, name in scan_list[:15]:  # 최대 15종목 (API 레이트 리밋)
+        try:
+            bars = get_minute_candles(ticker, count=30)
+            if len(bars) < 2:
+                continue
+            # 15:20 이전 마지막 봉 가격
+            bar_1520 = next(
+                (b for b in reversed(bars) if b.get("time", "") <= "152000"),
+                None,
+            )
+            if bar_1520 is None:
+                continue
+            price_1520 = float(bar_1520.get("close") or 0.0)
+            price_now  = float(bars[-1].get("close") or 0.0)
+            if price_1520 <= 0 or price_now <= 0:
+                continue
+            drop_pct = (price_now - price_1520) / price_1520 * 100
+            if drop_pct > -2.0:  # -2% 미만 하락만
+                continue
+            results.append({
+                "ticker":      ticker,
+                "name":        name,
+                "drop_pct":    round(drop_pct, 2),
+                "price_1520":  price_1520,
+                "price_now":   price_now,
+                "scan_time":   now_kst.strftime("%H:%M"),
+            })
+        except Exception:
+            continue
+
+    results.sort(key=lambda x: x["drop_pct"])  # 낙폭 큰 것부터
+    return results
 
 
 class KoreaStockDeskAgent(BaseAgent):
@@ -247,12 +331,31 @@ class KoreaStockDeskAgent(BaseAgent):
                 score += 0.10
         score = min(round(score, 2), 0.95)
 
+        # ── S16 Close Panic Reversal (15:20~15:29 포워드 테스트) ──────────────
+        # 장 막판 패닉셀 종목 감지 — KIS 분봉 기반 실시간 스캔
+        # 아직 shadow 검증 중 (실거래 미집행, 신호 수집만)
+        close_panic_candidates: list[dict] = []
+        try:
+            close_panic_candidates = _check_close_panic_reversal(
+                breakout_candidates + mongtata_candidates + rsi2_candidates
+            )
+        except Exception:
+            pass
+
+        # ── 미국 시장 컨텍스트 (15분 캐시) ───────────────────────────────────
+        us_ctx: dict = {}
+        try:
+            us_ctx = get_us_market_context()
+        except Exception:
+            pass
+
         return AgentResult(
             name=self.name,
             score=max(score, 0.2),
             reason=(
                 f"B:{breakout_confirmed_count}c/{breakout_partial_count}p "
                 f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} S10:{len(nday_candidates)} "
+                f"S16:{len(close_panic_candidates)} "
                 f"(universe {len(universe)}종목)"
             ),
             payload={
@@ -270,5 +373,18 @@ class KoreaStockDeskAgent(BaseAgent):
                 # Strategy S10 N-Day Pullback
                 "nday_candidates": nday_candidates[:3],
                 "nday_count": len(nday_candidates),
+                # Strategy S16 Close Panic Reversal (포워드 테스트 — 신호 수집만)
+                "close_panic_candidates": close_panic_candidates[:3],
+                "close_panic_count": len(close_panic_candidates),
+                # ── 미국 시장 컨텍스트 ──
+                "us_regime":      us_ctx.get("us_regime", "unknown"),
+                "vix":            us_ctx.get("vix", 0.0),
+                "vix_regime":     us_ctx.get("vix_regime", "unknown"),
+                "spy_chg":        us_ctx.get("spy_chg", 0.0),
+                "qqq_chg":        us_ctx.get("qqq_chg", 0.0),
+                "us_summary":     us_ctx.get("summary", ""),
+                "us_sectors":     us_ctx.get("sectors", {}),
+                "sector_leader":  us_ctx.get("sector_leader", ""),
+                "sector_laggard": us_ctx.get("sector_laggard", ""),
             },
         )
