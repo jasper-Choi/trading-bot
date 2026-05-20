@@ -21,6 +21,7 @@ _log = logging.getLogger(__name__)
 _STRATEGY_WR_THRESHOLDS: dict[str, float] = {
     "crypto.eth_4h_breakout":     0.0,    # breakout: hard to backtest WR meaningfully
     "crypto.momentum_breakout":   0.667,  # S15 Momentum Breakout (fee-adjusted 2026-05-20)
+    "crypto.bear_oversold_bounce": 0.600,  # S17 Bear Market Oversold Bounce (2026-05-20, n=15)
     "crypto.mongtata_airborne":   0.56,   # S2 — ⚠️ under re-validation, soft threshold
     "crypto.rsi2_mean_reversion": 0.481,  # S9 (fee-adjusted)
     "crypto.nday_pullback":       0.558,  # S10 (fee-adjusted)
@@ -205,6 +206,7 @@ _SHADOW_STRATEGIES: frozenset[str] = frozenset({
     "crypto.dual_rsi",              # S13 — deployed 2026-05-20
     "korea.dual_rsi",               # S13 Korea — deployed 2026-05-20
     "crypto.momentum_breakout",     # S15 — deployed 2026-05-20
+    "crypto.bear_oversold_bounce",  # S17 — deployed 2026-05-20
 })
 _SHADOW_MIN_TRADES: int = 15  # 30→15: 백테스트 통과 전략은 15거래면 충분한 forward validation
 

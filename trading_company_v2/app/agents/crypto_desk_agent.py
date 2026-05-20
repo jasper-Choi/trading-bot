@@ -317,6 +317,74 @@ def _check_mongtata_airborne_crypto() -> dict:
     return result
 
 
+def _check_bear_oversold_bounce_crypto() -> dict:
+    """Strategy S17: Bear Market Oversold Bounce — 백테스트 검증 (2026-05-20).
+
+    Daily 캔들 기준 (EMA200 아래 하락장 전용):
+      1. close < EMA200 × 0.97    -- EMA200 아래 3% 이상
+      2. RSI(2) < 5               -- 극단 단기 과매도
+      3. RSI(14) < 25             -- 중기 과매도 확인
+      4. close < EMA20 × 0.975   -- 단기 추세 하락 확인
+
+    백테스트 결과 (2022-2026, fee 0.10%):
+      Crypto: Sharpe 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15 ✅
+
+    파라미터: TP=+4%, SL=-0.8%, HOLD=5일, Size=0.50x (하락장 경감)
+    """
+    result: dict = {
+        "bear_oversold_long": False,
+        "bear_oversold_symbol": "",
+        "bear_oversold_rsi2": 0.0,
+        "bear_oversold_rsi14": 0.0,
+        "bear_oversold_ema200_gap_pct": 0.0,
+    }
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP"):
+        try:
+            daily = get_upbit_daily_candles(market, count=220)
+            if len(daily) < 215:
+                continue
+            closes = [float(c.get("close") or 0.0) for c in daily]
+            if not closes or closes[-1] <= 0:
+                continue
+
+            ema200 = _ema(closes, 200)
+            if ema200 <= 0:
+                continue
+
+            # 1. EMA200 아래 3% 이상
+            if closes[-1] >= ema200 * 0.97:
+                continue
+
+            ema20 = _ema(closes, 20)
+            if ema20 <= 0:
+                continue
+
+            # 4. close < EMA20 × 0.975
+            if closes[-1] >= ema20 * 0.975:
+                continue
+
+            # 2. RSI(2) < 5
+            rsi2_val = _rsi(closes, 2)
+            if rsi2_val is None or rsi2_val >= 5.0:
+                continue
+
+            # 3. RSI(14) < 25
+            rsi14_val = _rsi(closes, 14)
+            if rsi14_val is None or rsi14_val >= 25.0:
+                continue
+
+            gap_pct = round((ema200 - closes[-1]) / ema200 * 100, 2)
+            result["bear_oversold_long"]          = True
+            result["bear_oversold_symbol"]         = market
+            result["bear_oversold_rsi2"]           = rsi2_val
+            result["bear_oversold_rsi14"]          = rsi14_val
+            result["bear_oversold_ema200_gap_pct"] = gap_pct
+            return result
+        except Exception:
+            continue
+    return result
+
+
 def _check_momentum_breakout_crypto() -> dict:
     """Strategy S15: Crypto Momentum Breakout — 백테스트 검증 (2026-05-20).
 
@@ -426,6 +494,9 @@ class CryptoDeskAgent(BaseAgent):
         # ── Strategy S10: N-Day Consecutive Pullback ─────────────────────────
         nday = _check_nday_pullback_crypto()
 
+        # ── Strategy S17: Bear Market Oversold Bounce (하락장 전용, 2026-05-20) ─
+        bear_oversold = _check_bear_oversold_bounce_crypto()
+
         # ── 미국 시장 컨텍스트 (15분 캐시 — 재조회 비용 없음) ────────────────
         us_ctx: dict = {}
         try:
@@ -433,13 +504,14 @@ class CryptoDeskAgent(BaseAgent):
         except Exception:
             pass
 
-        # 우선순위: D(ETH4H추세) > S15(모멘텀돌파) > S2(BB) > S9(RSI2) > S10(NDayPullback)
+        # 우선순위: D > S15 > S2 > S9/S13 > S10 > S17(하락장)
         _lead = (
             "KRW-ETH" if eth4h["eth_4h_breakout"]
             else momentum["momentum_breakout_symbol"] if momentum["momentum_breakout_long"]
             else mongtata["mongtata_symbol"] if mongtata["mongtata_long"]
             else rsi2["rsi2_symbol"] if rsi2["rsi2_long"]
             else nday["nday_symbol"] if nday["nday_long"]
+            else bear_oversold["bear_oversold_symbol"] if bear_oversold["bear_oversold_long"]
             else "KRW-BTC"
         )
         _score = (
@@ -448,6 +520,7 @@ class CryptoDeskAgent(BaseAgent):
             else 0.65 if mongtata["mongtata_long"]
             else 0.62 if rsi2["rsi2_long"]
             else 0.60 if nday["nday_long"]
+            else 0.68 if bear_oversold["bear_oversold_long"]  # S17: 하락장 특화
             else 0.4
         )
 
@@ -460,6 +533,7 @@ class CryptoDeskAgent(BaseAgent):
                 f"MONGTATA={'✓ ' + mongtata['mongtata_symbol'] if mongtata['mongtata_long'] else '✗'} "
                 f"RSI2={'✓ ' + rsi2['rsi2_symbol'] if rsi2['rsi2_long'] else '✗'} "
                 f"NDAY={'✓ ' + nday['nday_symbol'] if nday['nday_long'] else '✗'} "
+                f"S17={'✓ ' + bear_oversold['bear_oversold_symbol'] if bear_oversold['bear_oversold_long'] else '✗'} "
                 f"BTC={btc_bias}"
             ),
             payload={
@@ -475,6 +549,7 @@ class CryptoDeskAgent(BaseAgent):
                     f"MONGTATA={'confirmed ' + mongtata['mongtata_symbol'] if mongtata['mongtata_long'] else 'not triggered'}",
                     f"RSI2={'confirmed ' + rsi2['rsi2_symbol'] if rsi2['rsi2_long'] else 'not triggered'}",
                     f"NDayPullback={'confirmed ' + nday['nday_symbol'] if nday['nday_long'] else 'not triggered'}",
+                    f"S17 bear_oversold={'confirmed ' + bear_oversold['bear_oversold_symbol'] if bear_oversold['bear_oversold_long'] else 'not triggered'}",
                 ],
                 # Strategy D fields
                 **eth4h,
@@ -486,6 +561,8 @@ class CryptoDeskAgent(BaseAgent):
                 **rsi2,
                 # Strategy S10 fields
                 **nday,
+                # Strategy S17 fields
+                **bear_oversold,
                 # ── 미국 시장 컨텍스트 (다른 에이전트/엔진에서 참조) ──
                 "us_regime":   us_ctx.get("us_regime", "unknown"),
                 "vix":         us_ctx.get("vix", 0.0),

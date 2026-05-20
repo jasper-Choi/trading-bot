@@ -199,14 +199,46 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             ],
         }
 
-    # ── 6. 신호 없음 → 관망 ───────────────────────────────────────────────
+    # ── 6. Strategy S17: Bear Market Oversold Bounce (하락장 전용) ─────────
+    # 백테스트: Sharpe 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15 (2022-2026)
+    # 조건: RSI(2)<5 + RSI(14)<25 + close<EMA200×0.97 + close<EMA20×0.975
+    # 하락장 전용 — EMA200 아래에서만 발동 (상승장 전략과 상호배타)
+    # NOTE: panic 레짐은 이미 위에서 차단됨. fear 구간도 0.35x로 추가 축소.
+    if payload.get("bear_oversold_long") and not _is_paused("crypto.bear_oversold_bounce"):
+        _bo_sym  = str(payload.get("bear_oversold_symbol", "KRW-BTC") or "KRW-BTC")
+        _bo_r2   = float(payload.get("bear_oversold_rsi2", 0.0) or 0.0)
+        _bo_r14  = float(payload.get("bear_oversold_rsi14", 0.0) or 0.0)
+        _bo_gap  = float(payload.get("bear_oversold_ema200_gap_pct", 0.0) or 0.0)
+        # 하락장 기본 0.50x, VIX fear 구간 0.35x로 추가 축소
+        _bo_size = "0.35x" if _vix_fear or _us_risk_off else "0.50x"
+        return {
+            "action": "probe_longs",
+            "size": _bo_size,
+            "focus": f"bear_oversold_bounce: {_bo_sym} RSI(2)={_bo_r2:.1f} RSI(14)={_bo_r14:.1f} EMA200 -{_bo_gap:.1f}%",
+            "symbol": _bo_sym,
+            "candidate_symbols": [],
+            "candidate_markets": [],
+            "focus_tag": "bear_oversold_bounce",
+            "strategy_id": "crypto.bear_oversold_bounce",
+            "entry_profile": "bear_oversold_bounce",
+            "signal_freshness": 1.0,
+            "btc_corr_15m": 0.75,
+            "notes": [
+                f"RSI(2)={_bo_r2:.1f} (조건 <5) / RSI(14)={_bo_r14:.1f} (조건 <25)",
+                f"EMA200 아래 -{_bo_gap:.1f}% / EMA20×0.975 이하 — 하락장 극단 과매도",
+                "백테스트: Sharpe 10.60 / WR 60% / P/L 3.63 / MDD -8.9% (n=15, 2022-2026)",
+                f"하락장 경감 사이즈: {_bo_size} (TP+4% / SL-0.8% / 최대 5일)",
+            ],
+        }
+
+    # ── 7. 신호 없음 → 관망 ───────────────────────────────────────────────
     return {
         "action": "watchlist_only",
         "size": "0.00x",
         "focus": f"No validated crypto signal. BTC bias={desk_bias}.",
         "symbol": lead_market,
         "candidate_symbols": [],
-        "notes": reasons[:3] + ["D/S15/S2/S9/S10/S13 not triggered."],
+        "notes": reasons[:3] + ["D/S15/S2/S9/S10/S13/S17 not triggered."],
     }
 
 

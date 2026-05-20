@@ -498,6 +498,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 조건: 10일 신고가 + EMA50>EMA200 + close>EMA20 + vol≥1.5x
         # TP +7.0%, SL -2.0%, max 15봉 (15일) = 2700 cycles @ 8s/cycle
         return 7.0, -2.0, 2700
+    if desk == "crypto" and "bear_oversold" in focus:
+        # S17 Bear Market Oversold Bounce (2026-05-20):
+        # Crypto: Sh 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15
+        # 조건: RSI(2)<5 + RSI(14)<25 + close<EMA200×0.97 + close<EMA20×0.975
+        # TP +4.0%, SL -0.8%, max 5일 = 900 cycles
+        return 4.0, -0.8, 900
     if desk == "crypto" and "dual_rsi" in focus:
         # S13 Dual RSI 이중 확인 (2026-05-20):
         # Crypto: Sh 7.28, WR 51.2%, PnL 3.20, MDD -8.7% | Korea: Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
@@ -1392,6 +1398,17 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "stop_hit")
                     elif trail_giveback and position.pnl_pct <= protect_level:
                         _close_position(position, "momentum_trail")
+                    elif position.cycles_open >= max_cycles:
+                        _close_position(position, "time_exit")
+                    continue
+                elif "bear_oversold" in pos_focus:
+                    # ── S17 Bear Market Oversold Bounce 청산 (2026-05-20) ──
+                    # Daily: TP +4%, SL -0.8%, max 5일
+                    # 타이트한 TP/SL — 트레일 없이 목표가/손절가 도달 즉시 청산
+                    if position.pnl_pct >= target_pct:
+                        _close_position(position, "target_hit")
+                    elif position.pnl_pct <= stop_pct:
+                        _close_position(position, "stop_hit")
                     elif position.cycles_open >= max_cycles:
                         _close_position(position, "time_exit")
                     continue
