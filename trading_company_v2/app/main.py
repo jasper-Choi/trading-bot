@@ -2343,6 +2343,18 @@ def telegram_test() -> dict:
     return {"ok": success, "error": notifier.last_error or None}
 
 
+@app.post("/weekly-report")
+def weekly_report() -> dict:
+    """주간 성과 리포트 발송 — 매주 월요일 KST 09:00 크론에서 호출.
+
+    Oracle VM에서 crontab 설정:
+      0 0 * * 1  curl -s -X POST http://localhost:8000/weekly-report
+    (KST 09:00 = UTC 00:00 월요일)
+    """
+    success = notifier.send_weekly_report(window_days=7)
+    return {"ok": success, "error": notifier.last_error or None}
+
+
 @app.get("/performance-data")
 def performance_data() -> dict:
     try:

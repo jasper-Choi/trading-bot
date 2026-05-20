@@ -188,3 +188,48 @@ def manually_resume_strategy(strategy_id: str) -> None:
     """Manually clear a paused strategy (e.g., after investigation/reset)."""
     _paused_strategies.discard(strategy_id)
     _log.info("strategy_monitor: %s manually resumed", strategy_id)
+
+
+# ── Shadow period (신규 전략 검증 유예기간) ───────────────────────────────────
+# New strategies trade in paper-only mode until they accumulate _SHADOW_MIN_TRADES
+# completed paper positions. After that, live execution is allowed.
+# Add newly deployed strategy IDs here; remove once they graduate shadow period.
+_SHADOW_STRATEGIES: frozenset[str] = frozenset({
+    "crypto.rsi2_mean_reversion",   # S9 — deployed 2026-05-20
+    "crypto.nday_pullback",         # S10 — deployed 2026-05-20
+    "korea.rsi2_mean_reversion",    # S9 Korea — deployed 2026-05-20
+    "korea.nday_pullback",          # S10 Korea — deployed 2026-05-20
+})
+_SHADOW_MIN_TRADES: int = 30
+
+
+def is_in_shadow_period(strategy_id: str) -> bool:
+    """
+    Return True if this strategy is in its shadow period (< 30 completed trades).
+
+    Shadow strategies MUST execute in paper mode only, even if the system is in
+    upbit_live or kis_live mode. Call this from execution routing before placing
+    live orders.
+    """
+    if strategy_id not in _SHADOW_STRATEGIES:
+        return False
+    try:
+        from app.core.state_store import SessionLocal, PaperPositionRecord
+        from sqlalchemy import select, func
+        with SessionLocal() as db:
+            count = db.execute(
+                select(func.count(PaperPositionRecord.id)).where(
+                    PaperPositionRecord.strategy_id == strategy_id,
+                    PaperPositionRecord.status == "closed",
+                )
+            ).scalar_one_or_none() or 0
+        in_shadow = int(count) < _SHADOW_MIN_TRADES
+        if in_shadow:
+            _log.debug(
+                "strategy_monitor: %s in shadow period (%d/%d completed trades)",
+                strategy_id, count, _SHADOW_MIN_TRADES,
+            )
+        return in_shadow
+    except Exception as exc:
+        _log.warning("strategy_monitor: is_in_shadow_period query failed: %s", exc)
+        return True  # fail safe: stay in shadow if we can't query

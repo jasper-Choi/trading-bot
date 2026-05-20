@@ -1486,6 +1486,18 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             elif position.cycles_open >= max_cycles:
                 _close_position(position, "time_exit")
 
+        # 평균회귀 전략 상관관계 리스크 제한: 코인 동시 최대 2포지션
+        _CRYPTO_MR_STRATEGY_IDS = frozenset({
+            "crypto.rsi2_mean_reversion",
+            "crypto.nday_pullback",
+            "crypto.mongtata_airborne",
+        })
+        _open_crypto_mr_count = sum(
+            1 for p in open_positions
+            if p.desk == "crypto" and p.status == "open"
+            and (p.strategy_id or "") in _CRYPTO_MR_STRATEGY_IDS
+        )
+
         existing_open_keys = {(item.desk, item.symbol) for item in open_positions if item.status == "open"}
         for order in paper_orders:
             meta = _extract_order_meta(order.action, order.rationale)
@@ -1498,6 +1510,17 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             entry_price = _paper_entry_price(reference_price, symbol, order.created_at) if order.desk == "crypto" else reference_price
             strategy_id = order.strategy_id or infer_strategy_id(order.action, order.focus, meta)
             entry_profile = order.entry_profile or _entry_profile(order.action, order.focus, meta)
+
+            # 코인 평균회귀 상관관계 리스크 가드 (max 2 동시 포지션)
+            if order.desk == "crypto" and strategy_id in _CRYPTO_MR_STRATEGY_IDS:
+                if _open_crypto_mr_count >= 2:
+                    _log.info(
+                        "correlation_limit: skip %s strategy=%s (already %d crypto MR positions open)",
+                        symbol, strategy_id, _open_crypto_mr_count,
+                    )
+                    continue
+                _open_crypto_mr_count += 1  # optimistic count for this batch
+
             position = PaperPositionRecord(
                 desk=order.desk,
                 symbol=symbol,

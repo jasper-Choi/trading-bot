@@ -89,6 +89,21 @@ def _route_mixed_upbit_mode(active_orders: list[PaperOrder], *, requested_mode: 
     unsupported_kis_orders = 0
 
     for order in active_orders:
+        # Shadow period guard: new strategies stay in paper mode until 30 completed trades
+        strategy_id = str(order.strategy_id or "")
+        if strategy_id:
+            try:
+                from app.services.strategy_monitor import is_in_shadow_period
+                if is_in_shadow_period(strategy_id):
+                    details.append(_tag_detail(
+                        {"symbol": getattr(order, "focus", "")[:50], "reason": f"shadow_period:{strategy_id}"},
+                        applied_mode="paper", broker_live=False,
+                    ))
+                    skipped_orders += 1
+                    continue
+            except Exception:
+                pass  # fail open — don't block order on monitor error
+
         if order.desk == "korea" and _kis_ready():
             result = place_kis_order(order)
             target_mode = "kis_live"

@@ -399,6 +399,70 @@ class TelegramNotifier:
         return self._send_keyed(key, body, cooldown_seconds=cooldown, suppress_duplicate_seconds=dup_window)
 
 
+    def send_weekly_report(self, window_days: int = 7) -> bool:
+        """
+        주간 성과 리포트 — 매주 월요일 KST 09:00 크론에서 호출.
+
+        Queries the last `window_days` of closed paper positions and sends
+        a Telegram summary: WR, P&L, per-strategy breakdown, live WR vs backtest.
+        """
+        if not self.enabled:
+            return False
+        try:
+            from app.core.state_store import SessionLocal, PaperPositionRecord
+            from app.services.strategy_monitor import compute_strategy_wr_stats, _STRATEGY_WR_THRESHOLDS
+            from sqlalchemy import select
+            from datetime import datetime, timezone, timedelta
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
+            with SessionLocal() as db:
+                rows = db.execute(
+                    select(PaperPositionRecord)
+                    .where(
+                        PaperPositionRecord.status == "closed",
+                        PaperPositionRecord.closed_at >= cutoff,
+                    )
+                    .order_by(PaperPositionRecord.closed_at.desc())
+                ).scalars().all()
+        except Exception as exc:
+            return self.send_ops_alert("weekly_report_error", [str(exc)])
+
+        total = len(rows)
+        if total == 0:
+            return self.send_ops_alert(
+                f"주간 성과 리포트 (최근 {window_days}일)",
+                [f"이번 주 완료된 포지션: 0건 (거래 없음)"],
+            )
+        wins = sum(1 for r in rows if r.pnl_pct > 0)
+        wr = wins / total * 100
+        avg_pnl = sum(r.pnl_pct for r in rows) / total
+        best = max((r.pnl_pct for r in rows), default=0.0)
+        worst = min((r.pnl_pct for r in rows), default=0.0)
+
+        # Strategy breakdown
+        strategy_stats = compute_strategy_wr_stats()
+        strat_lines = []
+        for s in sorted(strategy_stats, key=lambda x: -x.total)[:6]:
+            gap_indicator = "✅" if s.gap >= -0.05 else ("⚠️" if s.gap >= -0.15 else "🔴")
+            strat_lines.append(
+                f"  {gap_indicator} {s.strategy_id}: WR {s.live_wr*100:.1f}% "
+                f"vs BT {s.backtest_wr*100:.1f}% (n={s.total}{'⏸️' if s.paused else ''})"
+            )
+
+        lines = [
+            f"📊 주간 성과 리포트 (최근 {window_days}일)",
+            f"거래 수: {total}건 | 승률: {wr:.1f}% ({wins}승 {total-wins}패)",
+            f"평균 P&L: {avg_pnl:+.2f}% | 최고: {best:+.2f}% | 최악: {worst:+.2f}%",
+            "",
+            "📈 전략별 누적 WR (전체):",
+        ] + (strat_lines if strat_lines else ["  (데이터 없음)"])
+        return self._send_keyed(
+            "weekly_report",
+            "\n".join(lines),
+            cooldown_seconds=6 * 24 * 60 * 60,  # 6일 재발송 방지
+            suppress_duplicate_seconds=6 * 24 * 60 * 60,
+        )
+
+
 notifier = TelegramNotifier(
     token=settings.telegram_bot_token,
     chat_id=settings.telegram_chat_id,
