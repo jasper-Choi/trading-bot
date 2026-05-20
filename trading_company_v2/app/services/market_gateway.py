@@ -591,8 +591,14 @@ def get_us_daily_prices(ticker: str, count: int = 60) -> list[dict[str, Any]]:
             _save_us_cache(cache)
             return candles
         LAST_US_DATA_STATUS = {"provider": "alphavantage", "ok": False, "message": "empty or throttled response"}
+    # Stooq URL: 지수 티커(^로 시작)는 .us 접미사 없이 조회 (예: ^vix, ^spx)
+    _stooq_sym = ticker.lower()
+    if _stooq_sym.startswith("^"):
+        _stooq_url = f"https://stooq.com/q/d/l/?s={_stooq_sym}&i=d"
+    else:
+        _stooq_url = STOOQ_DAILY_URL.format(ticker=_stooq_sym)
     try:
-        resp = requests.get(STOOQ_DAILY_URL.format(ticker=ticker.lower()), timeout=REQUEST_TIMEOUT)
+        resp = requests.get(_stooq_url, timeout=REQUEST_TIMEOUT)
         resp.raise_for_status()
         lines = [line.strip() for line in resp.text.splitlines() if line.strip()]
     except RequestException:
@@ -657,9 +663,13 @@ def get_us_daily_prices(ticker: str, count: int = 60) -> list[dict[str, Any]]:
 
 def _get_us_daily_prices_yahoo(ticker: str, count: int = 60) -> list[dict[str, Any]]:
     try:
+        from urllib.parse import quote as _url_quote
+        # Yahoo Finance: ^ 문자를 %5E로 URL 인코딩해야 정상 조회됨 (예: ^VIX → %5EVIX)
+        _encoded = _url_quote(ticker.upper(), safe="")
         resp = requests.get(
-            YAHOO_CHART_URL.format(ticker=ticker.upper()),
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{_encoded}",
             params={"interval": "1d", "range": "6mo", "includePrePost": "false"},
+            headers={"User-Agent": "Mozilla/5.0"},
             timeout=REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
@@ -832,7 +842,15 @@ def get_us_market_context(force: bool = False) -> dict[str, Any]:
     qqq_chg = _chg("QQQ")
     up_count   = sum(1 for s in ["SPY","QQQ","DIA","IWM"] if _chg(s) > 0)
     down_count = sum(1 for s in ["SPY","QQQ","DIA","IWM"] if _chg(s) < 0)
-    if up_count >= 3 and vix_chg <= 0 and vix_regime in ("calm", "neutral"):
+    if vix_regime == "unknown":
+        # VIX fetch 실패 시: 지수 방향만으로 레짐 판단 (VIX 가용 시 덮어씀)
+        if up_count >= 3:
+            us_regime = "risk_on"
+        elif down_count >= 3:
+            us_regime = "risk_off"
+        else:
+            us_regime = "neutral"
+    elif up_count >= 3 and vix_chg <= 0 and vix_regime in ("calm", "neutral"):
         us_regime = "risk_on"
     elif down_count >= 3 or vix_regime in ("fear", "panic"):
         us_regime = "risk_off"

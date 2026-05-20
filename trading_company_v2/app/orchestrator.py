@@ -327,7 +327,14 @@ class CompanyOrchestrator:
         }
 
     @staticmethod
-    def _determine_stance(macro_score: float, trend_score: float) -> str:
+    def _determine_stance(
+        macro_score: float,
+        trend_score: float,
+        vix_regime: str = "",
+    ) -> str:
+        # VIX 공포/패닉 → 즉시 방어 포지션
+        if vix_regime in ("fear", "panic"):
+            return "DEFENSE"
         combined = (macro_score + trend_score) / 2
         if combined >= 0.66:
             return "OFFENSE"
@@ -336,10 +343,22 @@ class CompanyOrchestrator:
         return "BALANCED"
 
     @staticmethod
-    def _determine_regime(macro_score: float, trend_score: float) -> str:
+    def _determine_regime(
+        macro_score: float,
+        trend_score: float,
+        vix_regime: str = "",
+        any_crypto_signal: bool = False,
+    ) -> str:
+        # VIX 패닉 → 즉각 STRESSED (모든 신규 진입 차단)
+        if vix_regime == "panic":
+            return "STRESSED"
         if macro_score <= 0.35:
             return "STRESSED"
-        if abs(trend_score - 0.5) <= 0.06:  # 0.08→0.06: 밴드 축소, 추세 판단 빠르게
+        # 활성 신호 없음 = 어느 방향으로도 추세 없음 → RANGING
+        # (상승장 전략 EMA200 필터 통과 안 됨 + 하락장 S17도 미발동)
+        if not any_crypto_signal:
+            return "RANGING"
+        if abs(trend_score - 0.5) <= 0.06:
             return "RANGING"
         return "TRENDING"
 
@@ -585,8 +604,23 @@ class CompanyOrchestrator:
         crypto_desk_result = next((r for r in results if r.name == "crypto_desk_agent"), AgentResult(name="crypto_desk_agent", reason="missing"))
         stock_desk_result = next((r for r in results if r.name == "korea_stock_desk_agent"), AgentResult(name="korea_stock_desk_agent", reason="missing"))
         us_desk_result = next((r for r in results if r.name == "us_stock_desk_agent"), AgentResult(name="us_stock_desk_agent", reason="missing"))
-        state.stance = self._determine_stance(macro_result.score, trend_result.score)
-        state.regime = self._determine_regime(macro_result.score, trend_result.score)
+        # VIX 레짐 및 활성 신호 — stub 에이전트를 실제 데이터로 보강
+        _vix_regime_ctx = str(crypto_desk_result.payload.get("vix_regime", "") or "")
+        _any_crypto_signal = any([
+            bool(crypto_desk_result.payload.get("eth_4h_breakout", False)),
+            bool(crypto_desk_result.payload.get("momentum_breakout_long", False)),
+            bool(crypto_desk_result.payload.get("bear_oversold_long", False)),
+            bool(crypto_desk_result.payload.get("mongtata_long", False)),
+            bool(crypto_desk_result.payload.get("rsi2_long", False)),
+            bool(crypto_desk_result.payload.get("nday_long", False)),
+        ])
+        state.stance = self._determine_stance(
+            macro_result.score, trend_result.score, vix_regime=_vix_regime_ctx
+        )
+        state.regime = self._determine_regime(
+            macro_result.score, trend_result.score,
+            vix_regime=_vix_regime_ctx, any_crypto_signal=_any_crypto_signal,
+        )
         state.risk_budget = 0.5 if state.stance == "BALANCED" else 0.7 if state.stance == "OFFENSE" else 0.3
         requested_execution_mode = normalize_execution_mode(settings.execution_mode)
         state.execution_mode = requested_execution_mode
