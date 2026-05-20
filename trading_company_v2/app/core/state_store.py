@@ -534,24 +534,29 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
         return 3.0, -0.8, 360
     if desk == "crypto" and "rsi2_mean_reversion" in focus:
-        # S9 RSI(2) Connors: Sharpe 3.06, WR 48.1%, MDD -6.2%
-        # stop -1.5%, TP +10%, max 10 거래일
-        return 10.0, -1.5, 2700
+        # S9 RSI(2) Connors (fee-adjusted 2026-05-20):
+        # Crypto: Sh 2.76, WR 48.1%, PnL 1.58, MDD -6.3% | Stocks: Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
+        # stop -1.4% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
+        return 10.0, -1.4, 2700
     if desk == "crypto" and "nday_pullback" in focus:
-        # S10 N-Day Pullback: Sharpe 4.78, WR 55.8%, MDD -7.7%
-        # stop -1.5%, TP +10%, max 10 거래일
-        return 10.0, -1.5, 2700
+        # S10 N-Day Pullback (fee-adjusted 2026-05-20):
+        # Crypto: Sh 5.21, WR 55.8%, PnL 1.91, MDD -6.7% | Stocks: Sh 3.52, WR 51.0%, PnL 1.64, MDD -13.6%
+        # stop -1.2% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
+        return 10.0, -1.2, 2700
     if desk == "korea" and "rsi2_mean_reversion" in focus:
-        # S9 Korea: Sharpe 6.74, WR 58.1%, MDD -7.3%
-        return 10.0, -1.5, 2700
+        # S9 Korea (fee-adjusted 2026-05-20): Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
+        # stop -1.4% (tightened from -1.5% to maintain P&L≥1.5 after 0.25% round-trip fee)
+        return 10.0, -1.4, 2700
     if desk == "korea" and "nday_pullback" in focus:
-        # S10 Korea: Sharpe 4.52, WR 54.1%, MDD -12.1%
-        return 10.0, -1.5, 2700
+        # S10 Korea (fee-adjusted 2026-05-20): Sh 3.52, WR 51.0%, PnL 1.64, MDD -13.6%
+        # stop -1.2% (tightened from -1.5% to maintain P&L≥1.5 after 0.25% round-trip fee)
+        return 10.0, -1.2, 2700
     if desk == "korea" and "mongtata_airborne" in focus:
-        # 2026-05-20: 백테스트 검증 전략 S2 MONGTATA 에어본 (평균회귀)
-        # 주식 3년: Sharpe 8.60, WR 56.5%, MDD -5.9%
-        # target +10%, stop -3%, 최대 10 거래일 (2700 cycles @ 20s/cycle)
-        return 10.0, -3.0, 2700
+        # S2 MONGTATA ⚠️ 재검증 필요 (2026-05-20):
+        # 원본 백테스트는 4H 크립토 + EMA200 없음 + 수수료 없음 → 결과 무효
+        # 올바른 조건(daily+EMA200+수수료)으로 재백테스트: WR 50.9% 통과, MDD -26.1% FAIL
+        # 임시: size 축소 + 손절 -2% (production에서 보수적 운용)
+        return 10.0, -2.0, 2700
     if desk == "korea" and "new_high_breakout" in focus:
         # 2026-05-19: 백테스트 검증 전략 B (신고점 돌파)
         # 3년 152종목: 승률 84.6%, 연 +89.5%, Sharpe 6.16, MDD -4.0%
