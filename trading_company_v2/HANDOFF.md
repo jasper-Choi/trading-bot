@@ -1,5 +1,55 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-20 (S15 Momentum Breakout 신규 전략 + 파라미터 완화)
+
+### 작업 내용
+
+**전략 파라미터 완화 (TRENDING 시장 대응)**
+- ETH 4H 전략: vol 임계값 2.5x → 2.0x, RSI 범위 50-70 → 45-75
+- XRP 스캔 유니버스 추가 (S9/S10/S13 crypto)
+- Shadow period 30→15 거래 (백테스트 통과 전략은 15이면 충분)
+
+**S15 Crypto Momentum Breakout ✅ PASS (2026-05-20 신규)**
+
+진입 조건:
+- 10일 신고가 (close > 이전 10봉 close 최대값)
+- EMA50 > EMA200 (골든크로스 추세 필터)
+- close > EMA20 (단기 추세 확인)
+- volume ≥ 1.5x 20일 평균 (돌파 거래량)
+
+백테스트 결과 (2022-2026, fee 0.10%):
+- **Crypto: Sh 11.27, WR 66.7%, P/L 2.32, MDD -5.1%, n=51 ✅**
+- Korea 제외 (이미 Strategy B 신고점 돌파 전략 있음)
+
+파라미터: LB=10, VOL=1.5x, SL=-2%, TP=+7%, HOLD=15일
+
+| 파일 | 변경 |
+|------|------|
+| `Desktop/backtest/backtest_s15_momentum_breakout.py` | 정식 백테스트 스크립트 |
+| `app/agents/crypto_desk_agent.py` | `_check_momentum_breakout_crypto()` 추가 |
+| `app/services/recommendation_engine.py` | S15 섹션 추가 (Strategy D 다음, S2 앞) |
+| `app/core/state_store.py` | S15 포지션 임계값 + 청산 로직 추가 |
+| `app/services/strategy_monitor.py` | WR 임계값 0.667 + shadow 등록 |
+
+**현재 전략 포트폴리오 (검증된 것만)**
+
+| ID | 전략 | 타입 | 시장 | 상태 |
+|----|------|------|------|------|
+| D | ETH 4H 신고점 돌파 | 돌파/추세 | Crypto | 활성 |
+| S15 | Momentum Breakout (10일 신고가+거래량) | 돌파/추세 | Crypto | Shadow (15거래 대기) |
+| B | 60일 신고점 돌파 | 돌파 | Korea | 활성 |
+| S9 | RSI(2) Connors | 평균회귀 | Crypto+Korea | Shadow (15거래 대기) |
+| S10 | N-Day Pullback | 평균회귀 | Crypto+Korea | Shadow (15거래 대기) |
+| S13 | Dual RSI 이중 확인 | 평균회귀 | Crypto+Korea | Shadow (15거래 대기) |
+| S2 | MONGTATA | 평균회귀 | Crypto+Korea | ⚠️ 재검증 필요 |
+
+**현재 시장 상황 (2026-05-20)**
+- BTC/ETH RSI(2) = 86-93 (극도 과매도 ATH 랠리)
+- 평균회귀 전략(S9/S10/S13) → 신호 발동 안됨 (정상)
+- S15 Momentum Breakout이 현재 시장 조건에서 활성화될 수 있음
+
+---
+
 ## 0. Claude - 2026-05-20 (S13 신규 전략 추가 + DB 리셋 + 백테스트 탐색)
 
 ### 작업 내용

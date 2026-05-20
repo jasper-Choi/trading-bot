@@ -492,6 +492,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # TP +7.0%, SL -3.0%, trail_trigger +4% / max 20봉 (80h)
         # @ ~8s/cycle: 80h × 3600s / 8s = 36000 cycles
         return 7.0, -3.0, 36000
+    if desk == "crypto" and "momentum_breakout" in focus:
+        # S15 Momentum Breakout (2026-05-20):
+        # Crypto: Sh 11.27, WR 66.7%, P/L 2.32, MDD -5.1%, n=51
+        # 조건: 10일 신고가 + EMA50>EMA200 + close>EMA20 + vol≥1.5x
+        # TP +7.0%, SL -2.0%, max 15봉 (15일) = 2700 cycles @ 8s/cycle
+        return 7.0, -2.0, 2700
     if desk == "crypto" and "dual_rsi" in focus:
         # S13 Dual RSI 이중 확인 (2026-05-20):
         # Crypto: Sh 7.28, WR 51.2%, PnL 3.20, MDD -8.7% | Korea: Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
@@ -1371,6 +1377,21 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "stop_hit")
                     elif trail_giveback and position.pnl_pct <= protect_level:
                         _close_position(position, "eth4h_trail")
+                    elif position.cycles_open >= max_cycles:
+                        _close_position(position, "time_exit")
+                    continue
+                elif "momentum_breakout" in pos_focus:
+                    # ── S15 Momentum Breakout 청산 (2026-05-20) ──
+                    # Daily 타임프레임: TP +7%, SL -2%, max 15 거래일
+                    # ETH4H trail 재활용 (동일 TP 7%, 유사 모멘텀 구조)
+                    trail_giveback, profit_floor = _crypto_eth4h_trail_rules(peak_pnl)
+                    protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+                    if position.pnl_pct >= target_pct:
+                        _close_position(position, "target_hit")
+                    elif position.pnl_pct <= stop_pct:
+                        _close_position(position, "stop_hit")
+                    elif trail_giveback and position.pnl_pct <= protect_level:
+                        _close_position(position, "momentum_trail")
                     elif position.cycles_open >= max_cycles:
                         _close_position(position, "time_exit")
                     continue

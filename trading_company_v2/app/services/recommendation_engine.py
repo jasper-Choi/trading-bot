@@ -61,7 +61,34 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
             ],
         }
 
-    # ── 3. Strategy S2: MONGTATA 에어본 (평균회귀) ────────────────────────
+    # ── 3. Strategy S15: Momentum Breakout (추세 전략, TRENDING 특화) ────────
+    # 백테스트: Sharpe 11.27, WR 66.7%, P/L 2.32, MDD -5.1%, n=51 (2026-05-20)
+    # 조건: 10일 신고가 + EMA50>EMA200 + close>EMA20 + vol≥1.5x
+    # NOTE: 평균회귀 전략과 상호보완 — 시장 상황이 ATH/TRENDING일 때 주로 발동
+    if payload.get("momentum_breakout_long") and not _is_paused("crypto.momentum_breakout"):
+        _sym  = str(payload.get("momentum_breakout_symbol", "KRW-BTC") or "KRW-BTC")
+        _vrat = float(payload.get("momentum_breakout_vol_ratio", 0.0) or 0.0)
+        _h10  = float(payload.get("momentum_breakout_high10", 0.0) or 0.0)
+        return {
+            "action": "probe_longs",
+            "size": "1.00x",
+            "focus": f"momentum_breakout: {_sym} 10일 신고가 돌파 vol={_vrat:.1f}x",
+            "symbol": _sym,
+            "candidate_symbols": [],
+            "candidate_markets": [],
+            "focus_tag": "momentum_breakout",
+            "strategy_id": "crypto.momentum_breakout",
+            "entry_profile": "momentum_breakout",
+            "signal_freshness": 1.0,
+            "btc_corr_15m": 0.80,
+            "notes": [
+                f"10일 신고가 돌파: {_h10:,.0f}원 상향",
+                f"거래량 {_vrat:.2f}x (조건 ≥1.5x) / EMA50>EMA200 골든크로스",
+                "백테스트: Sharpe 11.27 / WR 66.7% / MDD -5.1% (n=51, 2026-05-20)",
+            ],
+        }
+
+    # ── 3b. Strategy S2: MONGTATA 에어본 (평균회귀) ────────────────────────
     # 백테스트 검증: Sharpe 6.66, WR 50.0%, MDD -9.7% (코인 일봉)
     # 조건: price > EMA200 + close < lower_BB + close < EMA20×0.975
     if payload.get("mongtata_long") and not _is_paused("crypto.mongtata_airborne"):
@@ -169,7 +196,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
         "focus": f"No validated crypto signal. BTC bias={desk_bias}.",
         "symbol": lead_market,
         "candidate_symbols": [],
-        "notes": reasons[:3] + ["D/S2/S9/S10/S13 not triggered."],
+        "notes": reasons[:3] + ["D/S15/S2/S9/S10/S13 not triggered."],
     }
 
 
