@@ -3467,3 +3467,48 @@ def load_performance_analytics(limit: int = 500) -> dict:
         "equity_curve": equity_curve,
         "streak_info": streak_info,
     }
+
+
+def db_archive_old_records(journal_days: int = 90, shadow_days: int = 30) -> dict:
+    """
+    오래된 DB 레코드 자동 삭제 — POST /db-archive 엔드포인트에서 호출.
+
+    - cycle_journal (CycleJournalRecord): journal_days일 이상 된 레코드 삭제
+    - shadow_signals (ShadowSignalRecord): shadow_days일 이상 된 레코드 삭제
+
+    paper_positions (PaperPositionRecord)는 전략 WR 추적에 필요하므로 삭제하지 않음.
+    """
+    init_db()
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    journal_cutoff = (now - timedelta(days=journal_days)).isoformat()
+    shadow_cutoff = (now - timedelta(days=shadow_days)).isoformat()
+    deleted_journal = 0
+    deleted_shadow = 0
+    try:
+        with SessionLocal() as db:
+            result = db.execute(
+                text("DELETE FROM cycle_journal WHERE run_at < :cutoff"),
+                {"cutoff": journal_cutoff},
+            )
+            deleted_journal = result.rowcount or 0
+            result2 = db.execute(
+                text("DELETE FROM shadow_signals WHERE created_at < :cutoff"),
+                {"cutoff": shadow_cutoff},
+            )
+            deleted_shadow = result2.rowcount or 0
+            db.commit()
+        _log.info(
+            "db_archive: deleted %d cycle_journal (>%dd) and %d shadow_signals (>%dd)",
+            deleted_journal, journal_days, deleted_shadow, shadow_days,
+        )
+    except Exception as exc:
+        _log.error("db_archive failed: %s", exc)
+        return {"ok": False, "error": str(exc)}
+    return {
+        "ok": True,
+        "deleted_cycle_journal": deleted_journal,
+        "deleted_shadow_signals": deleted_shadow,
+        "journal_cutoff": journal_cutoff[:10],
+        "shadow_cutoff": shadow_cutoff[:10],
+    }

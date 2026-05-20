@@ -2347,11 +2347,43 @@ def telegram_test() -> dict:
 def weekly_report() -> dict:
     """주간 성과 리포트 발송 — 매주 월요일 KST 09:00 크론에서 호출.
 
-    Oracle VM에서 crontab 설정:
-      0 0 * * 1  curl -s -X POST http://localhost:8000/weekly-report
+    Oracle VM crontab: 0 0 * * 1  curl -s -X POST http://localhost:8000/weekly-report
     (KST 09:00 = UTC 00:00 월요일)
     """
     success = notifier.send_weekly_report(window_days=7)
+    return {"ok": success, "error": notifier.last_error or None}
+
+
+@app.post("/db-archive")
+def db_archive() -> dict:
+    """오래된 cycle_journal / shadow_signals 레코드 삭제 (90일+ / 30일+).
+
+    Oracle VM crontab: 0 2 * * 0  curl -s -X POST http://localhost:8000/db-archive
+    (매주 일요일 UTC 02:00 = KST 11:00)
+    """
+    from app.core.state_store import db_archive_old_records
+    return db_archive_old_records()
+
+
+@app.post("/quarterly-reminder")
+def quarterly_reminder() -> dict:
+    """분기별 백테스트 재검증 리마인더 — 1/4/7/10월 1일 UTC 00:00 크론에서 호출.
+
+    Oracle VM crontab: 0 0 1 1,4,7,10 *  curl -s -X POST http://localhost:8000/quarterly-reminder
+    """
+    from datetime import datetime, timezone
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m")
+    success = notifier.send_ops_alert(
+        f"분기 백테스트 재검증 리마인더 ({now_str})",
+        [
+            "다음 전략들의 백테스트를 현재 시장 데이터로 재검증하세요:",
+            "  - S9 RSI(2) Connors (backtest_s9_rsi2_connors.py)",
+            "  - S10 N-Day Pullback (backtest_s10_nday_pullback.py)",
+            "  - B 신고점 돌파 (backtest_s2_mongtata.py — ⚠️ 미검증)",
+            "기준: Sharpe≥1.2 / WR≥48% / P&L≥1.5 / MDD≥-12%(코인) -15%(주식)",
+            "위치: Desktop/backtest/*.py",
+        ],
+    )
     return {"ok": success, "error": notifier.last_error or None}
 
 
