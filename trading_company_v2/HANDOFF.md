@@ -1,5 +1,92 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-20 (운영 체크리스트 10항목 완료)
+
+### 완료된 작업
+
+**Item 1: Oracle VM 자동 재시작** — 이전 세션 완료 (systemd ExecStartPre watchdog)
+
+**Item 2: 백테스트 수수료 반영** (커밋 포함)
+- `backtest_s9_rsi2_connors.py`: FEE_CRYPTO=0.10%, FEE_STOCK=0.25%, stop -1.4%
+  - Crypto WR 48.1% / P&L 1.58 / Sh 2.76 / MDD -6.3% ✅
+  - Stocks WR 58.1% / P&L 1.62 / Sh 5.52 / MDD -8.0% ✅
+- `backtest_s10_nday_pullback.py`: 동일 수수료, stop -1.2%
+  - Crypto WR 55.8% / P&L 1.91 / Sh 5.21 / MDD -6.7% ✅
+  - Stocks WR 51.0% / P&L 1.64 / Sh 3.52 / MDD -13.6% ✅
+- `backtest_s2_mongtata.py`: ⚠️ 4H → daily + EMA200 재검증 → FAIL (crypto WR 37%, Korea MDD -26%). 운영 SL -2.0% 보수적 유지, 재검증 필요
+
+**Item 3: Naver 데이터 장애 감지** — `market_gateway.py`
+- `get_naver_daily_prices()` 반환 < 5개 시 카운터 증가
+- 5회 누적마다 Telegram 알림 (`send_ops_alert`)
+- 성공 시 카운터 리셋
+
+**Item 4: 전략별 WR 모니터링 + 자동정지** — `app/services/strategy_monitor.py` (신규)
+- 30분마다 DB 쿼리 (PaperPositionRecord, status=closed)
+- 20거래 후 WR이 백테스트 대비 -20pp 이하 → Telegram 경고
+- 30거래 후 -20pp 이하 → 자동정지 (in-memory `_paused_strategies`)
+- -15pp 이내 회복 시 자동해제
+- `orchestrator.py`에서 매 사이클 후 호출
+
+**Item 5: 평균회귀 동시 포지션 2개 한도** — `state_store.py`
+- `_CRYPTO_MR_STRATEGY_IDS = {rsi2_mean_reversion, nday_pullback, mongtata_airborne}`
+- 진입 루프 전 open_count 계산, ≥2 이면 skip
+
+**Item 6: 신규 전략 Shadow Period (30거래 paper-only)** — `broker_router.py`
+- S9/S10 (crypto + korea) 4개 전략이 `_SHADOW_STRATEGIES`에 등록됨
+- 30개 완료 거래 달성 전 live 주문 차단, paper fallback
+- `is_in_shadow_period()` — DB 쿼리 실패 시 fail-safe(shadow 유지)
+
+**Item 7: 주간 성과 리포트** — `notifier.py` + `main.py`
+- `send_weekly_report(window_days=7)` — 최근 7일 종료 포지션 집계
+- WR / 평균 P&L / 최고·최악 종목 / 전략별 분해
+- Oracle VM crontab: `0 0 * * 1` → `curl -X POST http://localhost:8080/weekly-report`
+
+**Item 8: 분기 백테스트 리마인더** — `main.py`
+- `POST /quarterly-reminder` — 재검증 체크리스트 Telegram 발송
+- Oracle VM crontab: `0 0 1 1,4,7,10 *`
+
+**Item 9: DB 자동 아카이브** — `state_store.py` + `main.py`
+- `db_archive_old_records()` — cycle_journal >90일, shadow_signals >30일 삭제
+- paper_positions 보존 (WR 추적 필요)
+- `POST /db-archive`, crontab: `0 2 * * 0`
+
+**Item 10: HTTPS (nginx + 자체서명 인증서)** — Oracle VM 직접 설정
+- nginx 설치, `/etc/nginx/sites-available/trading-dashboard` 설정
+- 자체서명 인증서 (4096-bit RSA, 10년): `/etc/ssl/certs/trading.crt`
+- 443 → http://127.0.0.1:8080 reverse proxy, 80 → 301 HTTPS redirect
+- iptables 443/80 개방 + netfilter-persistent 저장
+- 접근 URL: `https://134.185.118.144` (브라우저 인증서 경고 무시 필요)
+
+### 상태 변경된 파일
+| 파일 | 변경 |
+|------|------|
+| `app/services/strategy_monitor.py` | 신규 생성 |
+| `app/services/market_gateway.py` | Naver 장애 감지 추가 |
+| `app/services/recommendation_engine.py` | `_is_paused()` 가드 추가 |
+| `app/services/broker_router.py` | shadow period 가드 추가 |
+| `app/core/state_store.py` | 수수료 조정 threshold, 상관한도, db_archive |
+| `app/orchestrator.py` | WR 모니터링 호출 추가 |
+| `app/notifier.py` | `send_weekly_report()` 추가 |
+| `app/main.py` | /weekly-report, /db-archive, /quarterly-reminder 추가 |
+| `Desktop/backtest/backtest_s9_rsi2_connors.py` | 수수료 + stop 조정 |
+| `Desktop/backtest/backtest_s10_nday_pullback.py` | 수수료 + stop 조정 |
+| `Desktop/backtest/backtest_s2_mongtata.py` | daily+EMA200 재작성, ⚠️ FAIL |
+
+### Oracle VM crontabs (이미 적용됨)
+```
+0 0 * * 1      curl -s -X POST http://localhost:8080/weekly-report
+0 0 1 1,4,7,10 curl -s -X POST http://localhost:8080/quarterly-reminder
+0 2 * * 0      curl -s -X POST http://localhost:8080/db-archive
+```
+
+### 다음 작업 후보
+1. **S2 MONGTATA 재검증** — 상관 분산 방식(포트폴리오 한도) 적용해 MDD 개선 시도
+2. **Shadow Period 졸업 모니터링** — S9/S10 30거래 달성 시 `_SHADOW_STRATEGIES`에서 제거
+3. **HTTPS 도메인 설정** — 도메인 구매 후 Let's Encrypt 인증서로 교체 (`certbot --nginx`)
+4. **신규 전략 백테스트** — Ross Cameron First Pullback, Linda Raschke Holy Grail
+
+---
+
 ## 0. Claude - 2026-05-19 (전략 코드 전체 리셋: Strategy B + D만 유지)
 
 ### 배경
