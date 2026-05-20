@@ -58,19 +58,20 @@ class StrategyWrStat(NamedTuple):
 def compute_strategy_wr_stats() -> list[StrategyWrStat]:
     """Query DB and return per-strategy WR stats for all tracked strategies."""
     from app.core.state_store import SessionLocal, PaperPositionRecord
-    from sqlalchemy import select, func
+    from sqlalchemy import select, func, case
 
     stats: list[StrategyWrStat] = []
     try:
         with SessionLocal() as db:
             # GROUP BY strategy_id — count total and wins
+            # case() 사용: func.cast(expr > 0, type_=None) → NullType 오류 방지
             rows = (
                 db.execute(
                     select(
                         PaperPositionRecord.strategy_id,
                         func.count(PaperPositionRecord.id).label("total"),
                         func.sum(
-                            func.cast(PaperPositionRecord.pnl_pct > 0, type_=None)
+                            case((PaperPositionRecord.pnl_pct > 0, 1), else_=0)
                         ).label("wins"),
                     )
                     .where(
