@@ -3,6 +3,15 @@ from __future__ import annotations
 from typing import Any
 
 
+def _is_paused(strategy_id: str) -> bool:
+    """Check if a strategy has been auto-paused by the WR monitor."""
+    try:
+        from app.services.strategy_monitor import is_strategy_paused
+        return is_strategy_paused(strategy_id)
+    except Exception:
+        return False  # fail open — never block entries due to monitor errors
+
+
 def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict[str, Any]:
     """코인 데스크 추천 — Strategy D (ETH 4H 신고점 돌파) 전용.
 
@@ -27,7 +36,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # 백테스트 검증: Sharpe 2.33, WR 61.1%, MDD -7.08%, n=18 (2025-2026)
     # 조건: BTC EMA200 상승장 + ETH 4H close > 20봉 최고가 + vol ≥ 2.5x + RSI 50-70 + EMA20
     # STRESSED 레짐에서만 차단, TRENDING/RANGING 모두 허용
-    if payload.get("eth_4h_breakout"):
+    if payload.get("eth_4h_breakout") and not _is_paused("crypto.eth_4h_breakout"):
         _vol_4h = float(payload.get("eth_4h_vol_ratio", 0.0) or 0.0)
         _rsi_4h = float(payload.get("eth_4h_rsi", 0.0) or 0.0)
         _btc_bull = bool(payload.get("btc_4h_regime_bull", False))
@@ -55,7 +64,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     # ── 3. Strategy S2: MONGTATA 에어본 (평균회귀) ────────────────────────
     # 백테스트 검증: Sharpe 6.66, WR 50.0%, MDD -9.7% (코인 일봉)
     # 조건: price > EMA200 + close < lower_BB + close < EMA20×0.975
-    if payload.get("mongtata_long"):
+    if payload.get("mongtata_long") and not _is_paused("crypto.mongtata_airborne"):
         _symbol = str(payload.get("mongtata_symbol", "KRW-BTC") or "KRW-BTC")
         _ema20 = float(payload.get("mongtata_ema20", 0.0) or 0.0)
         _lower_bb = float(payload.get("mongtata_lower_bb", 0.0) or 0.0)
@@ -81,7 +90,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # ── 4. Strategy S9: RSI(2) Connors 평균회귀 ──────────────────────────
     # 백테스트: Sharpe 3.06, WR 48.1%, MDD -6.2%
-    if payload.get("rsi2_long"):
+    if payload.get("rsi2_long") and not _is_paused("crypto.rsi2_mean_reversion"):
         _sym = str(payload.get("rsi2_symbol", "KRW-BTC") or "KRW-BTC")
         _rsi2 = float(payload.get("rsi2_value", 0.0) or 0.0)
         _dev = float(payload.get("rsi2_deviation_pct", 0.0) or 0.0)
@@ -105,7 +114,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # ── 5. Strategy S10: N-Day Consecutive Pullback ────────────────────
     # 백테스트: Sharpe 4.78, WR 55.8%, MDD -7.7%
-    if payload.get("nday_long"):
+    if payload.get("nday_long") and not _is_paused("crypto.nday_pullback"):
         _sym = str(payload.get("nday_symbol", "KRW-BTC") or "KRW-BTC")
         _consec = int(payload.get("nday_consec_down", 3) or 3)
         _dev = float(payload.get("nday_deviation_pct", 0.0) or 0.0)
@@ -185,7 +194,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
 
     # ── 3. Strategy B: 60일 신고점 돌파 (full confirm — 3/3 조건) ───────────
     # 백테스트 검증: Sharpe 6.16, WR 84.6%, MDD -4.0%
-    if breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE":
+    if breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
@@ -223,7 +232,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         }
 
     # ── 4. Strategy B partial (3/3 조건 중 3개 충족) ─────────────────────
-    if breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE":
+    if breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
@@ -254,7 +263,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # ── 5. Strategy S2: MONGTATA 에어본 (평균회귀) ───────────────────────
     # 백테스트 검증: Sharpe 8.60, WR 56.5%, MDD -5.9% (주식 3년)
     mongtata_candidates = payload.get("mongtata_airborne_candidates", []) or []
-    if mongtata_candidates and stance != "DEFENSE":
+    if mongtata_candidates and stance != "DEFENSE" and not _is_paused("korea.mongtata_airborne"):
         mt_leader = mongtata_candidates[0]
         mt_ticker = str(mt_leader.get("ticker", ""))
         mt_name = str(mt_leader.get("name", mt_ticker))
@@ -282,7 +291,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
 
     # ── 6. Strategy S9: RSI(2) Connors 평균회귀 ─────────────────────────
     rsi2_candidates = payload.get("rsi2_candidates", []) or []
-    if rsi2_candidates and stance != "DEFENSE":
+    if rsi2_candidates and stance != "DEFENSE" and not _is_paused("korea.rsi2_mean_reversion"):
         r = rsi2_candidates[0]
         r_syms = [c.get("ticker", "") for c in rsi2_candidates if c.get("ticker")]
         return {
@@ -304,7 +313,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
 
     # ── 7. Strategy S10: N-Day Pullback ──────────────────────────────────
     nday_candidates = payload.get("nday_candidates", []) or []
-    if nday_candidates and stance != "DEFENSE":
+    if nday_candidates and stance != "DEFENSE" and not _is_paused("korea.nday_pullback"):
         n = nday_candidates[0]
         n_syms = [c.get("ticker", "") for c in nday_candidates if c.get("ticker")]
         return {

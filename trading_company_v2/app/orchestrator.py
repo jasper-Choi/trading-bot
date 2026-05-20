@@ -956,6 +956,13 @@ class CompanyOrchestrator:
             notifier.send_ops_alert(title, lines)
         notifier.send_crypto_pilot_alert(self._crypto_pilot_lane(state))
 
+        # ── 전략 WR 모니터링 (30분 주기 / 내부 rate-limit 있음) ──────────────
+        try:
+            from app.services.strategy_monitor import check_strategy_wr_and_alert
+            check_strategy_wr_and_alert()
+        except Exception as _wr_exc:
+            _log.debug("strategy_wr_monitor skipped: %s", _wr_exc)
+
         return {
             "state": current_state,
             "results": [result.model_dump() for result in results],
