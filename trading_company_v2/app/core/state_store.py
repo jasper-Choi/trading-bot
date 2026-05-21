@@ -510,6 +510,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 진입 조건: RSI(2)<10 + RSI(14)<40 + close>EMA200 + close<EMA20
         # stop -1.4% (S9와 동일 — 같은 자산군, 같은 수수료 구조)
         return 10.0, -1.4, 2700
+    # ── Phase 2: Swing Recovery 모드 — 회복 가능성 평가 후 중장투 전환 ──────
+    # new_high_breakout 포지션이 stop(-4%)에 닿기 전, 시장/뉴스 조건 충족 시 전환
+    # target +15%, stop -7%, max ~5거래일 (wall-clock 기준 확인)
+    if "swing_recovery" in focus:
+        return 15.0, -7.0, 7200  # 7200 cycles (~50h @ 25s/cycle ≈ 5 trading days)
+
     if desk == "crypto" and "rsi2_mean_reversion" in focus:
         # S9 RSI(2) Connors (fee-adjusted 2026-05-20):
         # Crypto: Sh 2.76, WR 48.1%, PnL 1.58, MDD -6.3% | Stocks: Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
@@ -649,6 +655,62 @@ def _crypto_eth4h_trail_rules(peak_pnl: float) -> tuple[float, float]:
     if peak_pnl >= 2.0:
         return 2.0, 0.0
     return 0.0, 0.0
+
+
+def _check_swing_recovery_eligible(position: Any, minutes_open: float) -> bool:
+    """new_high_breakout 포지션이 stop 근처일 때 swing_recovery 전환 여부 판단.
+
+    회복 가능 조건 (모두 충족 시 True):
+      1. 아직 swing_recovery 모드가 아님 (중복 전환 방지)
+      2. peak_pnl > 0.3% — 진입 후 한 번이라도 수익이 났음 (재료 있는 돌파)
+      3. pnl_pct > -6.0% — 너무 깊은 손실은 회복 불가 판단 (swing 범위 밖)
+      4. minutes_open < 240 — 4시간 이내 포지션만 (오래된 좀비 제외)
+      5. 글로벌 뉴스 패닉 없음 (news_intel 캐시, 추가 HTTP 없음)
+      6. 한국 직접 리스크 뉴스 없음
+
+    반환: True → swing_recovery 전환 / False → 기존 stop_hit 유지
+    """
+    focus_str = str(getattr(position, "focus", "") or "")
+    strategy_type_str = str(getattr(position, "strategy_type", "") or "")
+
+    # 이미 swing_recovery 모드 → 재전환 금지
+    if "swing_recovery" in focus_str or "swing_recovery" in strategy_type_str:
+        return False
+
+    # peak_pnl 체크 — 한 번도 올라가지 않은 포지션은 처음부터 실패
+    peak = float(getattr(position, "peak_pnl_pct", None) or 0.0)
+    if peak < 0.30:
+        return False
+
+    # 너무 깊은 손실 — swing 범위(-7%) 밖이면 의미 없음
+    pnl = float(getattr(position, "pnl_pct", None) or 0.0)
+    if pnl <= -6.0:
+        return False
+
+    # 4시간 이상 된 포지션은 이미 충분히 기회가 있었음
+    if minutes_open > 240.0:
+        return False
+
+    # 뉴스/시장 조건 체크 (5분 캐시 — HTTP 없음)
+    try:
+        from app.services.global_news_intel import get_market_news_intel
+        intel = get_market_news_intel()
+        # 패닉 장세 → 회복 불가
+        if intel.get("impact") == "panic":
+            return False
+        # 한국 직접 리스크 뉴스
+        if intel.get("korea_risk"):
+            return False
+        # 트럼프 관세 + 타리프 동시 경보 → 회복 불가
+        if intel.get("trump_alert") and intel.get("tariff_alert"):
+            return False
+        # 매크로 점수 0.40 미만 → 시장 분위기 부정적
+        if float(intel.get("macro_score", 0.5) or 0.5) < 0.40:
+            return False
+    except Exception:
+        pass  # 뉴스 체크 실패 → 회복 허용 (차단하지 않음)
+
+    return True
 
 
 def _korea_newhi_trail_rules(peak_pnl: float) -> tuple[float, float]:
@@ -1459,13 +1521,34 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 if position.pnl_pct >= target_pct:
                     _close_position(position, "target_hit")
                 elif position.pnl_pct <= stop_pct:
-                    _close_position(position, "stop_hit")
+                    # ── Phase 2: Swing Recovery 전환 평가 ────────────────────
+                    # new_high_breakout 포지션이 stop에 닿을 때, 즉시 컷 대신
+                    # 회복 가능성을 평가하여 중장투 swing 모드로 전환
+                    if (
+                        "new_high_breakout" in pos_focus
+                        and "swing_recovery" not in pos_focus  # 중복 방지
+                        and _check_swing_recovery_eligible(position, minutes_open)
+                    ):
+                        # Swing recovery 전환: stop -7%, target +15%, 5거래일
+                        _original_focus = str(position.focus or "")
+                        position.focus = f"swing_recovery: {_original_focus}"
+                        position.strategy_type = "swing_recovery"
+                        _log.info(
+                            "Korea swing_recovery: %s pnl=%.2f%% peak=%.2f%% → "
+                            "widened stop -7%% target +15%% (%.0fmin open)",
+                            position.symbol, position.pnl_pct,
+                            float(position.peak_pnl_pct or 0.0), minutes_open,
+                        )
+                    else:
+                        _close_position(position, "stop_hit")
                 elif trail_giveback and position.pnl_pct <= protect_level:
                     _close_position(position, "korea_trail")
                 elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
                     _close_position(position, "early_failure")
                 elif position.cycles_open >= max_cycles:
-                    _close_position(position, "stale_exit")
+                    # swing_recovery 타임아웃 — 회복 실패
+                    reason = "swing_recovery_timeout" if "swing_recovery" in pos_focus else "stale_exit"
+                    _close_position(position, reason)
                 else:
                     # ── 피라미딩 트리거 ──────────────────────────────────────
                     # 브레이크아웃/갭업 종목이 peak +3% 이상 도달 시 0.10x 추가 진입
