@@ -9,9 +9,10 @@ from app.services.korea_universe import get_korea_universe
 from app.services.market_gateway import get_naver_daily_prices, get_us_market_context
 from app.services.signal_engine import summarize_breakout_signal, summarize_equity_signal
 
-_FETCH_WORKERS = 12
+_FETCH_WORKERS = 8
 # Max candidates from dynamic universe to run breakout scoring on (keeps runtime bounded)
-_UNIVERSE_SCAN_LIMIT = 80
+# 80종목×22페이지 = 1760 requests/scan → 40종목×22페이지 = 880 requests로 절반 감소
+_UNIVERSE_SCAN_LIMIT = 40
 
 
 def _ema(values: list[float], period: int) -> float:

@@ -57,7 +57,7 @@ _US_CONTEXT_TTL: float = 15 * 60  # 15분
 # 종목별 일봉 데이터를 캐시하여 55초 사이클마다 반복 요청 방지.
 # 장중에는 5분 TTL (현재가 반영), 장외에는 1시간 TTL.
 _naver_daily_cache: dict[str, tuple[float, list]] = {}  # ticker -> (ts, candles)
-_NAVER_DAILY_CACHE_TTL_MARKET = 300.0    # 5분 (장중 현재가 업데이트)
+_NAVER_DAILY_CACHE_TTL_MARKET = 1800.0   # 30분 (일봉 전략 — 분단위 변화 불필요)
 _NAVER_DAILY_CACHE_TTL_OFFHOUR = 3600.0  # 1시간 (장외 시간)
 
 # ── Naver data-failure tracking ──────────────────────────────────────────────
