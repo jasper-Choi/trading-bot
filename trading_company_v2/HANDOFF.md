@@ -1,5 +1,38 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-21 (🚨 CRITICAL: symbol rotation 잘못된 reference_price → -78% paper loss 버그 수정)
+
+### 작업 내용
+
+**🚨 CRITICAL BUG FIX: symbol rotation 시 잘못된 entry_price 사용 (`execution_agent.py` + `recommendation_engine.py`)**
+
+**재현 시나리오:**
+1. 스캔: [이오테크닉스(039030, breakout_count=4, 현재가=537,000원), 파두(440110, count=3, 현재가=116,600원)]
+2. `recommendation_engine`: bk_leader=이오테크닉스 → `symbol="039030"`, `reference_price=537,000`, `candidate_symbols=["039030","440110"]`
+3. `execution_agent._pick_symbol`: 039030은 이전 stop_hit으로 쿨다운 → **파두(440110)로 rotation**
+4. `_reference_price("korea","440110")` = 0 (market_snapshot 미포함) → `plan.get("reference_price") = 537,000` (이오테크닉스 가격!) 사용
+5. 파두 실제 가격 116,600원 vs entry_price=537,000원 → **즉시 -78.3% stop_hit**
+
+**실제 피해:** 포지션 4번 (440110, probe_longs) - entry=537,000, exit=116,600, pnl=-78.29%, cycles_open=1
+
+**수정:**
+- `recommendation_engine.py`: `_bk_candidate_prices` 맵 추가 (후보 종목별 현재가 딕셔너리)
+  - `breakout_candidates`의 모든 ticker → current_price 매핑
+  - probe_longs, selective_probe 리턴에 `candidate_prices` 필드 추가
+- `execution_agent.py`: reference_price fallback 로직 개선
+  - rotation된 종목: `candidate_prices[symbol]` 에서 실제 가격 조회
+  - primary 종목 그대로 진입 시에만 `plan.reference_price` fallback 허용
+  - **이오테크닉스 가격으로 파두 진입하는 사고 원천 차단**
+
+| 파일 | 변경 |
+|------|------|
+| `app/services/recommendation_engine.py` | `candidate_prices` 맵 추가 (종목별 현재가) |
+| `app/agents/execution_agent.py` | rotation 시 candidate_prices 우선 조회, primary 종목만 reference_price fallback |
+
+**커밋:** `05e8d32` — 2026-05-21 배포 완료, 서비스 재시작 확인
+
+---
+
 ## 0. Claude - 2026-05-21 (🚨 Korea 3대 버그 수정 + fchart API + 개장 완전 검증)
 
 ### 작업 내용
