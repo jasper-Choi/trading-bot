@@ -18,10 +18,12 @@ from app.services.market_gateway import NAVER_HEADERS, REQUEST_TIMEOUT, _strip_h
 
 _log = logging.getLogger(__name__)
 
-# Naver sise_quant: top stocks by trading amount (거래대금 기준)
+# Naver sise_market_sum: market cap + volume summary page (거래대금 정렬)
 # sosok=0 KOSPI, sosok=1 KOSDAQ
-_NAVER_SISE_QUANT_URL = (
-    "https://finance.naver.com/sise/sise_quant.naver?sosok={market}&page={page}"
+# NOTE: sise_quant URL (previously used) changed HTML structure — no longer has
+#       onMouseOver rows. sise_market_sum retains the same table format.
+_NAVER_SISE_MARKET_SUM_URL = (
+    "https://finance.naver.com/sise/sise_market_sum.naver?sosok={market}&page={page}"
 )
 
 _UNIVERSE_TTL = 4 * 3600.0  # 4 hours
@@ -32,14 +34,14 @@ _cache_ts: float = 0.0
 
 
 def _fetch_market(sosok: int, market_name: str, top_n: int) -> list[dict[str, Any]]:
-    """Scrape Naver sise_quant for top-n stocks by trading volume."""
+    """Scrape Naver sise_market_sum for top-n stocks by market cap/volume."""
     results: list[dict[str, Any]] = []
     for page in range(1, 4):
         if len(results) >= top_n:
             break
         try:
             resp = requests.get(
-                _NAVER_SISE_QUANT_URL.format(market=sosok, page=page),
+                _NAVER_SISE_MARKET_SUM_URL.format(market=sosok, page=page),
                 headers=NAVER_HEADERS,
                 timeout=REQUEST_TIMEOUT,
             )
