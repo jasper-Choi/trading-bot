@@ -834,6 +834,9 @@ class ExecutionAgent(BaseAgent):
         size = f"{scaled_notional_pct:.2f}x"
         notional_pct = scaled_notional_pct
         reference_price = self._reference_price(desk, symbol)
+        # Korea: market_snapshot에 없는 종목(신고점 돌파 중소형주 등)은 plan의 current_price 사용
+        if reference_price <= 0 and desk == "korea":
+            reference_price = float(plan.get("reference_price", 0.0) or 0.0)
         pnl_estimate_pct = self._expected_pnl_pct(desk, action)
         actionable_entries = {"probe_longs", "attack_opening_drive", "selective_probe"}
         actionable_exits = {"reduce_risk", "capital_preservation"}

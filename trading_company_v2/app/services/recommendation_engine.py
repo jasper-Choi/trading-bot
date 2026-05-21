@@ -323,11 +323,13 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         _bk_base_size = "0.70x" if stance == "OFFENSE" else "0.50x"
         _bk_size = "0.35x" if (_k_vix_fear or _k_us_risk_off) else _bk_base_size
         _us_note = f"US {_k_us_regime} / VIX={_k_vix_val:.1f}({_k_vix_regime}) SPY{_k_spy_chg:+.1f}%"
+        _bk_price = float(bk_leader.get("current_price", 0.0) or 0.0)
         return {
             "action": "probe_longs",
             "size": _bk_size,
             "focus": f"new_high_breakout: {bk_name} 60일 신고점 돌파 확인",
             "symbol": bk_ticker,
+            "reference_price": _bk_price,  # execution_agent 폴백용 (market_snapshot 미포함 종목)
             "candidate_symbols": candidate_symbols[:3],
             "focus_tag": "new_high_breakout",
             "strategy_id": "korea.new_high_breakout",
@@ -357,11 +359,13 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 "notes": [f"bias={bk_bias} / signal={bk_signal:.2f} — requires bullish+0.52"],
                 "quality_score": quality_score,
             }
+        _bk_price2 = float(bk_leader.get("current_price", 0.0) or 0.0)
         return {
             "action": "selective_probe",
             "size": "0.35x",
             "focus": f"new_high_breakout partial: {bk_name} — 3/3 signals confirmed.",
             "symbol": bk_ticker,
+            "reference_price": _bk_price2,  # execution_agent 폴백용
             "candidate_symbols": [bk_ticker],
             "focus_tag": "new_high_breakout",
             "strategy_id": "korea.new_high_breakout",
@@ -380,12 +384,14 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         mt_dev = float(mt_leader.get("deviation_pct", 0.0) or 0.0)
         mt_ema20 = float(mt_leader.get("ema20", 0.0) or 0.0)
         mt_lower_bb = float(mt_leader.get("lower_bb", 0.0) or 0.0)
+        mt_price = float(mt_leader.get("current_price", 0.0) or 0.0)
         mt_symbols = [str(c.get("ticker", "")).strip() for c in mongtata_candidates if c.get("ticker")]
         return {
             "action": "probe_longs",
             "size": "0.50x",
             "focus": f"mongtata_airborne: {mt_name} EMA20 대비 {mt_dev:.1f}% 이탈",
             "symbol": mt_ticker,
+            "reference_price": mt_price,
             "candidate_symbols": mt_symbols[:3],
             "focus_tag": "mongtata_airborne",
             "strategy_id": "korea.mongtata_airborne",
@@ -411,6 +417,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "size": "0.50x",
             "focus": f"dual_rsi: {r.get('name', r.get('ticker', ''))} RSI(2)={r.get('rsi2', 0):.1f} RSI(14)={r.get('rsi14', 0):.1f}",
             "symbol": r.get("ticker", ""),
+            "reference_price": float(r.get("current_price", 0.0) or 0.0),
             "candidate_symbols": r_syms[:3],
             "focus_tag": "dual_rsi",
             "strategy_id": "korea.dual_rsi",
@@ -432,6 +439,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "size": "0.50x",
             "focus": f"rsi2_mean_reversion: {r.get('name', r.get('ticker', ''))} RSI(2)={r.get('rsi2', 0):.1f}",
             "symbol": r.get("ticker", ""),
+            "reference_price": float(r.get("current_price", 0.0) or 0.0),
             "candidate_symbols": r_syms[:3],
             "focus_tag": "rsi2_mean_reversion",
             "strategy_id": "korea.rsi2_mean_reversion",
@@ -454,6 +462,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "size": "0.50x",
             "focus": f"nday_pullback: {n.get('name', n.get('ticker', ''))} EMA5 이탈 {n.get('deviation_pct', 0):.1f}%",
             "symbol": n.get("ticker", ""),
+            "reference_price": float(n.get("current_price", 0.0) or 0.0),
             "candidate_symbols": n_syms[:3],
             "focus_tag": "nday_pullback",
             "strategy_id": "korea.nday_pullback",
