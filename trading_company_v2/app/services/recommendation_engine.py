@@ -263,6 +263,13 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         for c in breakout_candidates
         if str(c.get("ticker", "")).strip()
     ]
+    # 종목별 현재가 맵 — execution_agent에서 symbol rotation 시 올바른 가격 사용 보장
+    # 버그 방지: primary 종목(이오테크닉스) reference_price를 rotation 대상(파두)에 잘못 적용하는 문제
+    _bk_candidate_prices: dict[str, float] = {
+        str(c.get("ticker", "")): float(c.get("current_price", 0.0) or 0.0)
+        for c in breakout_candidates
+        if c.get("ticker") and float(c.get("current_price", 0.0) or 0.0) > 0
+    }
 
     # ── 1. 장외 시간 ────────────────────────────────────────────────────────
     if not (session.get("korea_opening_window") or session.get("korea_mid_session")):
@@ -329,7 +336,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "size": _bk_size,
             "focus": f"new_high_breakout: {bk_name} 60일 신고점 돌파 확인",
             "symbol": bk_ticker,
-            "reference_price": _bk_price,  # execution_agent 폴백용 (market_snapshot 미포함 종목)
+            "reference_price": _bk_price,  # execution_agent 폴백용 (primary 종목 전용)
+            "candidate_prices": _bk_candidate_prices,  # rotation 시 종목별 가격 조회용
             "candidate_symbols": candidate_symbols[:3],
             "focus_tag": "new_high_breakout",
             "strategy_id": "korea.new_high_breakout",
@@ -365,7 +373,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "size": "0.35x",
             "focus": f"new_high_breakout partial: {bk_name} — 3/3 signals confirmed.",
             "symbol": bk_ticker,
-            "reference_price": _bk_price2,  # execution_agent 폴백용
+            "reference_price": _bk_price2,  # execution_agent 폴백용 (primary 종목 전용)
+            "candidate_prices": _bk_candidate_prices,  # rotation 시 종목별 가격 조회용
             "candidate_symbols": [bk_ticker],
             "focus_tag": "new_high_breakout",
             "strategy_id": "korea.new_high_breakout",

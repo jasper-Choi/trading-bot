@@ -834,9 +834,17 @@ class ExecutionAgent(BaseAgent):
         size = f"{scaled_notional_pct:.2f}x"
         notional_pct = scaled_notional_pct
         reference_price = self._reference_price(desk, symbol)
-        # Korea: market_snapshot에 없는 종목(신고점 돌파 중소형주 등)은 plan의 current_price 사용
+        # Korea: market_snapshot에 없는 종목(신고점 돌파 중소형주 등)은 plan의 가격 사용
+        # 버그 방지: symbol rotation 시 primary 종목 가격을 다른 종목에 잘못 적용하지 않도록
+        # candidate_prices 맵 우선 조회 → 없으면 primary 종목에 한해 reference_price fallback
         if reference_price <= 0 and desk == "korea":
-            reference_price = float(plan.get("reference_price", 0.0) or 0.0)
+            _cand_prices = plan.get("candidate_prices", {}) or {}
+            if symbol in _cand_prices:
+                # rotation된 종목의 실제 가격 사용 (잘못된 primary 가격 방지)
+                reference_price = float(_cand_prices[symbol] or 0.0)
+            elif symbol == str(plan.get("symbol", "")):
+                # primary 종목 그대로 진입 시에만 plan reference_price 허용
+                reference_price = float(plan.get("reference_price", 0.0) or 0.0)
         pnl_estimate_pct = self._expected_pnl_pct(desk, action)
         actionable_entries = {"probe_longs", "attack_opening_drive", "selective_probe"}
         actionable_exits = {"reduce_risk", "capital_preservation"}
