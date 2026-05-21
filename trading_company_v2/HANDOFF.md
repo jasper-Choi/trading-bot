@@ -1,5 +1,26 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-21 (🚨 Korea Universe 0개 버그 수정 + 개장 검증)
+
+### 작업 내용
+
+**🚨 CRITICAL BUG FIX: Korea Universe 0개 반환 (`app/services/korea_universe.py`)**
+- 원인: Naver `sise_quant` URL HTML 구조 변경 → `onMouseOver` 속성 제거됨 → 0개 반환
+- 결과: Korea 데스크가 **1600+ 사이클 동안 0개 종목 스캔** (전략 B/S2/S9/S10 모두 실질적 비활성)
+- 수정: `sise_quant` → `sise_market_sum` URL로 전환 (동일한 HTML 구조 유지)
+- 수정 후: 0개 → 120개 (KOSPI 60 + KOSDAQ 60), 갭업 종목 4/5개 포함 확인
+
+**개장 검증 결과 (09:00:47 KST 첫 사이클 확인)**
+- ✅ 세션 전환: 08:59:52 KST "outside market hours" → 09:00:47 KST "KOSDAQ opening drive" 정확
+- ✅ 갭업 후보: 0개 → 8개 (성호전자+11.17%, 심텍+9.07%, 아주IB투자+8.05% 등) 정상 감지
+- Universe 수정 후 재시작: 09:06:41 UTC (09:06 KST) — 이후 120개 스캔 시작
+
+| 파일 | 변경 |
+|------|------|
+| `app/services/korea_universe.py` | `sise_quant` → `sise_market_sum` (HTML 구조 변경 대응) |
+
+---
+
 ## 0. Claude - 2026-05-21 (VIX 수정 + 레짐/스탠스 개편 + S15/S17 사이즈 튜닝 + 시간 기반 청산)
 
 ### 작업 내용
