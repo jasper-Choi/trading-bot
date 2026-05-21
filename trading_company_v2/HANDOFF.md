@@ -1,6 +1,6 @@
 # Trading Company V2 Handoff
 
-## 0. Claude - 2026-05-21 (🚨 Korea Universe 0개 버그 수정 + 개장 검증)
+## 0. Claude - 2026-05-21 (🚨 Korea 3대 버그 수정 + fchart API + 개장 완전 검증)
 
 ### 작업 내용
 
@@ -13,18 +13,27 @@
 **🚨 CRITICAL BUG FIX 2: 일봉 데이터 30일 고정 반환 (`app/services/market_gateway.py`)**
 - 원인: `get_naver_daily_prices` 내 `range(1, 4)` (3페이지=30행) 하드코딩 → `count=220` 무시
 - 결과: `len(candles) < 62` 체크에 걸려 모든 종목 스킵 → 전략 B/S9/S10/S2 비활성
-- 수정: `_max_pages = max(4, count // 10 + 3)` 동적 계산
-- **캐시 추가**: 5분 TTL (장중) / 1시간 (장외) → 80종목×22페이지=1760 요청/사이클 방지
 
-**개장 검증 결과 (09:00:47 KST 첫 사이클 확인)**
+**🚨 CRITICAL BUG FIX 3: 성능 폭발 → fchart API로 230x 속도 향상**
+- 초기 수정(페이지수 동적화): 25페이지×40종목=1000 요청/사이클 → 사이클 7분+ 소요
+- 근본 수정: Naver fchart API (`fchart.stock.naver.com`) 도입
+  - `NAVER_FCHART_URL = "https://fchart.stock.naver.com/sise.nhn?symbol={ticker}&timeframe=day&count=250&requestType=0"`
+  - **1요청 = 250일 OHLCV XML 반환** (기존 22페이지 = 22요청 필요)
+  - 속도 테스트: 8종목 1.5초 (0.19초/종목) vs 기존 ~44초/종목 → **230배 빠름**
+- 캐시: 30분 TTL (장중) / 1시간 (장외), `_naver_daily_cache` dict
+- sise_day 페이지 스크래핑은 fchart 실패 시 폴백으로 유지
+
+**개장 검증 결과 (2026-05-21 09:00 KST)**
 - ✅ 세션 전환: 08:59:52 KST "outside market hours" → 09:00:47 KST "KOSDAQ opening drive" 정확
-- ✅ 갭업 후보: 0개 → 8개 (성호전자+11.17%, 심텍+9.07%, 아주IB투자+8.05% 등) 정상 감지
-- 두 버그 수정 + 재시작: 09:16:08 UTC (09:16 KST) — 이후 120개 전 종목 완전 스캔
+- ✅ 갭업 후보: 0개 → 8개 (마키나락스+30%, 심텍+10.91%, 성호전자+10.15% 등) 정상 감지
+- fchart 재시작: 09:24:21 UTC (09:24 KST)
+- ✅ 사이클 타이밍 정상화: ~30초 간격 (00:25:27→25:57→26:26→26:56→27:26 UTC)
+- ✅ 전략 B 스캔 확인: `B=0c/0p S2=0 S9/S13=0(dual=0) S10=0` — 120종목 평가 중 (오늘 60일 고점 돌파 없음 = 정상)
 
 | 파일 | 변경 |
 |------|------|
 | `app/services/korea_universe.py` | `sise_quant` → `sise_market_sum` (HTML 구조 변경 대응) |
-| `app/services/market_gateway.py` | 일봉 데이터 페이지 수 동적 계산 + 5분 TTL 캐시 |
+| `app/services/market_gateway.py` | fchart API 도입 (1요청=250일), 30분 캐시 |
 
 ---
 
