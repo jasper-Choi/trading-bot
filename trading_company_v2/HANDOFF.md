@@ -4,20 +4,27 @@
 
 ### 작업 내용
 
-**🚨 CRITICAL BUG FIX: Korea Universe 0개 반환 (`app/services/korea_universe.py`)**
+**🚨 CRITICAL BUG FIX 1: Korea Universe 0개 반환 (`app/services/korea_universe.py`)**
 - 원인: Naver `sise_quant` URL HTML 구조 변경 → `onMouseOver` 속성 제거됨 → 0개 반환
 - 결과: Korea 데스크가 **1600+ 사이클 동안 0개 종목 스캔** (전략 B/S2/S9/S10 모두 실질적 비활성)
 - 수정: `sise_quant` → `sise_market_sum` URL로 전환 (동일한 HTML 구조 유지)
 - 수정 후: 0개 → 120개 (KOSPI 60 + KOSDAQ 60), 갭업 종목 4/5개 포함 확인
 
+**🚨 CRITICAL BUG FIX 2: 일봉 데이터 30일 고정 반환 (`app/services/market_gateway.py`)**
+- 원인: `get_naver_daily_prices` 내 `range(1, 4)` (3페이지=30행) 하드코딩 → `count=220` 무시
+- 결과: `len(candles) < 62` 체크에 걸려 모든 종목 스킵 → 전략 B/S9/S10/S2 비활성
+- 수정: `_max_pages = max(4, count // 10 + 3)` 동적 계산
+- **캐시 추가**: 5분 TTL (장중) / 1시간 (장외) → 80종목×22페이지=1760 요청/사이클 방지
+
 **개장 검증 결과 (09:00:47 KST 첫 사이클 확인)**
 - ✅ 세션 전환: 08:59:52 KST "outside market hours" → 09:00:47 KST "KOSDAQ opening drive" 정확
 - ✅ 갭업 후보: 0개 → 8개 (성호전자+11.17%, 심텍+9.07%, 아주IB투자+8.05% 등) 정상 감지
-- Universe 수정 후 재시작: 09:06:41 UTC (09:06 KST) — 이후 120개 스캔 시작
+- 두 버그 수정 + 재시작: 09:16:08 UTC (09:16 KST) — 이후 120개 전 종목 완전 스캔
 
 | 파일 | 변경 |
 |------|------|
 | `app/services/korea_universe.py` | `sise_quant` → `sise_market_sum` (HTML 구조 변경 대응) |
+| `app/services/market_gateway.py` | 일봉 데이터 페이지 수 동적 계산 + 5분 TTL 캐시 |
 
 ---
 
