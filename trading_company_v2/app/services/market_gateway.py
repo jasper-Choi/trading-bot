@@ -6,6 +6,7 @@ from html import unescape
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,13 @@ _US_CONTEXT_TICKERS: dict[str, str] = {
 _US_CONTEXT_CACHE: dict[str, Any] = {}
 _US_CONTEXT_CACHE_TS: float = 0.0
 _US_CONTEXT_TTL: float = 15 * 60  # 15분
+
+# ── Naver daily price cache ───────────────────────────────────────────────────
+# 종목별 일봉 데이터를 캐시하여 55초 사이클마다 반복 요청 방지.
+# 장중에는 5분 TTL (현재가 반영), 장외에는 1시간 TTL.
+_naver_daily_cache: dict[str, tuple[float, list]] = {}  # ticker -> (ts, candles)
+_NAVER_DAILY_CACHE_TTL_MARKET = 300.0    # 5분 (장중 현재가 업데이트)
+_NAVER_DAILY_CACHE_TTL_OFFHOUR = 3600.0  # 1시간 (장외 시간)
 
 # ── Naver data-failure tracking ──────────────────────────────────────────────
 # 연속 실패 횟수를 추적하고 임계값 초과 시 Telegram 알림 발송.
@@ -520,9 +528,25 @@ def build_market_snapshot() -> MarketSnapshot:
 
 
 def get_naver_daily_prices(ticker: str, count: int = 20) -> list[dict[str, Any]]:
-    candles: list[dict[str, Any]] = []
     if not ticker:
-        return candles
+        return []
+
+    # ── 캐시 확인 ──────────────────────────────────────────────────────────
+    _now_ts = time.monotonic()
+    _cached = _naver_daily_cache.get(ticker)
+    if _cached:
+        _cached_ts, _cached_candles = _cached
+        # 장중(09:00~15:30 KST = 00:00~06:30 UTC)이면 5분 TTL, 장외는 1시간 TTL
+        try:
+            from zoneinfo import ZoneInfo
+            _kst_h = datetime.now(ZoneInfo("Asia/Seoul")).hour
+        except Exception:
+            _kst_h = 12  # fallback: assume market hours
+        _ttl = _NAVER_DAILY_CACHE_TTL_MARKET if 9 <= _kst_h < 16 else _NAVER_DAILY_CACHE_TTL_OFFHOUR
+        if (_now_ts - _cached_ts) < _ttl and len(_cached_candles) >= count:
+            return list(_cached_candles)[-count:]
+
+    candles: list[dict[str, Any]] = []
 
     # Naver sise_day returns ~10 rows per page.
     # Compute max pages needed to satisfy count; add 3 buffer pages.
@@ -575,6 +599,8 @@ def get_naver_daily_prices(ticker: str, count: int = 20) -> list[dict[str, Any]]
         _naver_record_failure(ticker)
     else:
         _naver_record_success()
+        # 캐시 저장 (성공 시만, 최대 count 크기 저장)
+        _naver_daily_cache[ticker] = (time.monotonic(), result)
     return result
 
 
