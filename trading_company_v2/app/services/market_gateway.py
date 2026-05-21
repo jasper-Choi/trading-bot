@@ -524,7 +524,11 @@ def get_naver_daily_prices(ticker: str, count: int = 20) -> list[dict[str, Any]]
     if not ticker:
         return candles
 
-    for page in range(1, 4):
+    # Naver sise_day returns ~10 rows per page.
+    # Compute max pages needed to satisfy count; add 3 buffer pages.
+    _rows_per_page = 10
+    _max_pages = max(4, count // _rows_per_page + 3)
+    for page in range(1, _max_pages + 1):
         try:
             resp = requests.get(NAVER_STOCK_DAY_URL.format(ticker=ticker, page=page), headers=NAVER_HEADERS, timeout=REQUEST_TIMEOUT)
             resp.raise_for_status()
