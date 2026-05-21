@@ -1,5 +1,44 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-21 (Phase 1: 글로벌 뉴스 인텔리전스 에이전트 구축)
+
+### 작업 내용
+
+**글로벌 뉴스/SNS 인텔리전스 — `macro_sentiment_agent` stub → 실제 에이전트로 교체**
+
+**구현 내용:**
+- **`app/services/global_news_intel.py`** (신규, 546줄):
+  - Google News RSS (영어 글로벌 + 한국어) — 무료, API 키 없음
+  - Nitter RSS — 트럼프/@realDonaldTrump, 연준/@federalreserve, 엘론머스크 등 핵심 계정
+  - Naver 금융 종목별 뉴스 스크래핑
+  - **핵심: 발행 시각 기반 가중치** (<2시간=1.0, 2~6시간=0.4, 6~24시간=0.1, >24시간=0.0)
+    - 이전: 오래된 관세 기사들이 모두 누적 → macro_score=0.05(영구 패닉) 버그
+    - 수정: 배경 소음 vs 브레이킹 뉴스 분리 → 평상시 0.55(calm), 실제 급보 시만 패닉
+
+- **`app/agents/macro_sentiment_agent.py`** 업그레이드:
+  - score 0.45 고정 → 실제 뉴스 기반 0.0~1.0
+  - trump_alert, tariff_alert, crypto_boost, korea_risk 알림 플래그
+  - vix_regime 호환 인터페이스 → orchestrator stance/regime 직접 반영
+
+- **`app/agents/korea_stock_desk_agent.py`**: 종목별 catalyst 체크
+  - 악재 뉴스 종목: 진입 스킵 / 호재: score 보정
+
+- **`app/services/recommendation_engine.py`**: 글로벌 패닉 시 capital_preservation
+
+- **`app/orchestrator.py`**: macro_result.vix_regime 통합
+
+**검증:**
+- `macro_score: 0.549 (calm)` — 평상시 정상 동작 확인
+- `stance=BALANCED` 복원 확인 (이전 영구 DEFENSE 문제 해결)
+- 브레이킹 뉴스 2시간 필터: "Fed Minutes Suggest Rate Hikes" 1건만 감지 (정확)
+
+**커밋:** `44b4651`(Phase1), `ffd739d`(스코어링 수정) — 2026-05-21 배포 완료
+
+**Phase 2 (다음):** 포지션 회복 가능성 판단 — 손실 시 hard stop 대신 섹터 모멘텀 체크 후 중장투 전환
+**Phase 3 (이후):** 종토방/SNS 감성 분석 심화
+
+---
+
 ## 0. Claude - 2026-05-21 (🚨 CRITICAL: symbol rotation 잘못된 reference_price → -78% paper loss 버그 수정)
 
 ### 작업 내용
