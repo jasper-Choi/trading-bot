@@ -1,5 +1,46 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-21 (Phase 3: 글로벌 뉴스 인텔리전스 고도화 완료)
+
+### 작업 내용
+
+**`app/services/global_news_intel.py`** 전면 재작성 (Phase 3 완성):
+
+**30+ 계정 모니터링 체계 (6개 카테고리)**:
+- 정책/정부: 트럼프(2.0), POTUS(1.5), 재무부(1.8), 백악관(1.4), USTR(1.6), EU집행위(1.3), G20(1.2), FSC_Korea(1.3), KRX_Korea(1.2)
+- 중앙은행: Fed(2.0), ECB(1.8), BOE(1.6), IMF(1.5), WorldBank(1.3), BIS(1.3)
+- 글로벌 투자자: Elon(1.8), CathieWood(1.4), RayDalio(1.5), MicroStrategy(1.6), Naval(1.2)
+- 코인/블록체인: Vitalik(1.7), Pompliano(1.4), Binance(1.5), Coinbase(1.4)
+- 금융 미디어 RSS: Reuters/Bloomberg/WSJ/FT/Economist/CNBC, 한국경제/연합뉴스/이데일리/블록미디어
+- 커뮤니티 RSS: Reddit r/investing, r/stocks, r/CryptoCurrency, r/Korea
+  → **트럼프는 수백 인사이트 원천 중 하나** (다양한 관점 통합)
+
+**새 기능:**
+- `_fetch_jongto(ticker)`: Naver 종목토론방 스크래핑 — 활동량 + 감성 점수 (0~1)
+- `get_stock_catalyst()`: `catalyst_score(0~1)` + `catalyst_rating(0~10)` 연속 점수 (기존 binary 대체)
+  - 종토방 핫 + 부정 감성 → 개미 물타기 패턴 자동 감지
+- `cb_alert`: 중앙은행 서프라이즈 감지 신규 플래그
+- `is_entry_blocked_by_news()`: `cb_alert + macro_score<0.40` 조건 추가
+- 하위호환: `trump_alert = policy_alert` 유지
+
+**`app/agents/korea_stock_desk_agent.py`** Phase 3 통합:
+- 신고점 돌파 전략: `catalyst_rating`, `jongto_hot`, `jongto_sentiment` 후보 데이터 저장
+- 종토방 과열+부정 종목 추가 감점 (-0.08): 개미 물타기 패턴 차단
+- S2(MONGTATA)/S9(RSI2)/S10(N-Day Pullback) 전략에도 catalyst 후처리 필터 적용
+  - 기존: 신고점 돌파 전략에만 catalyst 체크
+  - 수정: 평균회귀 전략도 악재 종목 차단 (낙폭 연장 리스크)
+
+**VM 테스트 결과 (2026-05-21 07:22):**
+- `impact=calm`, `macro_score=0.519` ✅ (정상 범위)
+- `cb_alert=True` — 한은 금리 인상 가능성 뉴스 감지 (7~8월 인상 전망 기사들)
+- `breaking 8개` — RSS 실시간 수집 정상
+- 삼성전자 종토방: `post=17, sentiment=0.642` ✅
+- 카카오 종토방 제목 스크래핑 ✅
+
+**커밋:** `ad0c4be`(Phase3 global_news_intel), `554bf8d`(korea_stock_desk_agent 통합) — 2026-05-21 배포 완료
+
+---
+
 ## 0. Claude - 2026-05-21 (Phase 1: 글로벌 뉴스 인텔리전스 에이전트 구축)
 
 ### 작업 내용
