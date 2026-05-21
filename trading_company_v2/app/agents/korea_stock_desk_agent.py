@@ -9,10 +9,10 @@ from app.services.korea_universe import get_korea_universe
 from app.services.market_gateway import get_naver_daily_prices, get_us_market_context
 from app.services.signal_engine import summarize_breakout_signal, summarize_equity_signal
 
-_FETCH_WORKERS = 8
-# Max candidates from dynamic universe to run breakout scoring on (keeps runtime bounded)
-# 80종목×22페이지 = 1760 requests/scan → 40종목×22페이지 = 880 requests로 절반 감소
-_UNIVERSE_SCAN_LIMIT = 40
+_FETCH_WORKERS = 12
+# fchart API로 1요청=250일 데이터 → 전 종목(120개) 스캔 가능 (0.19s/종목 × 120 = ~2.5s)
+# 기존 40종목 제한은 sise_day 22페이지 스크래핑 시대의 유물 (이제 불필요)
+_UNIVERSE_SCAN_LIMIT = 120
 
 
 def _ema(values: list[float], period: int) -> float:
@@ -146,9 +146,29 @@ class KoreaStockDeskAgent(BaseAgent):
         super().__init__("korea_stock_desk_agent")
 
     def run(self) -> AgentResult:
+        # ── 시간대별 vol 기준 동적 계산 ─────────────────────────────────────
+        # 개장 초반은 거래량이 하루 평균의 30~50% 수준 → 2배 기준 충족 불가
+        # 09:00-09:30: 0.8x (개장 직후), 09:30-10:00: 1.3x (반시간), 10:00+: 2.0x (정상)
+        try:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            _kst = datetime.now(ZoneInfo("Asia/Seoul"))
+            _kst_min = _kst.hour * 60 + _kst.minute
+        except Exception:
+            _kst_min = 600  # 10:00 KST 기본값
+        if _kst_min < 9 * 60 + 30:        # 09:00 ~ 09:30
+            _vol_mult = 0.8
+            _rsi_min, _rsi_max = 50.0, 85.0
+        elif _kst_min < 10 * 60:           # 09:30 ~ 10:00
+            _vol_mult = 1.3
+            _rsi_min, _rsi_max = 50.0, 85.0
+        else:                              # 10:00 이후 (장중)
+            _vol_mult = 2.0
+            _rsi_min, _rsi_max = 50.0, 85.0  # 55-80 → 50-85 (완화)
+
         # ── Strategy B: 60일 신고점 돌파 스캔 ────────────────────────────────
         # 백테스트 검증: Sharpe 6.16, WR 84.6%, MDD -4.0%
-        # 조건: 60일 신고점 돌파 + vol ≥ 2배 + RSI 55-80 (3/3 조건 모두 충족)
+        # 조건: 60일 신고점 돌파 + vol 기준(시간대별) + RSI 50-85
         universe = get_korea_universe()
         watchlist_items = [
             (item["ticker"], item["name"])
@@ -174,15 +194,13 @@ class KoreaStockDeskAgent(BaseAgent):
             if len(candles) < 62:  # 60일 신고점 계산 최소 요건
                 continue
 
-            # 백테스트 검증 파라미터
-            # breakout_period=60, vol_surge_mult=2.0, rsi_min=55.0, rsi_max=80.0
-            # 근거: 3년 152종목 백테스트 → 승률 84.6%, Sharpe 6.16, MDD -4.0%
+            # 시간대별 vol 기준 적용 (개장 초반 완화)
             bk = summarize_breakout_signal(
                 candles,
                 breakout_period=60,
-                vol_surge_mult=2.0,
-                rsi_min=55.0,
-                rsi_max=80.0,
+                vol_surge_mult=_vol_mult,
+                rsi_min=_rsi_min,
+                rsi_max=_rsi_max,
             )
             confirmed_count = int(bk.get("confirmed_count", 0) or 0)
             if confirmed_count < 3:
@@ -357,7 +375,8 @@ class KoreaStockDeskAgent(BaseAgent):
                 f"B:{breakout_confirmed_count}c/{breakout_partial_count}p "
                 f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} S10:{len(nday_candidates)} "
                 f"S16:{len(close_panic_candidates)} "
-                f"(universe {len(universe)}종목)"
+                f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
+                f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
             payload={
                 "new_high_breakout_candidates": breakout_candidates[:5],
