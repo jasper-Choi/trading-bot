@@ -34,8 +34,33 @@
 
 **커밋:** `44b4651`(Phase1), `ffd739d`(스코어링 수정) — 2026-05-21 배포 완료
 
-**Phase 2 (다음):** 포지션 회복 가능성 판단 — 손실 시 hard stop 대신 섹터 모멘텀 체크 후 중장투 전환
-**Phase 3 (이후):** 종토방/SNS 감성 분석 심화
+**Phase 2 완료** → 아래 섹션 참조
+**Phase 3 (다음):** 종토방/SNS 감성 분석 심화 + 진입 전 재료 강도 레이팅
+
+---
+
+## 0. Claude - 2026-05-21 (Phase 2: 포지션 회복 가능성 평가 — swing_recovery 모드)
+
+### 작업 내용
+
+**`app/core/state_store.py`** — new_high_breakout 포지션 손실 시 중장투 전환 로직
+
+**회복 전환 조건 (모두 충족 시 stop_hit 대신 swing_recovery):**
+- `peak_pnl > 0.3%` — 진입 후 최소한 한 번 수익이 났어야 함 (재료 없는 돌파 차단)
+- `pnl > -6.0%` — swing 범위(-7%) 내에 있어야 의미 있음
+- `minutes_open < 240` — 4시간 이내 포지션만 (오래된 좀비 제외)
+- `news_intel.impact != "panic"` — 글로벌 패닉 뉴스 없음 (5분 캐시, HTTP 없음)
+- `trump_alert + tariff_alert` 동시 없음
+
+**swing_recovery 모드:**
+- stop: -7% / target: +15% / max: 7200 cycles (~5 거래일)
+- trail: 기존 `_korea_newhi_trail_rules` 그대로 적용 (peak ≥5% 시 trail)
+- `strategy_type = "swing_recovery"`, focus에 "swing_recovery:" prefix 추가
+- 타임아웃 → `swing_recovery_timeout`으로 종료
+
+**결과:** stop_hit 남발 방지, 시장/뉴스 조건이 좋을 때는 회복 기회 제공
+
+**커밋:** `d3bacc8` — 2026-05-21 배포 완료
 
 ---
 
