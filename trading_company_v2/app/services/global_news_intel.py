@@ -158,10 +158,56 @@ def _parse_rss(xml_text: str, max_items: int = 30) -> list[dict]:
     return items
 
 
-def _score_text(text: str) -> tuple[float, float, list[str]]:
-    """텍스트의 공황(-) / 긍정(+) 점수와 매칭 키워드를 반환.
+def _parse_pubdate(pub_str: str) -> datetime | None:
+    """RSS pubDate 문자열 → datetime (UTC). 파싱 실패 시 None."""
+    if not pub_str:
+        return None
+    fmts = [
+        "%a, %d %b %Y %H:%M:%S %z",
+        "%a, %d %b %Y %H:%M:%S GMT",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%SZ",
+    ]
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(pub_str.strip(), fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except ValueError:
+            continue
+    return None
 
-    Returns: (panic_score, positive_score, matched_keywords)
+
+def _recency_weight(pub_dt: datetime | None) -> float:
+    """발행 시각 → 가중치.
+
+    뉴스의 시장 영향력은 발행 직후가 가장 크고 시간이 지날수록 급감.
+    배경 소음(며칠 전 기사)을 브레이킹 뉴스와 분리하는 핵심 필터.
+
+    < 2시간 : 1.0  (Breaking)
+    2~6시간 : 0.4  (Recent)
+    6~24시간: 0.1  (Background — 배경 소음 수준)
+    > 24시간: 0.0  (Stale — 완전 무시)
+    """
+    if pub_dt is None:
+        return 0.15  # 발행일 미상 → 최소 가중치
+    now_utc = datetime.now(timezone.utc)
+    age_hrs = (now_utc - pub_dt).total_seconds() / 3600
+    if age_hrs < 2:
+        return 1.0
+    if age_hrs < 6:
+        return 0.4
+    if age_hrs < 24:
+        return 0.1
+    return 0.0
+
+
+def _score_text(text: str) -> tuple[float, float, list[str]]:
+    """텍스트의 공황(-) / 긍정(+) 원시 점수와 매칭 키워드를 반환.
+
+    Returns: (panic_raw, positive_raw, matched_keywords)
+    — 실제 가중치 적용은 _recency_weight와 함께 호출자가 처리.
     """
     lower = text.lower()
     panic_score = 0.0
@@ -178,43 +224,72 @@ def _score_text(text: str) -> tuple[float, float, list[str]]:
             pos_score += w
             matched.append(f"+{kw}")
 
-    return panic_score, pos_score, matched
+    # 기사당 최대 기여도 제한 — 같은 키워드가 수백 기사에 등장해도 합계 폭발 방지
+    return min(panic_score, 4.0), min(pos_score, 4.0), matched
 
 
-def _headlines_to_impact(headlines: list[str]) -> dict:
-    """헤드라인 목록을 종합 분석하여 market impact dict 반환."""
-    total_panic  = 0.0
-    total_pos    = 0.0
+def _headlines_to_impact(items: list[dict]) -> dict:
+    """뉴스 아이템 목록(title + published)을 시간 가중치 분석하여 market impact dict 반환.
+
+    items: [{"title": str, "published": str, "weight": float(선택)}]
+    — weight는 소스별 중요도 (예: Nitter 포스트 = 소스 가중치 2.0)
+
+    배경 소음(오래된 관세 기사)과 브레이킹 뉴스(오늘 발표)를 구분하는 것이 핵심.
+    """
+    weighted_panic = 0.0
+    weighted_pos   = 0.0
     all_matched: list[str] = []
+
+    # 알림 플래그는 최근 6시간 기사에서만 설정
     trump_alert  = False
     tariff_alert = False
     crypto_boost = False
     korea_risk   = False
+    breaking_titles: list[str] = []  # 최근 2시간 브레이킹
 
-    for h in headlines:
-        p, pos, matched = _score_text(h)
-        total_panic += p
-        total_pos   += pos
+    for item in items:
+        title  = str(item.get("title", "") or "")
+        pub_dt = _parse_pubdate(str(item.get("published", "") or ""))
+        src_w  = float(item.get("weight", 1.0) or 1.0)
+        r_w    = _recency_weight(pub_dt)
+        eff_w  = r_w * src_w
+
+        if eff_w <= 0.0:
+            continue  # 24시간 이상 된 기사 → 완전 무시
+
+        p, pos, matched = _score_text(title)
+        weighted_panic += p * eff_w
+        weighted_pos   += pos * eff_w
         all_matched.extend(matched)
 
-        lower = h.lower()
-        if any(kw in lower for kw in _TRUMP_MARKET_KW):
-            trump_alert = True
-        if any(kw in lower for kw in ("tariff", "관세", "trade war", "무역전쟁")):
-            tariff_alert = True
-        if any(kw in lower for kw in ("bitcoin", "crypto", "비트코인", "암호화폐")):
-            if pos > 0:
-                crypto_boost = True
-        if any(kw in lower for kw in ("kospi", "코스피", "코스닥", "원화", "한국 주식")):
-            if p > 0:
-                korea_risk = True
+        # 알림 플래그 — 6시간 이내만
+        if r_w >= 0.4:
+            lower = title.lower()
+            if any(kw in lower for kw in _TRUMP_MARKET_KW):
+                trump_alert = True
+            if any(kw in lower for kw in ("tariff", "관세", "trade war", "무역전쟁")):
+                tariff_alert = True
+            if any(kw in lower for kw in ("bitcoin", "crypto", "비트코인", "암호화폐")):
+                if pos > 0:
+                    crypto_boost = True
+            if any(kw in lower for kw in ("kospi", "코스피", "코스닥", "원화")):
+                if p > 0:
+                    korea_risk = True
 
-    # 점수 정규화 → macro_score (0.0 ~ 1.0)
-    # 패닉이 높을수록 낮은 점수, 긍정이 높을수록 높은 점수
-    # 기준선: 뉴스 없음 = 0.55 (약간 긍정적 바이어스)
-    net = total_pos - total_panic
-    raw = 0.55 + net * 0.04          # 스케일 조정
-    macro_score = max(0.05, min(0.95, round(raw, 3)))
+        if r_w >= 1.0:
+            breaking_titles.append(title)
+
+    # ── 점수 정규화 ────────────────────────────────────────────────────────
+    # 기사 합계가 아닌 순 영향(net) 기반 — 음수=패닉, 양수=긍정
+    # 기준선 0.55: 뉴스 없음 = 약간 긍정 (이미 VIX 정상 등 사전 체크 완료 가정)
+    net = weighted_pos - weighted_panic
+    # 스케일: ±10 net → ±0.30 점수 변화 (더 민감하게 조정)
+    raw = 0.55 + net * 0.03
+    macro_score = max(0.15, min(0.95, round(raw, 3)))
+
+    # 트럼프 + 관세 동시 감지(6시간 이내) → panic 보정
+    if trump_alert and tariff_alert and macro_score > 0.35:
+        macro_score = min(macro_score, 0.38)
 
     if macro_score <= 0.30:
         impact = "panic"
@@ -224,15 +299,16 @@ def _headlines_to_impact(headlines: list[str]) -> dict:
         impact = "calm"
 
     return {
-        "impact":       impact,
-        "macro_score":  macro_score,
-        "trump_alert":  trump_alert,
-        "tariff_alert": tariff_alert,
-        "crypto_boost": crypto_boost,
-        "korea_risk":   korea_risk,
-        "panic_score":  round(total_panic, 2),
-        "pos_score":    round(total_pos, 2),
-        "keywords":     list(set(all_matched))[:10],
+        "impact":         impact,
+        "macro_score":    macro_score,
+        "trump_alert":    trump_alert,
+        "tariff_alert":   tariff_alert,
+        "crypto_boost":   crypto_boost,
+        "korea_risk":     korea_risk,
+        "panic_score":    round(weighted_panic, 2),
+        "pos_score":      round(weighted_pos, 2),
+        "keywords":       list(set(all_matched))[:10],
+        "breaking_count": len(breaking_titles),
     }
 
 
@@ -240,8 +316,9 @@ def _headlines_to_impact(headlines: list[str]) -> dict:
 # Google News RSS 스캔
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _google_news_rss(query: str, lang: str = "en", gl: str = "US") -> list[str]:
-    """Google News RSS에서 헤드라인 목록 반환."""
+def _google_news_rss(query: str, lang: str = "en", gl: str = "US",
+                     src_weight: float = 1.0) -> list[dict]:
+    """Google News RSS에서 [{title, published, weight}] 목록 반환."""
     from urllib.parse import quote_plus
     encoded = quote_plus(query)
     ceid = f"{gl}:{lang}"
@@ -252,12 +329,15 @@ def _google_news_rss(query: str, lang: str = "en", gl: str = "US") -> list[str]:
     resp = _safe_get(url)
     if not resp:
         return []
-    items = _parse_rss(resp.text, max_items=25)
-    return [item["title"] for item in items]
+    raw_items = _parse_rss(resp.text, max_items=15)  # 쿼리당 15개로 줄임
+    return [
+        {"title": item["title"], "published": item["published"], "weight": src_weight}
+        for item in raw_items
+    ]
 
 
-def _fetch_global_macro_headlines() -> list[str]:
-    """전세계 거시경제 영향 뉴스 수집 (영어 기반)."""
+def _fetch_global_macro_headlines() -> list[dict]:
+    """전세계 거시경제 영향 뉴스 수집 (영어 기반) — 발행 시각 포함."""
     queries = [
         "Trump tariff trade war stock market",
         "Federal Reserve interest rate cut hike",
@@ -265,53 +345,57 @@ def _fetch_global_macro_headlines() -> list[str]:
         "crypto bitcoin ETF regulation",
         "global recession GDP inflation",
     ]
-    headlines: list[str] = []
+    items: list[dict] = []
     for q in queries:
-        headlines += _google_news_rss(q, lang="en", gl="US")
-    return headlines
+        items += _google_news_rss(q, lang="en", gl="US", src_weight=1.0)
+    return items
 
 
-def _fetch_korea_macro_headlines() -> list[str]:
-    """한국 시장 거시 뉴스 (한국어)."""
+def _fetch_korea_macro_headlines() -> list[dict]:
+    """한국 시장 거시 뉴스 (한국어) — 발행 시각 포함."""
     queries = [
         "코스피 코스닥 외국인 기관 주식",
         "원달러 환율 한국 경제",
         "반도체 삼성 하이닉스 수출",
     ]
-    headlines: list[str] = []
+    items: list[dict] = []
     for q in queries:
-        headlines += _google_news_rss(q, lang="ko", gl="KR")
-    return headlines
+        items += _google_news_rss(q, lang="ko", gl="KR", src_weight=1.0)
+    return items
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Nitter RSS (X/Twitter 핵심 계정)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _try_nitter_rss(username: str) -> list[str]:
-    """여러 Nitter 인스턴스를 순서대로 시도하여 최신 포스트 반환."""
+def _try_nitter_rss(username: str) -> list[dict]:
+    """여러 Nitter 인스턴스를 순서대로 시도하여 최신 포스트 [{title, published}] 반환."""
     for base in _NITTER_INSTANCES:
         url = f"{base}/{username}/rss"
         resp = _safe_get(url, timeout=5)
         if resp and resp.status_code == 200 and "<item>" in resp.text:
             items = _parse_rss(resp.text, max_items=10)
-            titles = [item["title"] for item in items]
-            if titles:
-                return titles
+            if items:
+                return items
     return []
 
 
-def _fetch_influencer_posts() -> list[str]:
+def _fetch_influencer_posts() -> list[dict]:
     """핵심 계정 X 포스트 수집 (Nitter 통해 — best effort).
 
     실패 시 빈 리스트 반환 (Google News에서 viral 포스트 커버됨).
+    SNS 포스트는 src_weight=2.0 — 핵심 계정 직접 발언이므로 뉴스 기사보다 높은 가중치.
     """
-    posts: list[str] = []
-    for username, label, _ in _KEY_ACCOUNTS:
+    posts: list[dict] = []
+    for username, label, acct_w in _KEY_ACCOUNTS:
         try:
             items = _try_nitter_rss(username)
-            for text in items[:5]:  # 최신 5개
-                posts.append(f"[{label}] {text}")
+            for item in items[:5]:  # 최신 5개
+                posts.append({
+                    "title":     f"[{label}] {item['title']}",
+                    "published": item.get("published", ""),
+                    "weight":    acct_w,  # 계정별 중요도 가중치
+                })
         except Exception:
             continue
     return posts
@@ -387,38 +471,47 @@ def get_market_news_intel(force_refresh: bool = False) -> dict:
         if not force_refresh and cached and (now - cached.get("_ts", 0)) < _MARKET_CACHE_TTL:
             return {**cached, "from_cache": True}
 
-    headlines: list[str] = []
+    all_items: list[dict] = []
     sources: list[str] = []
 
     # 1. 글로벌 거시 뉴스 (Google News 영어)
     try:
-        global_h = _fetch_global_macro_headlines()
-        headlines.extend(global_h)
-        if global_h:
-            sources.append(f"google_global({len(global_h)})")
+        global_items = _fetch_global_macro_headlines()
+        all_items.extend(global_items)
+        if global_items:
+            sources.append(f"google_global({len(global_items)})")
     except Exception:
         pass
 
     # 2. 한국 시장 뉴스 (Google News 한국어)
     try:
-        korea_h = _fetch_korea_macro_headlines()
-        headlines.extend(korea_h)
-        if korea_h:
-            sources.append(f"google_korea({len(korea_h)})")
+        korea_items = _fetch_korea_macro_headlines()
+        all_items.extend(korea_items)
+        if korea_items:
+            sources.append(f"google_korea({len(korea_items)})")
     except Exception:
         pass
 
-    # 3. X/Twitter 핵심 계정 (Nitter — best effort)
+    # 3. X/Twitter 핵심 계정 (Nitter — best effort, 가중치 2x)
     try:
-        snsl = _fetch_influencer_posts()
-        headlines.extend(snsl)
-        if snsl:
-            sources.append(f"nitter({len(snsl)})")
+        snsl_items = _fetch_influencer_posts()
+        all_items.extend(snsl_items)
+        if snsl_items:
+            sources.append(f"nitter({len(snsl_items)})")
     except Exception:
         pass
 
-    result = _headlines_to_impact(headlines)
-    result["breaking"]   = headlines[:15]  # 최근 헤드라인 15개
+    result = _headlines_to_impact(all_items)
+    # breaking: 최근 2시간 이내 헤드라인만
+    now_utc = datetime.now(timezone.utc)
+    result["breaking"] = [
+        item["title"]
+        for item in all_items
+        if _recency_weight(_parse_pubdate(item.get("published", ""))) >= 1.0
+    ][:15]
+    if not result["breaking"]:
+        # 브레이킹 없으면 최신 순으로 최대 10개
+        result["breaking"] = [item["title"] for item in all_items[:10]]
     result["sources"]    = sources
     result["cached_at"]  = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     result["from_cache"] = False
