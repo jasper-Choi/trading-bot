@@ -1,5 +1,35 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-21 (Korea 전략 백테스트 v3 파라미터 반영)
+
+### 작업 내용
+
+**Korea 전략 전체 백테스트 (`C:\Users\User\Desktop\backtest\`):**
+- v1~v4 백테스트 진행 (115종목 × 3년 2022-2024, 수수료 0.25% 왕복)
+- **S9/S10**: trail 필수! trail 제거시 WR 62%→20% 붕괴 (v4 교훈)
+- **v3 결과 (최우수)**: S9 Sharpe 4.71 / MDD_port -5.2%, S10 Sharpe 4.07 / MDD_port -4.4%
+- PF 구조적 한계: 수수료 0.25% + avg_win ~1.8% → PF ~1.1 (1.5 목표 달성 불가, 하지만 Sharpe/MDD 우수)
+
+**`app/core/state_store.py` 파라미터 수정 (커밋 `fe203a3`):**
+
+| 전략 | 기존 | 변경 | 근거 |
+|---|---|---|---|
+| B (new_high_breakout) | stop -4.0% | **stop -2.5%** | MDD_port -66.2%→-8.2% 극적 개선 |
+| S2 (mongtata_airborne) | stop -2.0% | **stop -5.0%** | WR 21%→41-50% 개선 |
+| S2 | (없음) | **EMA20 동적 청산** | 2 거래일+ 후 현재가≥EMA20 → ema20_recovery |
+| S9 (rsi2_mean_reversion) | stop -1.4% | 유지 | v1 원복이 최적, 변경시 악화 |
+| S10 (nday_pullback) | stop -1.2% | 유지 | 동일 |
+
+**EMA20 동적 청산 구현:**
+- `_build_korea_ema20_lookup(market_snapshot)` 헬퍼 추가
+- market_snapshot 후보 리스트(mongtata/rsi2/nday/breakout/gap)에서 ema20 수집
+- 포지션 회복 중 후보 미발견 시: `pnl_pct >= 2.5%` 프록시 사용
+  (진입 조건 close < ema20*0.975 → 최소 2.5% 디스카운트에서 진입)
+
+**배포:** Oracle VM 134.185.118.144 — git pull + trading-loop.service 재시작 완료
+
+---
+
 ## 0. Claude - 2026-05-21 (Phase 3: 글로벌 뉴스 인텔리전스 고도화 완료)
 
 ### 작업 내용
