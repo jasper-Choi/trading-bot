@@ -237,9 +237,12 @@ class KoreaStockDeskAgent(BaseAgent):
                 2,
             )
 
-            # ── 뉴스 catalyst 체크 ──────────────────────────────────────────
-            # 악재 뉴스 종목: 진입 차단 / 호재 뉴스 종목: 점수 보정
+            # ── 뉴스 catalyst 체크 (Phase 3) ────────────────────────────────
+            # catalyst_score 0~1 연속 점수 + 종토방 감성 통합
             _news_reason = ""
+            _catalyst_rating = 5   # 기본 중립
+            _jongto_hot = False
+            _jongto_sentiment = 0.5
             try:
                 from app.services.global_news_intel import get_stock_catalyst
                 _catalyst = get_stock_catalyst(ticker, name)
@@ -249,6 +252,14 @@ class KoreaStockDeskAgent(BaseAgent):
                 _delta = float(_catalyst.get("score_delta", 0.0) or 0.0)
                 candidate_score = round(candidate_score + _delta, 2)
                 _news_reason = _catalyst.get("reason", "")
+                _catalyst_rating = int(_catalyst.get("catalyst_rating", 5) or 5)
+                _jt = _catalyst.get("jongto", {}) or {}
+                _jongto_hot = bool(_jt.get("hot", False))
+                _jongto_sentiment = float(_jt.get("sentiment_score", 0.5) or 0.5)
+                # 종토방 과열+부정 종목 — 개미 물타기 패턴 → 추가 감점
+                if _jongto_hot and _jongto_sentiment < 0.35:
+                    candidate_score = round(candidate_score - 0.08, 2)
+                    _news_reason = (_news_reason + " [종토방 과열-부정]").strip()
             except Exception:
                 pass  # 뉴스 수집 실패 시 무시 (차단하지 않음)
 
@@ -272,6 +283,9 @@ class KoreaStockDeskAgent(BaseAgent):
                 "supply_demand_score": round(sd_score, 3),
                 "inst_radar": ticker in inst_tickers,
                 "news_reason": _news_reason,
+                "catalyst_rating": _catalyst_rating,   # Phase 3: 0~10
+                "jongto_hot": _jongto_hot,             # Phase 3: 종토방 과열 여부
+                "jongto_sentiment": _jongto_sentiment, # Phase 3: 종토방 감성 0~1
                 # 신고점 돌파 전략 태그 — state_store에서 전용 trail/threshold 적용
                 "focus_tag": "new_high_breakout",
             })
@@ -351,6 +365,39 @@ class KoreaStockDeskAgent(BaseAgent):
                     })
             except Exception:
                 continue
+
+        # ── S2/S9/S10 전략 후보 catalyst 후처리 필터 (Phase 3) ──────────────────
+        # 평균회귀 전략은 악재 뉴스 종목 진입 시 낙폭 연장 리스크 → 상위 후보만 체크
+        def _apply_catalyst_filter(clist: list[dict], max_check: int = 5) -> list[dict]:
+            try:
+                from app.services.global_news_intel import get_stock_catalyst
+                filtered = []
+                for c in clist:
+                    tkr = str(c.get("ticker", "") or "")
+                    nm  = str(c.get("name", "") or "")
+                    if not tkr:
+                        filtered.append(c)
+                        continue
+                    if len(filtered) >= max_check:
+                        break
+                    cat = get_stock_catalyst(tkr, nm)
+                    if cat.get("negative"):
+                        continue  # 악재 종목 제거
+                    # jongto 과열+부정 제거
+                    jt = cat.get("jongto", {}) or {}
+                    if jt.get("hot") and float(jt.get("sentiment_score", 0.5) or 0.5) < 0.35:
+                        continue
+                    c["catalyst_rating"]  = int(cat.get("catalyst_rating", 5) or 5)
+                    c["jongto_hot"]       = bool(jt.get("hot", False))
+                    c["jongto_sentiment"] = float(jt.get("sentiment_score", 0.5) or 0.5)
+                    filtered.append(c)
+                return filtered
+            except Exception:
+                return clist  # 실패 시 원본 반환
+
+        mongtata_candidates = _apply_catalyst_filter(mongtata_candidates)
+        rsi2_candidates     = _apply_catalyst_filter(rsi2_candidates)
+        nday_candidates     = _apply_catalyst_filter(nday_candidates)
 
         breakout_confirmed_count = sum(
             1 for c in breakout_candidates if int(c.get("breakout_count", 0) or 0) >= 4
