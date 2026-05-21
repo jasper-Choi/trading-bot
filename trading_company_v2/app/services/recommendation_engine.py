@@ -291,6 +291,26 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     _k_vix_fear   = _k_vix_regime in ("fear", "panic")
     _k_us_risk_off = _k_us_regime == "risk_off"
 
+    # ── 1c. 글로벌 뉴스 패닉 체크 ──────────────────────────────────────────
+    # 트럼프 관세·연준 서프라이즈·시장 붕괴 뉴스 감지 시 신규 진입 차단
+    _news_blocked = False
+    _news_block_reason = ""
+    try:
+        from app.services.global_news_intel import is_entry_blocked_by_news
+        _news_blocked, _news_block_reason = is_entry_blocked_by_news()
+    except Exception:
+        pass
+    if _news_blocked:
+        return {
+            "action": "capital_preservation",
+            "size": "0.00x",
+            "focus": f"뉴스 패닉 차단: {_news_block_reason}",
+            "symbol": candidate_symbols[0] if candidate_symbols else "",
+            "candidate_symbols": candidate_symbols,
+            "notes": [_news_block_reason, "글로벌 뉴스 패닉 감지 — 신규 진입 일시 중단"],
+            "quality_score": quality_score,
+        }
+
     # ── 2. 스트레스 레짐 차단 ──────────────────────────────────────────────
     if regime == "STRESSED" or _k_vix_regime == "panic":
         _k_block = "Stress regime" if regime == "STRESSED" else f"VIX panic ({_k_vix_val:.1f})"

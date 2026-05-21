@@ -604,8 +604,14 @@ class CompanyOrchestrator:
         crypto_desk_result = next((r for r in results if r.name == "crypto_desk_agent"), AgentResult(name="crypto_desk_agent", reason="missing"))
         stock_desk_result = next((r for r in results if r.name == "korea_stock_desk_agent"), AgentResult(name="korea_stock_desk_agent", reason="missing"))
         us_desk_result = next((r for r in results if r.name == "us_stock_desk_agent"), AgentResult(name="us_stock_desk_agent", reason="missing"))
-        # VIX 레짐 및 활성 신호 — stub 에이전트를 실제 데이터로 보강
+        # VIX 레짐 및 활성 신호 — crypto_desk + macro_news 통합
         _vix_regime_ctx = str(crypto_desk_result.payload.get("vix_regime", "") or "")
+        # 뉴스 패닉 감지 시 vix_regime 강제 panic (트럼프 관세·연준 서프라이즈 등)
+        _macro_vix = str(macro_result.payload.get("vix_regime", "") or "")
+        if _macro_vix == "panic" and _vix_regime_ctx not in ("panic",):
+            _vix_regime_ctx = "panic"
+        elif _macro_vix == "fear" and _vix_regime_ctx not in ("panic", "fear"):
+            _vix_regime_ctx = "fear"
         _any_crypto_signal = any([
             bool(crypto_desk_result.payload.get("eth_4h_breakout", False)),
             bool(crypto_desk_result.payload.get("momentum_breakout_long", False)),
@@ -635,8 +641,18 @@ class CompanyOrchestrator:
             "Linda Raschke: price confirms",
             "Ed Seykota: systems and risk over prediction",
         ]
+        _news_alerts = []
+        if macro_result.payload.get("trump_alert"):
+            _news_alerts.append("🚨trump")
+        if macro_result.payload.get("tariff_alert"):
+            _news_alerts.append("⚠️tariff")
+        if macro_result.payload.get("crypto_boost"):
+            _news_alerts.append("🟢crypto")
+        if macro_result.payload.get("korea_risk"):
+            _news_alerts.append("⚠️korea")
         state.latest_signals = [
-            f"macro_bias={macro_result.payload.get('macro_bias', 'unknown')}",
+            f"macro_bias={macro_result.payload.get('macro_bias', 'unknown')} (score={macro_result.score:.2f})",
+            f"news_alerts={','.join(_news_alerts) if _news_alerts else 'none'}",
             f"trend_bias={trend_result.payload.get('trend_bias', 'unknown')}",
             f"regime={state.regime.lower()}",
             f"session_focus={strategy_allocator_result.payload.get('company_focus', 'unknown')}",

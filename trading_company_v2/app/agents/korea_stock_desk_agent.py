@@ -237,6 +237,21 @@ class KoreaStockDeskAgent(BaseAgent):
                 2,
             )
 
+            # ── 뉴스 catalyst 체크 ──────────────────────────────────────────
+            # 악재 뉴스 종목: 진입 차단 / 호재 뉴스 종목: 점수 보정
+            _news_reason = ""
+            try:
+                from app.services.global_news_intel import get_stock_catalyst
+                _catalyst = get_stock_catalyst(ticker, name)
+                if _catalyst.get("negative"):
+                    # 악재 뉴스 종목 — 진입 스킵
+                    continue
+                _delta = float(_catalyst.get("score_delta", 0.0) or 0.0)
+                candidate_score = round(candidate_score + _delta, 2)
+                _news_reason = _catalyst.get("reason", "")
+            except Exception:
+                pass  # 뉴스 수집 실패 시 무시 (차단하지 않음)
+
             breakout_candidates.append({
                 "ticker": ticker,
                 "name": name,
@@ -256,6 +271,7 @@ class KoreaStockDeskAgent(BaseAgent):
                 "breakout_reasons": bk.get("reasons", []),
                 "supply_demand_score": round(sd_score, 3),
                 "inst_radar": ticker in inst_tickers,
+                "news_reason": _news_reason,
                 # 신고점 돌파 전략 태그 — state_store에서 전용 trail/threshold 적용
                 "focus_tag": "new_high_breakout",
             })
