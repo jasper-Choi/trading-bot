@@ -146,9 +146,10 @@ class KoreaStockDeskAgent(BaseAgent):
         super().__init__("korea_stock_desk_agent")
 
     def run(self) -> AgentResult:
-        # ── 시간대별 vol 기준 동적 계산 ─────────────────────────────────────
-        # 개장 초반은 거래량이 하루 평균의 30~50% 수준 → 2배 기준 충족 불가
-        # 09:00-09:30: 0.8x (개장 직후), 09:30-10:00: 1.3x (반시간), 10:00+: 2.0x (정상)
+        # ── 시간대별 vol 기준 ────────────────────────────────────────────────
+        # 09:00-09:30: 개장 직후 구조적 저거래량 → 1.0x 예외
+        # 09:30+: 정상 장중 → 2.0x 필수 (거래량 없는 돌파 = false breakout)
+        # RSI: 50-85 (원래 55-80에서 소폭 완화)
         try:
             from datetime import datetime
             from zoneinfo import ZoneInfo
@@ -156,15 +157,12 @@ class KoreaStockDeskAgent(BaseAgent):
             _kst_min = _kst.hour * 60 + _kst.minute
         except Exception:
             _kst_min = 600  # 10:00 KST 기본값
-        if _kst_min < 9 * 60 + 30:        # 09:00 ~ 09:30
-            _vol_mult = 0.8
-            _rsi_min, _rsi_max = 50.0, 85.0
-        elif _kst_min < 10 * 60:           # 09:30 ~ 10:00
-            _vol_mult = 1.3
-            _rsi_min, _rsi_max = 50.0, 85.0
-        else:                              # 10:00 이후 (장중)
+        if _kst_min < 9 * 60 + 30:   # 09:00 ~ 09:30 (개장 직후)
+            _vol_mult = 1.0
+        else:                          # 09:30 이후 (정상 장중)
             _vol_mult = 2.0
-            _rsi_min, _rsi_max = 50.0, 85.0  # 55-80 → 50-85 (완화)
+        _rsi_min, _rsi_max = 50.0, 85.0  # 원래 55-80에서 소폭 완화 유지
+        _min_breakout_pct = 0.5  # 60일 신고점 대비 최소 0.5% 돌파 (노이즈 차단)
 
         # ── Strategy B: 60일 신고점 돌파 스캔 ────────────────────────────────
         # 백테스트 검증: Sharpe 6.16, WR 84.6%, MDD -4.0%
@@ -205,6 +203,14 @@ class KoreaStockDeskAgent(BaseAgent):
             confirmed_count = int(bk.get("confirmed_count", 0) or 0)
             if confirmed_count < 3:
                 continue
+
+            # 최소 돌파폭 필터: 신고점 대비 0.5% 미만 돌파는 노이즈 (예: +0.18% 같은 케이스)
+            _period_high = float(bk.get("period_high", 0.0) or 0.0)
+            _last_close = float(candles[-1].get("close") or 0.0)
+            if bk.get("breakout") and _period_high > 0:
+                _breakout_pct = (_last_close - _period_high) / _period_high * 100
+                if _breakout_pct < _min_breakout_pct:
+                    continue  # 노이즈 수준 돌파 제외
 
             signal = summarize_equity_signal(candles)
             signal_score = float(signal.get("score", 0.5) or 0.5)
