@@ -441,6 +441,32 @@ def _build_price_lookup(market_snapshot: dict) -> dict[tuple[str, str], float]:
     return lookup
 
 
+def _build_korea_ema20_lookup(market_snapshot: dict) -> dict[str, float]:
+    """Korea 종목별 EMA20 lookup 빌드 (S2 EMA20 동적 청산용).
+
+    market_snapshot의 Korea 후보 리스트에서 ema20 값을 수집.
+    포지션이 회복 중인 경우 후보에서 사라지므로, 없으면 pnl_pct 프록시 사용.
+    """
+    lookup: dict[str, float] = {}
+    candidate_keys = (
+        "mongtata_airborne_candidates",
+        "rsi2_candidates",
+        "nday_candidates",
+        "new_high_breakout_candidates",
+        "gap_candidates",
+        "close_panic_candidates",
+    )
+    for key in candidate_keys:
+        for item in market_snapshot.get(key, []):
+            if not isinstance(item, dict):
+                continue
+            ticker = str(item.get("ticker", "") or "").strip()
+            ema20_val = float(item.get("ema20", 0.0) or 0.0)
+            if ticker and ema20_val > 0:
+                lookup[ticker] = ema20_val
+    return lookup
+
+
 def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float, float, int]:
     # Returns (target_pct, stop_pct, max_cycles)
     # Backtest-validated (2025-04):
@@ -580,18 +606,15 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # stop -1.2% (tightened from -1.5% to maintain P&L≥1.5 after 0.25% round-trip fee)
         return 10.0, -1.2, 2700
     if desk == "korea" and "mongtata_airborne" in focus:
-        # S2 MONGTATA ⚠️ 재검증 필요 (2026-05-20):
-        # 원본 백테스트는 4H 크립토 + EMA200 없음 + 수수료 없음 → 결과 무효
-        # 올바른 조건(daily+EMA200+수수료)으로 재백테스트: WR 50.9% 통과, MDD -26.1% FAIL
-        # 임시: size 축소 + 손절 -2% (production에서 보수적 운용)
-        return 10.0, -2.0, 2700
+        # 2026-05-21 백테스트 v2/v3 재검증 (115종목 3년):
+        # stop -5.0% + EMA20 동적 청산: WR 41-50%, PF 1.50-1.80, MDD_port -7-9%
+        # (기존 -2.0% 타이트 스탑은 WR 21%로 붕괴 — EMA20 회복 홀딩이 핵심)
+        return 10.0, -5.0, 2700
     if desk == "korea" and "new_high_breakout" in focus:
-        # 2026-05-19: 백테스트 검증 전략 B (신고점 돌파)
-        # 3년 152종목: 승률 84.6%, 연 +89.5%, Sharpe 6.16, MDD -4.0%
-        # target 10% (trail이 실제 청산 담당, target은 상한선)
-        # stop -4.0%: 백테스트 최적값 (stop=-2.5%도 유효하나 보수적으로 -4% 유지)
-        # max 2700 cycles ≈ 20 거래일 (20s/cycle)
-        return 10.0, -4.0, 2700
+        # 2026-05-21 백테스트 v3 재검증 (115종목 3년):
+        # stop -2.5%: MDD_port -8.2% (기존 -4.0%는 MDD_port -66.2% → 손실 폭 극적 축소)
+        # WR 32.9%, PF 1.86, Sharpe 2.73
+        return 10.0, -2.5, 2700
     if desk == "korea" and action == "probe_longs":
         # 2026-05-19: stop -1.5% → -1.0% (avgLoss 축소 → 손익비 개선)
         return 25.0, -1.0, 2700
@@ -1357,6 +1380,7 @@ def _fetch_zombie_prices(pos_pairs: list[tuple[str, str]], price_lookup: dict[tu
 def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) -> None:
     init_db()
     price_lookup = _build_price_lookup(market_snapshot)
+    _korea_ema20_lookup = _build_korea_ema20_lookup(market_snapshot)
     cycle_signal_meta = _build_cycle_signal_meta(paper_orders)
     opened_alerts: list[dict] = []
 
@@ -1543,6 +1567,24 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "stop_hit")
                 elif trail_giveback and position.pnl_pct <= protect_level:
                     _close_position(position, "korea_trail")
+                elif "mongtata_airborne" in pos_focus and "swing_recovery" not in pos_focus:
+                    # ── S2 EMA20 동적 청산 (백테스트 v2/v3 검증: 2거래일+ 후 EMA20 회복시 청산) ──
+                    # 백테스트 결과: dyn_min_days=2, exit when close >= ema20
+                    # WR 42-50%, PF 1.50-1.80, MDD_port -7-9% 개선
+                    _days_open = minutes_open / 390.0  # ~390분 = 1 Korea 거래일
+                    _pos_ema20 = _korea_ema20_lookup.get(position.symbol, 0.0)
+                    # 후보 리스트에 없으면 pnl_pct 2.5% 프록시 사용
+                    # (진입 조건: close < ema20*0.975 → 최소 2.5% 하락 상태에서 진입)
+                    _ema20_recovered = (
+                        (_pos_ema20 > 0 and position.current_price >= _pos_ema20)
+                        or (_pos_ema20 <= 0 and position.pnl_pct >= 2.5)
+                    )
+                    if _days_open >= 2.0 and _ema20_recovered:
+                        _close_position(position, "ema20_recovery")
+                    elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
+                        _close_position(position, "early_failure")
+                    elif position.cycles_open >= max_cycles:
+                        _close_position(position, "stale_exit")
                 elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
                     _close_position(position, "early_failure")
                 elif position.cycles_open >= max_cycles:
