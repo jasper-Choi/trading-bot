@@ -26,6 +26,8 @@ UPBIT_CANDLES_URL = "https://api.upbit.com/v1/candles/minutes/{unit}"
 NAVER_KOSDAQ_URL = "https://m.stock.naver.com/api/stock/exchange/KOSDAQ"
 NAVER_KOSDAQ_FALLBACK_URL = "https://finance.naver.com/sise/sise_market_sum.naver?sosok=1&page={page}"
 NAVER_STOCK_DAY_URL = "https://finance.naver.com/item/sise_day.naver?code={ticker}&page={page}"
+# fchart: 1 요청으로 최대 250일 OHLCV (XML 형식) — page-by-page scraping 대체
+NAVER_FCHART_URL = "https://fchart.stock.naver.com/sise.nhn?symbol={ticker}&timeframe=day&count=250&requestType=0"
 STOOQ_DAILY_URL = "https://stooq.com/q/d/l/?s={ticker}.us&i=d"
 YAHOO_CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
 ALPHAVANTAGE_DAILY_URL = "https://www.alphavantage.co/query"
@@ -548,58 +550,88 @@ def get_naver_daily_prices(ticker: str, count: int = 20) -> list[dict[str, Any]]
 
     candles: list[dict[str, Any]] = []
 
-    # Naver sise_day returns ~10 rows per page.
-    # Compute max pages needed to satisfy count; add 3 buffer pages.
-    _rows_per_page = 10
-    _max_pages = max(4, count // _rows_per_page + 3)
-    for page in range(1, _max_pages + 1):
-        try:
-            resp = requests.get(NAVER_STOCK_DAY_URL.format(ticker=ticker, page=page), headers=NAVER_HEADERS, timeout=REQUEST_TIMEOUT)
-            resp.raise_for_status()
-            html = resp.content.decode("euc-kr", errors="ignore")
-        except RequestException as exc:
-            _log.warning("naver_daily_prices ticker=%s page=%d failed: %s", ticker, page, exc)
-            continue
-
-        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.S | re.I)
-        for row in rows:
-            cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S | re.I)
-            if len(cells) < 7:
+    # ── Primary: fchart API (1 요청 = 250일 OHLCV, XML 형식) ─────────────────
+    # sise_day page-by-page scraping(22페이지×40종목) 대신 1 요청으로 처리
+    try:
+        resp = requests.get(
+            NAVER_FCHART_URL.format(ticker=ticker),
+            headers=NAVER_HEADERS,
+            timeout=REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        xml_text = resp.content.decode("euc-kr", errors="ignore")
+        # <item data="YYYYMMDD|open|high|low|close|volume" />
+        for m in re.finditer(r'<item\s+data="(\d{8})\|([^"]+)"', xml_text):
+            parts = m.group(2).split("|")
+            if len(parts) < 5:
                 continue
-            date_text = _strip_html(cells[0])
-            close_text = _strip_html(cells[1])
-            open_text = _strip_html(cells[3])
-            high_text = _strip_html(cells[4])
-            low_text = _strip_html(cells[5])
-            volume_text = _strip_html(cells[6])
             try:
-                if not date_text or "." not in date_text:
+                candles.append({
+                    "date": m.group(1),
+                    "open":   float(parts[0]),
+                    "high":   float(parts[1]),
+                    "low":    float(parts[2]),
+                    "close":  float(parts[3]),
+                    "volume": float(parts[4]),
+                })
+            except (ValueError, IndexError):
+                continue
+    except RequestException as exc:
+        _log.warning("naver_daily_prices fchart ticker=%s failed: %s", ticker, exc)
+
+    # ── Fallback: sise_day page-by-page (fchart 실패 시) ────────────────────
+    if not candles:
+        _rows_per_page = 10
+        _max_pages = max(4, count // _rows_per_page + 3)
+        for page in range(1, _max_pages + 1):
+            try:
+                resp = requests.get(
+                    NAVER_STOCK_DAY_URL.format(ticker=ticker, page=page),
+                    headers=NAVER_HEADERS,
+                    timeout=REQUEST_TIMEOUT,
+                )
+                resp.raise_for_status()
+                html = resp.content.decode("euc-kr", errors="ignore")
+            except RequestException as exc:
+                _log.warning("naver_daily_prices sise_day ticker=%s page=%d failed: %s", ticker, page, exc)
+                continue
+            rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, flags=re.S | re.I)
+            for row in rows:
+                cells = re.findall(r"<td[^>]*>(.*?)</td>", row, flags=re.S | re.I)
+                if len(cells) < 7:
                     continue
-                candles.append(
-                    {
+                date_text = _strip_html(cells[0])
+                close_text = _strip_html(cells[1])
+                open_text = _strip_html(cells[3])
+                high_text = _strip_html(cells[4])
+                low_text = _strip_html(cells[5])
+                volume_text = _strip_html(cells[6])
+                try:
+                    if not date_text or "." not in date_text:
+                        continue
+                    candles.append({
                         "date": date_text,
                         "open": _to_number(open_text),
                         "high": _to_number(high_text),
                         "low": _to_number(low_text),
                         "close": _to_number(close_text),
                         "volume": _to_number(volume_text),
-                    }
-                )
-            except (TypeError, ValueError):
-                continue
+                    })
+                except (TypeError, ValueError):
+                    continue
+                if len(candles) >= count:
+                    break
             if len(candles) >= count:
                 break
-        if len(candles) >= count:
-            break
+        candles.reverse()  # sise_day는 최신→과거 순이므로 역정렬
 
-    candles.reverse()
-    result = candles[:count]
+    result = candles[-count:] if len(candles) > count else candles
     # 실패 감지: 최소 5개 캔들도 반환되지 않으면 데이터 소스 이상으로 간주
     if len(result) < 5:
         _naver_record_failure(ticker)
     else:
         _naver_record_success()
-        # 캐시 저장 (성공 시만, 최대 count 크기 저장)
+        # 캐시 저장 (성공 시만)
         _naver_daily_cache[ticker] = (time.monotonic(), result)
     return result
 
