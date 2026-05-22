@@ -1,5 +1,36 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-22 (S15 Gap Momentum 전략 추가)
+
+### 작업 내용
+
+**백테스트 탐색 과정 (`C:\Users\User\Desktop\backtest\`):**
+- S11 EMA20 눌림목 계열 (v5b~v5g): 모든 변형 WR 44% 고착 → 신호 자체의 구조적 한계, 스킵
+- S12 Squeeze Breakout (v6): KOSPI 대형주 WR 14-28% → 한국 시장 미적용, 폐기
+- S14c → S15 Gap Momentum (v7, v7b): **최종 통과**
+
+**S15 Gap Momentum 전략 (커밋 `a390d86`):**
+- 백테스트: **WR 48.9%, PF 1.97, Sharpe 3.32, MDD_port -2.7%, n=47** (114종목 3년)
+- 신호 조건: EMA 상승추세(20>60>200 정렬+기울기) + gap>=1% + chg1d>=2% + cs>=0.65 + vol>=1.5x + RSI 40-65 + chg5d<15%
+- "상승했다가 하락 여지" 방지: RSI 상한 65, chg5d<15% 과열 차단
+
+**구현 파일:**
+
+`app/agents/korea_stock_desk_agent.py`:
+- S15 스캔 루프 추가 (EMA 추세 + 갭/모멘텀 조건 체크)
+- gap_momentum_candidates catalyst 필터 적용
+- AgentResult reason에 `S15:{n}` 포함, score에 +0.15 보너스
+- payload에 `gap_momentum_candidates[:5]`, `gap_momentum_count` 추가
+
+`app/core/state_store.py`:
+- `_build_korea_ema20_lookup()`: "gap_momentum_candidates" 키 추가
+- `_position_thresholds()`: focus "gap_momentum" → target 12.0%, stop -3.0%, max 1300 cycles
+- `sync_paper_positions()`: `gm_dyn_exit` 동적 청산 (close < EMA20, 2거래일+ 후)
+
+**배포:** Oracle VM 134.185.118.144 — git pull + trading-loop.service 재시작 완료 (2026-05-22)
+
+---
+
 ## 0. Claude - 2026-05-21 (Korea 전략 백테스트 v3 파라미터 반영)
 
 ### 작업 내용
