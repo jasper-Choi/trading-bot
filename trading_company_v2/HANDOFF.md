@@ -1,5 +1,35 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-22 (대시보드 종목명 표시 + 코인 백테스트 탐색)
+
+### 작업 내용
+
+**코인 전략 활성화 탐색 (`C:\Users\User\Desktop\backtest\`):**
+- `coin_tf_universe_backtest.py`: 1D/4H/1H 타임프레임 × 40코인 비교 → 1D 최적 (4H/1H 모두 저하)
+- `coin_regime_backtest.py`: A(BTC regime 완화), B(40코인), C(top10) 세 방향 검증
+- `coin_s15_top10_backtest.py`: 포트폴리오 MDD (시간순 정렬) 정확 계산
+
+**백테스트 핵심 발견:**
+- BTC/ETH/SOL 3종목 → **O PASS**: WR=57.3%, PF=2.61, Sharpe=3.46, MDD=-24.2%, n=75
+- DOGE 추가 시 MDD -25.2% → 간신히 실패 (경계선)
+- Top10 전체: WR=46.2%, MDD=-70.5% → 2025년 WR 35% 급락이 주원인
+- 유니버스 확장(40코인)은 신호 품질 저하 → 대형 3종목이 최적
+
+**대시보드 종목명 표시 (`app/core/state_store.py`, `app/main.py`):**
+- `_CRYPTO_NAMES` dict: KRW-BTC→비트코인 등 23개 매핑
+- `resolve_symbol_name(symbol, desk)`: 종목코드 → 한글명 변환 헬퍼
+- open/closed positions, symbol_stats에 `name` 필드 주입
+- `_position_display_name` 크립토 → "비트코인(BTC)" 포맷
+- JS `symLabel()`: 이름(코드) 형태로 모든 화면 렌더링
+
+**배포:** Oracle VM 134.185.118.144 — git pull + trading-loop.service 재시작 완료 (커밋 `7a3dd25`)
+
+**미결 사항:**
+- 코인봇 universe를 BTC/ETH/SOL 3종목으로 변경 미적용 (crypto_desk_agent.py 수정 필요)
+- 2025년 WR 저하 원인 추가 분석 필요 (BTC regime 파라미터 튜닝)
+
+---
+
 ## 0. Claude - 2026-05-22 (S15 Gap Momentum 전략 추가)
 
 ### 작업 내용
