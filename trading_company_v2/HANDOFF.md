@@ -1,5 +1,41 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-22 (세계적 트레이더 방법론 적용: Circuit Breaker + ATR SL + Half-Kelly)
+
+### 작업 내용
+
+**세계적 트레이더 방법론 분석 → 구현 (커밋 `7e9bcf9`):**
+
+**1. Circuit Breaker (Paul Tudor Jones / Market Wizards)**
+- `state_store.py`: 데스크별 일일 손실 임계값 (crypto -8%, korea -6%, us -5%)
+- 오늘 3건 이상 청산 후 임계값 돌파 → 해당 데스크 신규 진입 차단
+- 별도 read-only 세션으로 pre-read (write lock 경합 없음)
+
+**2. ATR 기반 동적 SL (Ed Seykota: SL = 2x ATR)**
+- `state_store.py`: `_compute_atr_pct()`, `_parse_atr_from_focus()`, `_position_thresholds_atr()` 추가
+- 규칙: ATR-SL이 고정 SL보다 타이트할 때만 적용 (절대 넓히지 않음), 최소 -0.50%
+- `crypto_desk_agent.py`: S15/S9/S10/S17 각 전략에서 ATR 계산, `atr_pct`로 payload 전달
+- `korea_stock_desk_agent.py`: gap_momentum 후보에 ATR 추가
+- `execution_agent.py`: gap_momentum_candidates 풀에 추가, `atr_pct` candidate → plan 전달
+- 포지션 focus에 `|atr=X.XXX` 태그 삽입 → 청산 로직에서 파싱
+
+**3. Half-Kelly 포지션 사이징 (Larry Connors / Tom Basso)**
+- `state_store.py`: `_half_kelly_multiplier()` — f* = WR - (1-WR)/b, half-Kelly 적용
+- 방어적: [0.5x, 1.0x] — 성과 부진 시 축소, 절대 1.0x 초과 안 함
+- 최근 20건 이상의 청산 기록 있을 때만 활성화
+
+**백테스트 결과 (B트랙 — 미배포):**
+- RS filter (63일 RS 상위3 필터): WR ~41% 그대로, MDD -59% → FAIL
+- VCP (Minervini, KOSPI 100종목): WR 31%, MDD -79% → FAIL (KOSPI에서 타이트 SL 문제)
+
+**배포:** Oracle VM 134.185.118.144 — git pull + trading-loop.service 재시작 완료
+
+**미결 사항:**
+- VCP: KOSPI에서 SL 넓히기 (pivot×0.97 → pivot×0.94) 재시도 가능
+- Kelly 상향 (1.0x → 1.25x) — 100건 이상 누적 후 검토
+
+---
+
 ## 0. Claude - 2026-05-22 (대시보드 종목명 표시 + 코인 백테스트 탐색)
 
 ### 작업 내용
