@@ -69,6 +69,10 @@ class ExecutionAgent(BaseAgent):
         ns = desk if desk in {"crypto", "korea", "us"} else "crypto"
         # Korea-specific patterns
         if ns == "korea":
+            if "inst_foreign_breakout" in text:
+                return "korea.inst_foreign_breakout"
+            if "inst_foreign_gap" in text:
+                return "korea.inst_foreign_gap"
             if "new_high_breakout" in text:
                 return "korea.new_high_breakout"
             if "mongtata_airborne" in text:
@@ -321,6 +325,7 @@ class ExecutionAgent(BaseAgent):
                 + (self.market_snapshot.get("gap_fill_candidates", []) or [])
                 + (self.market_snapshot.get("pullback_ma_candidates", []) or [])
                 + (self.market_snapshot.get("gap_momentum_candidates", []) or [])
+                + (self.market_snapshot.get("inst_foreign_candidates", []) or [])
             )
             key = "ticker"
         for item in pools:
@@ -358,6 +363,22 @@ class ExecutionAgent(BaseAgent):
             focus = f"pullback_ma: {name} ({symbol}) MA pullback continuation"
             entry_profile = "pullback_ma"
             strategy_id = "korea.pullback_ma"
+        elif "inst_foreign_breakout" in base_focus:
+            _fnet = float(snapshot.get("foreign_net_bn", 0.0) or 0.0)
+            focus = (
+                f"inst_foreign_breakout: {name} ({symbol}) "
+                f"기관+외국인 신고점돌파 foreign_net={_fnet:+.1f}억"
+            )
+            entry_profile = "inst_foreign_breakout"
+            strategy_id = "korea.inst_foreign_breakout"
+        elif "inst_foreign_gap" in base_focus:
+            _fnet = float(snapshot.get("foreign_net_bn", 0.0) or 0.0)
+            focus = (
+                f"inst_foreign_gap: {name} ({symbol}) "
+                f"기관+외국인 갭모멘텀 foreign_net={_fnet:+.1f}억"
+            )
+            entry_profile = "inst_foreign_gap"
+            strategy_id = "korea.inst_foreign_gap"
         elif "gap_momentum" in base_focus:
             focus = f"gap_momentum: {name} ({symbol}) S15 gap momentum breakout"
             entry_profile = "gap_momentum"

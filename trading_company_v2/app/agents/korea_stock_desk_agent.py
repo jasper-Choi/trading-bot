@@ -4,7 +4,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 from app.agents.base import BaseAgent
 from app.core.models import AgentResult
-from app.services.korea_supply_demand import get_institutional_tickers, get_supply_demand_score
+from app.services.korea_supply_demand import (
+    get_institutional_tickers,
+    get_investor_flow_today,
+    get_smart_money_confirmed,
+    get_supply_demand_score,
+)
 from app.services.korea_universe import get_korea_universe
 from app.services.market_gateway import get_naver_daily_prices, get_us_market_context
 from app.services.signal_engine import summarize_breakout_signal, summarize_equity_signal
@@ -503,6 +508,44 @@ class KoreaStockDeskAgent(BaseAgent):
         nday_candidates        = _apply_catalyst_filter(nday_candidates)
         gap_momentum_candidates = _apply_catalyst_filter(gap_momentum_candidates)
 
+        # ── Strategy S18/S19: 기관+외국인 스마트머니 확인 전략 ────────────────────
+        # S18 (inst_foreign_breakout): 신고점 돌파 후보 중 기관 레이더 포함 + 외국인 순매수
+        # S19 (inst_foreign_gap):      갭 모멘텀 후보 중 기관 레이더 포함 + 외국인 순매수
+        # 두 조건 동시 충족 시 스마트머니 확인 신호 — 기존 전략 대비 우선순위 상향
+        inst_foreign_candidates: list[dict] = []
+        try:
+            # 상위 후보만 확인 (Naver API 레이트 리밋 대응)
+            _SMART_MONEY_CHECK_LIMIT = 8
+            _seen_tickers: set[str] = set()
+            for c in breakout_candidates[:_SMART_MONEY_CHECK_LIMIT]:
+                tkr = str(c.get("ticker", "") or "").strip()
+                if not tkr or tkr in _seen_tickers:
+                    continue
+                if get_smart_money_confirmed(tkr, inst_tickers, min_foreign_net_bn=0.0):
+                    flow = get_investor_flow_today(tkr)
+                    inst_foreign_candidates.append({
+                        **c,
+                        "focus_tag":      "inst_foreign_breakout",
+                        "foreign_net_bn": round(float(flow.get("foreign_net", 0.0)), 2),
+                        "foreign_streak": int(flow.get("foreign_streak", 0)),
+                    })
+                    _seen_tickers.add(tkr)
+            for c in gap_momentum_candidates[:_SMART_MONEY_CHECK_LIMIT]:
+                tkr = str(c.get("ticker", "") or "").strip()
+                if not tkr or tkr in _seen_tickers:
+                    continue
+                if get_smart_money_confirmed(tkr, inst_tickers, min_foreign_net_bn=0.0):
+                    flow = get_investor_flow_today(tkr)
+                    inst_foreign_candidates.append({
+                        **c,
+                        "focus_tag":      "inst_foreign_gap",
+                        "foreign_net_bn": round(float(flow.get("foreign_net", 0.0)), 2),
+                        "foreign_streak": int(flow.get("foreign_streak", 0)),
+                    })
+                    _seen_tickers.add(tkr)
+        except Exception:
+            pass
+
         breakout_confirmed_count = sum(
             1 for c in breakout_candidates if int(c.get("breakout_count", 0) or 0) >= 4
         )
@@ -519,6 +562,8 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.25
         if gap_momentum_candidates:
             score += 0.15  # S15 갭 모멘텀 신호 존재 시 추가 점수
+        if inst_foreign_candidates:
+            score += 0.10  # S18/S19 기관+외국인 동시 확인 시 추가 점수
         if breakout_candidates:
             top_sd = float(breakout_candidates[0].get("supply_demand_score", 0.0) or 0.0)
             if top_sd >= 0.7:
@@ -550,6 +595,7 @@ class KoreaStockDeskAgent(BaseAgent):
                 f"B:{breakout_confirmed_count}c/{breakout_partial_count}p "
                 f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} S10:{len(nday_candidates)} "
                 f"S15:{len(gap_momentum_candidates)} S16:{len(close_panic_candidates)} "
+                f"S18/19:{len(inst_foreign_candidates)} "
                 f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
                 f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
@@ -575,6 +621,10 @@ class KoreaStockDeskAgent(BaseAgent):
                 # Strategy S16 Close Panic Reversal (포워드 테스트 — 신호 수집만)
                 "close_panic_candidates": close_panic_candidates[:3],
                 "close_panic_count": len(close_panic_candidates),
+                # Strategy S18 inst_foreign_breakout / S19 inst_foreign_gap
+                # 기관 레이더 + 외국인 순매수 동시 확인 후보 (우선순위 상위)
+                "inst_foreign_candidates": inst_foreign_candidates[:5],
+                "inst_foreign_count": len(inst_foreign_candidates),
                 # ── 미국 시장 컨텍스트 ──
                 "us_regime":      us_ctx.get("us_regime", "unknown"),
                 "vix":            us_ctx.get("vix", 0.0),

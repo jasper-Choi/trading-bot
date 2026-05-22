@@ -562,6 +562,7 @@ def _build_korea_ema20_lookup(market_snapshot: dict) -> dict[str, float]:
         "gap_candidates",
         "close_panic_candidates",
         "gap_momentum_candidates",
+        "inst_foreign_candidates",
     )
     for key in candidate_keys:
         for item in market_snapshot.get(key, []):
@@ -717,6 +718,16 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # stop -5.0% + EMA20 동적 청산: WR 41-50%, PF 1.50-1.80, MDD_port -7-9%
         # (기존 -2.0% 타이트 스탑은 WR 21%로 붕괴 — EMA20 회복 홀딩이 핵심)
         return 10.0, -5.0, 2700
+    if desk == "korea" and "inst_foreign_breakout" in focus:
+        # S18: 신고점 돌파 + 기관 레이더 + 외국인 순매수 동시 확인
+        # S_B 백테스트 (WR 84.6%) 위에 스마트머니 필터 추가 → 고확신 신호
+        # TP +7%, SL -3%, trail after +4.5% (기존 new_high_breakout 보다 TP 확장)
+        return 7.0, -3.0, 2700
+    if desk == "korea" and "inst_foreign_gap" in focus:
+        # S19: 갭 모멘텀 + 기관 레이더 + 외국인 순매수 동시 확인
+        # S15 백테스트 (WR 48.9%) 위에 스마트머니 필터 추가 → 이중 확인
+        # TP +6%, SL -2.5% (S15 기본보다 TP 축소, SL 타이트)
+        return 6.0, -2.5, 1300
     if desk == "korea" and "gap_momentum" in focus:
         # S15 Gap Momentum 백테스트 검증 (2026-05-22, 114종목 3년):
         # 갭업 1%+ + 당일 2%+ + 강한종가(0.65) + 거래량 1.5x + EMA 상승추세
