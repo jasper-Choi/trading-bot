@@ -214,6 +214,56 @@ def _size_to_notional(size: str) -> float:
         return 0.0
 
 
+# ── 종목명 룩업 (코드 → 한글명) ─────────────────────────────────────────────
+_CRYPTO_NAMES: dict[str, str] = {
+    "KRW-BTC": "비트코인", "KRW-ETH": "이더리움", "KRW-SOL": "솔라나",
+    "KRW-XRP": "리플", "KRW-DOGE": "도지코인", "KRW-ADA": "에이다",
+    "KRW-AVAX": "아발란체", "KRW-DOT": "폴카닷", "KRW-LINK": "체인링크",
+    "KRW-SUI": "수이", "KRW-BNB": "바이낸스코인", "KRW-MATIC": "폴리곤",
+    "KRW-NEAR": "니어프로토콜", "KRW-WLD": "월드코인", "KRW-PENGU": "펭구",
+    "KRW-BERA": "베라체인", "KRW-VIRTUAL": "버추얼", "KRW-ONDO": "온도",
+    "KRW-XLM": "스텔라루멘", "KRW-CHZ": "칠리즈", "KRW-USDT": "테더",
+    "KRW-JTO": "지토", "KRW-SUI": "수이", "KRW-IP": "스토리",
+}
+_korea_name_cache: dict[str, str] = {}
+_korea_name_cache_ts: float = 0.0
+_KOREA_NAME_TTL = 3600.0  # 1h
+
+import threading as _threading
+_korea_name_lock = _threading.Lock()
+
+
+def _get_korea_name_cache() -> dict[str, str]:
+    """ticker -> 한글 종목명 (korea_universe 기반, 1h TTL)."""
+    import time as _time
+    global _korea_name_cache, _korea_name_cache_ts
+    with _korea_name_lock:
+        if _time.time() - _korea_name_cache_ts < _KOREA_NAME_TTL and _korea_name_cache:
+            return _korea_name_cache
+        try:
+            from app.services.korea_universe import get_korea_universe
+            _korea_name_cache = {item["ticker"]: item["name"] for item in get_korea_universe()}
+            _korea_name_cache_ts = _time.time()
+        except Exception:
+            pass
+        return _korea_name_cache
+
+
+def resolve_symbol_name(symbol: str, desk: str = "") -> str:
+    """종목코드 → 표시명. 코인은 한글 코인명, 주식은 한글 종목명."""
+    if not symbol:
+        return symbol
+    sym = str(symbol).strip()
+    # 코인
+    if sym.startswith("KRW-"):
+        return _CRYPTO_NAMES.get(sym, sym.replace("KRW-", ""))
+    # 한국 주식 (6자리 숫자 코드)
+    if sym.isdigit() and len(sym) == 6:
+        cache = _get_korea_name_cache()
+        return cache.get(sym, sym)
+    return sym
+
+
 def _paper_slippage_bps(symbol: str, side: str, salt: str = "") -> float:
     min_bps = float(settings.paper_slippage_min_bps)
     max_bps = max(float(settings.paper_slippage_max_bps), min_bps)
@@ -1083,6 +1133,7 @@ def _symbol_performance_stats(positions: list[PaperPositionRecord]) -> list[dict
             {
                 "desk": row.desk,
                 "symbol": row.symbol,
+                "name": resolve_symbol_name(row.symbol, row.desk),
                 "count": 0,
                 "wins": 0,
                 "losses": 0,
@@ -2591,6 +2642,7 @@ def load_paper_open_positions(limit: int = 20) -> list[dict]:
                     "id": row.id,
                     "desk": row.desk,
                     "symbol": row.symbol,
+                    "name": resolve_symbol_name(row.symbol, row.desk),
                     "entry_price": row.entry_price,
                     "current_price": row.current_price,
                     "notional_pct": _size_to_notional(row.size),
@@ -2627,6 +2679,7 @@ def load_paper_closed_positions(limit: int = 50) -> list[dict]:
                     "id": row.id,
                     "desk": row.desk,
                     "symbol": row.symbol,
+                    "name": resolve_symbol_name(row.symbol, row.desk),
                     "entry_price": row.entry_price,
                     "exit_price": row.exit_price,
                     "notional_pct": _size_to_notional(row.size),
@@ -3459,7 +3512,9 @@ def load_performance_analytics(limit: int = 500) -> dict:
             return "unknown"
         focus = str(row.focus or "")
         if row.desk == "crypto":
-            return symbol.replace("KRW-", "")
+            name = _CRYPTO_NAMES.get(symbol)
+            code = symbol.replace("KRW-", "")
+            return f"{name}({code})" if name else code
         if row.desk in {"korea", "us"}:
             snapshot_name = snapshot_name_lookup.get((row.desk, symbol), "")
             if snapshot_name:

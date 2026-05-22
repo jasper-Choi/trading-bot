@@ -435,7 +435,7 @@ def _build_performance_payload(state: CompanyState, closed_positions: list[dict]
         cumulative = round(cumulative + delta, 2)
         trade_curve.append(
             {
-                "label": item.get("symbol") or f"T{index}",
+                "label": item.get("name") or item.get("symbol") or f"T{index}",
                 "equity": cumulative,
                 "delta": delta,
             }
@@ -2747,7 +2747,9 @@ function renderSymbolSubTable(targetId,rows){
   var body=sorted.map(function(x){
     var barW=Math.min(60,Math.max(4,Math.abs(n(x.total_pnl_pct))/maxAbs*60));
     var barCol=n(x.total_pnl_pct)>=0?'#39d98a':'#ff6b6b';
-    var label=String(x.label||'').replace('KRW-','');
+    var code=String(x.label||'').replace('KRW-','');
+    var nm=x.name||'';
+    var label=(nm&&nm!==code&&nm!==(x.label||''))?nm+'<small style="color:#888;font-weight:normal;margin-left:3px">('+code+')</small>':code;
     return '<tr>'
       +'<td><b>'+label+'</b></td>'
       +'<td>'+n(x.trades)+'건</td>'
@@ -2778,7 +2780,9 @@ function _drawSymbolTable(){
   var rows=sorted.map(function(x){
     var barW=Math.min(60,Math.max(4,Math.abs(n(x.total_pnl_pct))/maxAbs*60));
     var barCol=n(x.total_pnl_pct)>=0?'#39d98a':'#ff6b6b';
-    var coin=(x.label||'').replace('KRW-','');
+    var code2=(x.label||'').replace('KRW-','');
+    var nm2=x.name||'';
+    var coin=(nm2&&nm2!==code2&&nm2!==(x.label||''))?nm2+'<small style="color:#888;font-weight:normal;margin-left:3px">('+code2+')</small>':code2;
     return '<tr>'
       +'<td><b>'+coin+'</b></td>'
       +'<td>'+n(x.trades)+'건</td>'
@@ -2865,13 +2869,21 @@ function renderReasons(id,rows){
   }).join('')||'<div class="empty">집계 데이터 없음</div>';
 }
 
+/* ── 종목 표시명 헬퍼 (name 있으면 "이름(코드)", 없으면 코드만) ── */
+function symLabel(x){
+  var code=(x.symbol||'').replace('KRW-','');
+  var nm=x.name||'';
+  if(nm && nm!==code && nm!==(x.symbol||'')) return nm+'<small style="color:#888;font-weight:normal;margin-left:3px">('+code+')</small>';
+  return code;
+}
+
 /* ── 포지션 테이블 ── */
 function renderTables(a){
   document.getElementById('open-table').innerHTML=table(['종목','진입','보유','PnL','Peak'],(a.open_positions||[]).map(function(x){
-    return '<tr><td><b>'+(x.symbol||'').replace('KRW-','')+'</b></td><td>'+x.action+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td>'+pct(x.peak_pnl_pct)+'</td></tr>';
+    return '<tr><td><b>'+symLabel(x)+'</b></td><td>'+x.action+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td>'+pct(x.peak_pnl_pct)+'</td></tr>';
   }));
   document.getElementById('closed-table').innerHTML=table(['종목','청산','보유','PnL','금액','시간'],(a.recent_closed||[]).slice(0,20).map(function(x){
-    return '<tr><td><b>'+(x.symbol||'').replace('KRW-','')+'</b></td><td>'+x.closed_reason+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td class="'+cls(x.pnl_krw)+'">'+krw(x.pnl_krw)+'</td><td>'+kst(x.closed_at)+'</td></tr>';
+    return '<tr><td><b>'+symLabel(x)+'</b></td><td>'+x.closed_reason+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td class="'+cls(x.pnl_krw)+'">'+krw(x.pnl_krw)+'</td><td>'+kst(x.closed_at)+'</td></tr>';
   }));
 }
 
