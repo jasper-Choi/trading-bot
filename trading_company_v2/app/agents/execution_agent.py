@@ -320,6 +320,7 @@ class ExecutionAgent(BaseAgent):
                 + (self.market_snapshot.get("close_drive_candidates", []) or [])
                 + (self.market_snapshot.get("gap_fill_candidates", []) or [])
                 + (self.market_snapshot.get("pullback_ma_candidates", []) or [])
+                + (self.market_snapshot.get("gap_momentum_candidates", []) or [])
             )
             key = "ticker"
         for item in pools:
@@ -357,6 +358,10 @@ class ExecutionAgent(BaseAgent):
             focus = f"pullback_ma: {name} ({symbol}) MA pullback continuation"
             entry_profile = "pullback_ma"
             strategy_id = "korea.pullback_ma"
+        elif "gap_momentum" in base_focus:
+            focus = f"gap_momentum: {name} ({symbol}) S15 gap momentum breakout"
+            entry_profile = "gap_momentum"
+            strategy_id = "korea.gap_momentum"
         elif "breakout" in base_focus:
             _focus_tag = str(snapshot.get("focus_tag", "") or "").lower()
             if _focus_tag == "new_high_breakout":
@@ -389,6 +394,10 @@ class ExecutionAgent(BaseAgent):
         mapped["signal_score"] = signal
         mapped["candidate_score"] = candidate_score
         mapped["candidate_symbols"] = []
+        # ATR from candidate snapshot — used for dynamic SL tightening at exit
+        _snap_atr = float(snapshot.get("atr_pct", 0.0) or 0.0)
+        if _snap_atr > 0:
+            mapped["atr_pct"] = _snap_atr
         notes = list(mapped.get("notes", []) or [])
         notes.append(
             f"korea candidate-specific: {name} {symbol} signal={signal:.2f} "

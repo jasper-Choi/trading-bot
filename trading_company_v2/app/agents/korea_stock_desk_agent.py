@@ -443,6 +443,14 @@ class KoreaStockDeskAgent(BaseAgent):
                 if chg5d >= 15.0:
                     continue
 
+                # ATR(14) as % of close — used for dynamic SL tightening at exit
+                _atr_trs = [
+                    max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+                    for i in range(max(1, len(closes)-15), len(closes))
+                    if highs[i] > 0 and lows[i] > 0 and closes[i-1] > 0
+                ]
+                _atr_val_gm = round(sum(_atr_trs) / len(_atr_trs) / cur_close * 100, 3) if _atr_trs and cur_close > 0 else 0.0
+
                 gap_momentum_candidates.append({
                     "ticker":         ticker,
                     "name":           name,
@@ -452,6 +460,7 @@ class KoreaStockDeskAgent(BaseAgent):
                     "close_strength": round(close_strength, 3),
                     "vol_ratio":      round(volumes[-1] / vol20_avg, 2),
                     "rsi14":          rsi14_val,
+                    "atr_pct":        _atr_val_gm,
                     "chg5d":          round(chg5d, 2),
                     "ema20":          round(ema20_val, 0),
                     "ema200":         round(ema200_val, 0),

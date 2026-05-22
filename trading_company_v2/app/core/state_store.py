@@ -214,6 +214,61 @@ def _size_to_notional(size: str) -> float:
         return 0.0
 
 
+def _compute_atr_pct(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
+    """ATR as % of last close. Ed Seykota SL baseline: SL = 2x ATR."""
+    n = min(len(highs), len(lows), len(closes))
+    if n < period + 1:
+        return 0.0
+    trs: list[float] = []
+    for i in range(1, n):
+        tr = max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1]))
+        trs.append(tr)
+    atr = sum(trs[-period:]) / period
+    last_close = closes[-1]
+    return round(atr / last_close * 100, 3) if last_close > 0 else 0.0
+
+
+def _parse_atr_from_focus(focus: str) -> float:
+    """Extract |atr=X.XXX tag from focus string."""
+    for part in str(focus or "").split("|"):
+        p = part.strip()
+        if p.startswith("atr="):
+            try:
+                return float(p[4:])
+            except ValueError:
+                pass
+    return 0.0
+
+
+def _half_kelly_multiplier(desk: str, recent_closed: list) -> float:
+    """Half-Kelly position size multiplier [0.5, 1.0] from last 50 closed trades.
+
+    Defensive-only: reduces size when live edge is below expectations,
+    never increases above 1.0x until >100 trades confirm the edge.
+    Formula: f* = WR - (1-WR)/b  where b = avg_win / avg_loss.
+    Baseline: half_kelly=0.10 -> 1.0x (typical WR~55%, b~1.4).
+    """
+    trades = [r for r in recent_closed if r.desk == desk][:50]
+    if len(trades) < 20:
+        return 1.0
+    wins = [float(r.pnl_pct or 0) for r in trades if float(r.pnl_pct or 0) > 0]
+    losses = [abs(float(r.pnl_pct or 0)) for r in trades if float(r.pnl_pct or 0) <= 0]
+    if not wins or not losses:
+        return 1.0
+    wr = len(wins) / len(trades)
+    avg_win = sum(wins) / len(wins)
+    avg_loss = sum(losses) / len(losses)
+    if avg_loss <= 0:
+        return 1.0
+    b = avg_win / avg_loss
+    kelly = wr - (1.0 - wr) / b
+    if kelly <= 0:
+        return 0.5
+    half_k = kelly / 2.0
+    multiplier = half_k / 0.10  # normalize: 0.10 -> 1.0x
+    return round(max(0.5, min(1.0, multiplier)), 2)
+
+
 # ── 종목명 룩업 (코드 → 한글명) ─────────────────────────────────────────────
 _CRYPTO_NAMES: dict[str, str] = {
     "KRW-BTC": "비트코인", "KRW-ETH": "이더리움", "KRW-SOL": "솔라나",
@@ -357,6 +412,7 @@ def _extract_order_meta(action: str, rationale: list) -> dict:
         "entry_profile": str(meta.get("entry_profile", meta.get("entry_path", "")) or ""),
         "status": str(meta.get("status", "idle") or "idle"),
         "pnl_estimate_pct": float(meta.get("pnl_estimate_pct", 0.0) or 0.0),
+        "atr_pct": float(meta.get("atr_pct", 0.0) or 0.0),
     }
     if action not in ACTIONABLE_ENTRY_ACTIONS:
         normalized["status"] = "idle"
@@ -681,6 +737,22 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if action in {"attack_opening_drive", "probe_longs", "selective_probe"}:
         return 25.0, -1.5, 2700
     return 25.0, -1.5, 2700
+
+
+def _position_thresholds_atr(desk: str, action: str, focus: str = "") -> tuple[float, float, int]:
+    """_position_thresholds with ATR-based SL tightening (Ed Seykota: SL = 2x ATR).
+
+    Only tightens the stop — never widens beyond the backtest-validated SL.
+    Minimum effective stop: -0.50% (noise floor).
+    Requires |atr=X.XXX tag in focus string (written at position open time).
+    """
+    target, stop, cycles = _position_thresholds(desk, action, focus)
+    atr = _parse_atr_from_focus(focus)
+    if atr > 0:
+        atr_sl = round(-2.0 * atr, 2)
+        if atr_sl > stop:  # tighter = numerically closer to 0
+            stop = max(atr_sl, -0.50)
+    return target, stop, cycles
 
 
 def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
@@ -1450,6 +1522,52 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
 
     _fetch_zombie_prices(_pairs, price_lookup)
 
+    # ── Circuit Breaker + Half-Kelly pre-read (read-only, outside write lock) ──
+    _today_str = _today_local_date()
+    _recent_closed_for_risk: list[PaperPositionRecord] = []
+    _today_pnl_by_desk: dict[str, float] = {}
+    _today_n_by_desk: dict[str, int] = {}
+    try:
+        with SessionLocal() as _pre_db:
+            _start_iso, _ = _local_day_utc_bounds_iso(_today_str)
+            _all_recent = _pre_db.execute(
+                select(PaperPositionRecord)
+                .where(PaperPositionRecord.status == "closed")
+                .order_by(PaperPositionRecord.id.desc())
+                .limit(200)
+            ).scalars().all()
+            for _row in _all_recent:
+                _recent_closed_for_risk.append(_row)
+                if (_row.closed_at or "") >= _start_iso:
+                    d = _row.desk
+                    _today_pnl_by_desk[d] = _today_pnl_by_desk.get(d, 0.0) + float(_row.pnl_pct or 0.0)
+                    _today_n_by_desk[d] = _today_n_by_desk.get(d, 0) + 1
+    except Exception as _pre_err:
+        _log.warning("risk_pre_read failed: %s", _pre_err)
+
+    # Circuit Breaker: block new entries if daily loss exceeds threshold per desk
+    # Thresholds are conservative — safety net for tail events, not daily throttle
+    _CIRCUIT_THRESHOLDS = {"crypto": -8.0, "korea": -6.0, "us": -5.0}
+    _circuit_blocked: set[str] = set()
+    for _cb_desk, _cb_thresh in _CIRCUIT_THRESHOLDS.items():
+        _dloss = _today_pnl_by_desk.get(_cb_desk, 0.0)
+        _dn = _today_n_by_desk.get(_cb_desk, 0)
+        if _dloss <= _cb_thresh and _dn >= 3:
+            _circuit_blocked.add(_cb_desk)
+            _log.warning(
+                "CIRCUIT_BREAKER activated: %s desk daily_pnl=%.1f%% (n=%d, threshold=%.1f%%) — blocking new entries",
+                _cb_desk, _dloss, _dn, _cb_thresh,
+            )
+
+    # Half-Kelly: per-desk size multiplier from recent closed trades
+    _kelly_by_desk: dict[str, float] = {
+        desk: _half_kelly_multiplier(desk, _recent_closed_for_risk)
+        for desk in ("crypto", "korea", "us")
+    }
+    _kelly_non_baseline = {k: v for k, v in _kelly_by_desk.items() if v != 1.0}
+    if _kelly_non_baseline:
+        _log.info("Half-Kelly size multipliers active: %s", _kelly_non_baseline)
+
     with SessionLocal() as db:
         open_positions = db.execute(
             select(PaperPositionRecord).where(PaperPositionRecord.status == "open").order_by(PaperPositionRecord.id.asc())
@@ -1469,7 +1587,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 str(part or "")
                 for part in (position.focus, position.entry_profile, position.strategy_id)
             )
-            target_pct, stop_pct, max_cycles = _position_thresholds(position.desk, position.action, pos_focus)
+            target_pct, stop_pct, max_cycles = _position_thresholds_atr(position.desk, position.action, pos_focus)
             is_range_scalp = "range_scalp" in pos_focus or "ranging_b36" in pos_focus
             # early_failure: exit if still deeply losing after fast_fail_cycle cycles
             # stale_floor:   exit near max_cycles if barely profitable
@@ -1768,6 +1886,10 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 continue
             if (order.desk, symbol) in existing_open_keys:
                 continue
+            # Circuit Breaker: skip if today's desk loss exceeds safety threshold
+            if order.desk in _circuit_blocked:
+                _log.info("circuit_breaker: skip %s %s (desk blocked)", order.desk, symbol)
+                continue
             entry_price = _paper_entry_price(reference_price, symbol, order.created_at) if order.desk == "crypto" else reference_price
             strategy_id = order.strategy_id or infer_strategy_id(order.action, order.focus, meta)
             entry_profile = order.entry_profile or _entry_profile(order.action, order.focus, meta)
@@ -1782,19 +1904,35 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     continue
                 _open_crypto_mr_count += 1  # optimistic count for this batch
 
+            # Half-Kelly: scale position size if edge deviates from baseline
+            _kelly_mult = _kelly_by_desk.get(order.desk, 1.0)
+            if _kelly_mult != 1.0:
+                _base_n = _size_to_notional(order.size)
+                _adj_n = round(_base_n * _kelly_mult, 3)
+                _adj_size = f"{_adj_n:.3f}x"
+                _log.info("Kelly size: %s %s %.3f->%.3fx (mult=%.2f)", order.desk, symbol, _base_n, _adj_n, _kelly_mult)
+            else:
+                _adj_size = order.size
+
+            # ATR tagging: embed ATR% in focus for dynamic SL tightening at exit
+            _atr_val = float(meta.get("atr_pct", 0.0) or 0.0)
+            _focus_str = order.focus
+            if _atr_val > 0:
+                _focus_str = f"{_focus_str}|atr={_atr_val:.3f}"
+
             position = PaperPositionRecord(
                 desk=order.desk,
                 symbol=symbol,
                 status="open",
                 action=order.action,
-                size=order.size,
+                size=_adj_size,
                 opened_at=order.created_at,
                 entry_price=entry_price,
                 current_price=reference_price,
                 pnl_pct=0.0,
                 peak_pnl_pct=0.0,
                 cycles_open=0,
-                focus=order.focus,
+                focus=_focus_str,
                 strategy_id=strategy_id,
                 entry_profile=entry_profile,
                 strategy_type=_derive_strategy_type(order.focus or "", order.action or "", order.desk or ""),

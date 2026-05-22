@@ -5,6 +5,25 @@ from app.core.models import AgentResult
 from app.services.market_gateway import get_upbit_15m_candles, get_upbit_4h_candles, get_upbit_daily_candles, get_us_market_context
 
 
+def _atr_pct(candles: list[dict], period: int = 14) -> float:
+    """ATR as % of last close from daily candles (high/low/close keys)."""
+    if len(candles) < period + 1:
+        return 0.0
+    trs: list[float] = []
+    for i in range(1, len(candles)):
+        h = float(candles[i].get("high") or 0.0)
+        l = float(candles[i].get("low") or 0.0)
+        pc = float(candles[i - 1].get("close") or 0.0)
+        if h <= 0 or l <= 0 or pc <= 0:
+            continue
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    if len(trs) < period:
+        return 0.0
+    atr = sum(trs[-period:]) / period
+    last_close = float(candles[-1].get("close") or 0.0)
+    return round(atr / last_close * 100, 3) if last_close > 0 else 0.0
+
+
 def _ema(values: list[float], period: int) -> float:
     """지수이동평균 (EMA)."""
     if not values:
@@ -202,6 +221,7 @@ def _check_rsi2_mean_reversion_crypto() -> dict:
                 result["rsi2_deviation_pct"] = deviation_pct
                 result["dual_rsi_long"] = dual
                 result["dual_rsi_rsi14"] = round(rsi14_val or 0.0, 1)
+                result["rsi2_atr_pct"] = _atr_pct(daily)
                 return result
         except Exception:
             continue
@@ -253,6 +273,7 @@ def _check_nday_pullback_crypto() -> dict:
                 result["nday_consec_down"] = consec
                 result["nday_ema5"] = round(ema5, 0)
                 result["nday_deviation_pct"] = deviation_pct
+                result["nday_atr_pct"] = _atr_pct(daily)
                 return result
         except Exception:
             continue
@@ -379,6 +400,7 @@ def _check_bear_oversold_bounce_crypto() -> dict:
             result["bear_oversold_rsi2"]           = rsi2_val
             result["bear_oversold_rsi14"]          = rsi14_val
             result["bear_oversold_ema200_gap_pct"] = gap_pct
+            result["bear_oversold_atr_pct"]       = _atr_pct(daily)
             return result
         except Exception:
             continue
@@ -451,6 +473,7 @@ def _check_momentum_breakout_crypto() -> dict:
             result["momentum_breakout_vol_ratio"]  = round(vol_ratio, 2)
             result["momentum_breakout_ema_trend"]  = True
             result["momentum_breakout_high10"]     = round(high10, 0)
+            result["momentum_breakout_atr_pct"]   = _atr_pct(daily)
             return result
         except Exception:
             continue
@@ -524,6 +547,15 @@ class CryptoDeskAgent(BaseAgent):
             else 0.4
         )
 
+        # ATR for the active signal — used downstream for dynamic SL tightening
+        _signal_atr = (
+            momentum.get("momentum_breakout_atr_pct", 0.0) if momentum["momentum_breakout_long"]
+            else rsi2.get("rsi2_atr_pct", 0.0) if rsi2["rsi2_long"]
+            else nday.get("nday_atr_pct", 0.0) if nday["nday_long"]
+            else bear_oversold.get("bear_oversold_atr_pct", 0.0) if bear_oversold["bear_oversold_long"]
+            else 0.0
+        )
+
         return AgentResult(
             name=self.name,
             score=_score,
@@ -563,6 +595,8 @@ class CryptoDeskAgent(BaseAgent):
                 **nday,
                 # Strategy S17 fields
                 **bear_oversold,
+                # ATR for active signal — flows to position focus for dynamic SL
+                "atr_pct": _signal_atr,
                 # ── 미국 시장 컨텍스트 (다른 에이전트/엔진에서 참조) ──
                 "us_regime":   us_ctx.get("us_regime", "unknown"),
                 "vix":         us_ctx.get("vix", 0.0),
