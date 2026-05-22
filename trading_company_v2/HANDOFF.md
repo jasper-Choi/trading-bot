@@ -1,5 +1,42 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-22 (기관+외국인 수급 전략 S18/S19 구현)
+
+### 작업 내용
+
+**기관+외국인 스마트머니 전략 통합 (커밋 `5e5caf2`):**
+
+**배경 — 이번 세션에서 수행한 분석:**
+1. Oracle VM DB 통계 분석: 4건 청산, WR=75%, Sharpe=13.3 (p=0.317, n 부족)
+2. 포트폴리오 백테스트 Monte Carlo: WR=55.9%, PF=1.74, Sharpe=4.08, MDD=-25.76%
+   → 200 트레이드 기준 수익 확률 100%, 중앙값 +199.8%
+3. 기관/외국인 OHLCV 프록시 백테스트 (OBV, CMF, VolAsym) → 모두 FAIL (WR 37-40%, 랭킹 없어 신호 과다)
+
+**구현한 전략:**
+
+**`app/services/korea_supply_demand.py` (이전 세션 완료):**
+- `get_investor_flow_today(ticker)`: Naver frgn.naver 스크래핑, 외국인 순매수 (30분 캐시)
+- `get_smart_money_confirmed(ticker)`: 기관 레이더(sise_invest) AND 외국인 순매수 동시 확인
+
+**S18 inst_foreign_breakout:**
+- 조건: 신고점 돌파(S_B) + 기관 레이더 포함 + 외국인 순매수
+- 파라미터: TP +7%, SL -3%, max ~2700 cycles
+
+**S19 inst_foreign_gap:**
+- 조건: 갭 모멘텀(S15) + 기관 레이더 포함 + 외국인 순매수
+- 파라미터: TP +6%, SL -2.5%, max ~1300 cycles
+
+**파일 변경:**
+- `korea_stock_desk_agent.py`: 상위 8개 breakout/gap 후보 중 smart money 확인 → `inst_foreign_candidates` 생성
+- `execution_agent.py`: `_infer_strategy_id()`, `_candidate_snapshot()`, `_apply_korea_candidate_snapshot()` 업데이트
+- `state_store.py`: EMA20 lookup에 `inst_foreign_candidates` 추가, `_position_thresholds()` 업데이트
+
+**미결 사항:**
+- 실 신호 발생 모니터링 필요 (Naver 파싱 성공률 확인)
+- 신호 발생 시 `strategy_id=korea.inst_foreign_breakout/gap`으로 shadow_signals 누적 → 50건 후 정식 검증
+
+---
+
 ## 0. Claude - 2026-05-22 (세계적 트레이더 방법론 적용: Circuit Breaker + ATR SL + Half-Kelly)
 
 ### 작업 내용
