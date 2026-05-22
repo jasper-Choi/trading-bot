@@ -366,6 +366,100 @@ class KoreaStockDeskAgent(BaseAgent):
             except Exception:
                 continue
 
+        # ── Strategy S15: Gap Momentum (갭 모멘텀) ──────────────────────────────
+        # 백테스트 검증 (2026-05-22, 114종목 3년):
+        # WR 48.9%, PF 1.97, Sharpe 3.32, MDD_port -2.7%, n=47
+        # 조건: EMA 상승추세 + gap>=1% + chg1d>=2% + 강한종가(0.65) + vol>=1.5x + RSI 40-65
+        # "상승했다가 하락 여지" 방지: RSI<=65 + 5일수익률<15% + chg5d 필터
+        gap_momentum_candidates: list[dict] = []
+        for ticker, name, candles in results:
+            if len(candles) < 22:
+                continue
+            try:
+                closes  = [float(c.get("close")  or 0.0) for c in candles]
+                highs   = [float(c.get("high")   or 0.0) for c in candles]
+                lows    = [float(c.get("low")    or 0.0) for c in candles]
+                opens   = [float(c.get("open")   or 0.0) for c in candles]
+                volumes = [float(c.get("volume") or 0.0) for c in candles]
+
+                if len(closes) < 22 or closes[-1] <= 0:
+                    continue
+
+                ema20_val  = _ema(closes, 20)
+                ema60_val  = _ema(closes, 60)  if len(closes) >= 60  else 0.0
+                ema200_val = _ema(closes, 200) if len(closes) >= 200 else 0.0
+
+                # 추세 정렬: close > EMA200 > 0, EMA20 > EMA60 > EMA200
+                if not (
+                    ema200_val > 0
+                    and closes[-1] > ema200_val
+                    and ema20_val > ema60_val > 0
+                    and ema60_val > ema200_val
+                ):
+                    continue
+
+                # EMA200 상승 기울기 (20일 전 대비 양수)
+                if len(closes) >= 220:
+                    ema200_20ago = _ema(closes[:-20], 200)
+                    if ema200_20ago > 0 and ema200_val <= ema200_20ago:
+                        continue
+
+                # EMA20 5일 전 대비 상승
+                if len(closes) >= 25:
+                    ema20_5ago = _ema(closes[:-5], 20)
+                    if ema20_val <= ema20_5ago:
+                        continue
+
+                prev_close = closes[-2] if len(closes) >= 2 else 0.0
+                cur_open   = opens[-1]
+                cur_close  = closes[-1]
+                cur_high   = highs[-1]
+                cur_low    = lows[-1]
+
+                if prev_close <= 0 or cur_open <= 0:
+                    continue
+
+                gap_pct  = (cur_open / prev_close - 1.0) * 100
+                chg1d    = (cur_close / prev_close - 1.0) * 100
+
+                if gap_pct < 1.0 or chg1d < 2.0:
+                    continue
+
+                price_range = cur_high - cur_low
+                close_strength = (cur_close - cur_low) / price_range if price_range > 0 else 0.5
+                if close_strength < 0.65:
+                    continue
+
+                # 20일 평균 거래량 (당일 제외)
+                vol20_avg = (sum(volumes[-21:-1]) / 20) if len(volumes) >= 21 else 0.0
+                if vol20_avg <= 0 or volumes[-1] < vol20_avg * 1.5:
+                    continue
+
+                rsi14_val = _rsi(closes, 14)
+                if rsi14_val is None or not (40.0 <= rsi14_val <= 65.0):
+                    continue
+
+                chg5d = (cur_close / closes[-6] - 1.0) * 100 if len(closes) >= 6 else 0.0
+                if chg5d >= 15.0:
+                    continue
+
+                gap_momentum_candidates.append({
+                    "ticker":         ticker,
+                    "name":           name,
+                    "current_price":  cur_close,
+                    "gap_pct":        round(gap_pct, 2),
+                    "chg1d":          round(chg1d, 2),
+                    "close_strength": round(close_strength, 3),
+                    "vol_ratio":      round(volumes[-1] / vol20_avg, 2),
+                    "rsi14":          rsi14_val,
+                    "chg5d":          round(chg5d, 2),
+                    "ema20":          round(ema20_val, 0),
+                    "ema200":         round(ema200_val, 0),
+                    "focus_tag":      "gap_momentum",
+                })
+            except Exception:
+                continue
+
         # ── S2/S9/S10 전략 후보 catalyst 후처리 필터 (Phase 3) ──────────────────
         # 평균회귀 전략은 악재 뉴스 종목 진입 시 낙폭 연장 리스크 → 상위 후보만 체크
         def _apply_catalyst_filter(clist: list[dict], max_check: int = 5) -> list[dict]:
@@ -395,9 +489,10 @@ class KoreaStockDeskAgent(BaseAgent):
             except Exception:
                 return clist  # 실패 시 원본 반환
 
-        mongtata_candidates = _apply_catalyst_filter(mongtata_candidates)
-        rsi2_candidates     = _apply_catalyst_filter(rsi2_candidates)
-        nday_candidates     = _apply_catalyst_filter(nday_candidates)
+        mongtata_candidates    = _apply_catalyst_filter(mongtata_candidates)
+        rsi2_candidates        = _apply_catalyst_filter(rsi2_candidates)
+        nday_candidates        = _apply_catalyst_filter(nday_candidates)
+        gap_momentum_candidates = _apply_catalyst_filter(gap_momentum_candidates)
 
         breakout_confirmed_count = sum(
             1 for c in breakout_candidates if int(c.get("breakout_count", 0) or 0) >= 4
@@ -413,6 +508,8 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.20
         elif mongtata_candidates or rsi2_candidates or nday_candidates:
             score += 0.25
+        if gap_momentum_candidates:
+            score += 0.15  # S15 갭 모멘텀 신호 존재 시 추가 점수
         if breakout_candidates:
             top_sd = float(breakout_candidates[0].get("supply_demand_score", 0.0) or 0.0)
             if top_sd >= 0.7:
@@ -443,7 +540,7 @@ class KoreaStockDeskAgent(BaseAgent):
             reason=(
                 f"B:{breakout_confirmed_count}c/{breakout_partial_count}p "
                 f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} S10:{len(nday_candidates)} "
-                f"S16:{len(close_panic_candidates)} "
+                f"S15:{len(gap_momentum_candidates)} S16:{len(close_panic_candidates)} "
                 f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
                 f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
@@ -462,6 +559,10 @@ class KoreaStockDeskAgent(BaseAgent):
                 # Strategy S10 N-Day Pullback
                 "nday_candidates": nday_candidates[:3],
                 "nday_count": len(nday_candidates),
+                # Strategy S15 Gap Momentum (2026-05-22)
+                # 백테스트: WR 48.9%, PF 1.97, Sharpe 3.32, MDD -2.7%, n=47
+                "gap_momentum_candidates": gap_momentum_candidates[:5],
+                "gap_momentum_count": len(gap_momentum_candidates),
                 # Strategy S16 Close Panic Reversal (포워드 테스트 — 신호 수집만)
                 "close_panic_candidates": close_panic_candidates[:3],
                 "close_panic_count": len(close_panic_candidates),

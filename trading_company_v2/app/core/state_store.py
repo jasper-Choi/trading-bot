@@ -455,6 +455,7 @@ def _build_korea_ema20_lookup(market_snapshot: dict) -> dict[str, float]:
         "new_high_breakout_candidates",
         "gap_candidates",
         "close_panic_candidates",
+        "gap_momentum_candidates",
     )
     for key in candidate_keys:
         for item in market_snapshot.get(key, []):
@@ -610,6 +611,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # stop -5.0% + EMA20 동적 청산: WR 41-50%, PF 1.50-1.80, MDD_port -7-9%
         # (기존 -2.0% 타이트 스탑은 WR 21%로 붕괴 — EMA20 회복 홀딩이 핵심)
         return 10.0, -5.0, 2700
+    if desk == "korea" and "gap_momentum" in focus:
+        # S15 Gap Momentum 백테스트 검증 (2026-05-22, 114종목 3년):
+        # 갭업 1%+ + 당일 2%+ + 강한종가(0.65) + 거래량 1.5x + EMA 상승추세
+        # WR 48.9%, PF 1.97, Sharpe 3.32, MDD_port -2.7%, n=47
+        # stop -3%, target 12%, max_days 10 → ~1300 cycles @ ~20s
+        return 12.0, -3.0, 1300
     if desk == "korea" and "new_high_breakout" in focus:
         # 2026-05-21 백테스트 v3 재검증 (115종목 3년):
         # stop -2.5%: MDD_port -8.2% (기존 -4.0%는 MDD_port -66.2% → 손실 폭 극적 축소)
@@ -1581,6 +1588,24 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     )
                     if _days_open >= 2.0 and _ema20_recovered:
                         _close_position(position, "ema20_recovery")
+                    elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
+                        _close_position(position, "early_failure")
+                    elif position.cycles_open >= max_cycles:
+                        _close_position(position, "stale_exit")
+                elif "gap_momentum" in pos_focus:
+                    # ── S15 Gap Momentum 동적 청산 (2026-05-22) ──
+                    # 백테스트: stop -3%, target 12%, dyn_exit(close<EMA20, day2+), max_days 10
+                    # WR 48.9%, PF 1.97, Sharpe 3.32, MDD_port -2.7%
+                    _gm_days_open = minutes_open / 390.0
+                    _gm_ema20 = _korea_ema20_lookup.get(position.symbol, 0.0)
+                    # close < EMA20 이면 추세 이탈 → 동적 청산
+                    # EMA20 없으면 -1.5% 손실(EMA20 근방) 프록시 사용
+                    _gm_below_ema20 = (
+                        (_gm_ema20 > 0 and position.current_price < _gm_ema20)
+                        or (_gm_ema20 <= 0 and position.pnl_pct <= -1.5)
+                    )
+                    if _gm_days_open >= 2.0 and _gm_below_ema20:
+                        _close_position(position, "gm_dyn_exit")
                     elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
                         _close_position(position, "early_failure")
                     elif position.cycles_open >= max_cycles:
