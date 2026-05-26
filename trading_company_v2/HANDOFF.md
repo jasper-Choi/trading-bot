@@ -1,5 +1,30 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-26 (strategy health 오진단 수정 — rapid 수익 청산 stop-like 오분류)
+
+### 작업 내용
+
+**커밋 `942a261`**
+
+#### 버그
+`_strategy_performance_stats`에서 `rapid_*` 이유 전체를 stop-like로 분류.
+- `rapid_profit_protect`(+0.40% 수익) → stop-like로 카운트 → 오진단
+- bear_oversold: 6건 중 stop_like=6/6=100% → `repeated_stop_like=True` → `disabled_candidate`
+- 이후 KRW-ADA 신호가 11번 발화했지만 전부 `strategy_disabled`로 차단 → 거래 전무
+
+#### 수정
+`rapid_*` 이유 중 `pnl >= 0`인 청산은 stop-like에서 제외:
+```python
+_is_stop_like = (
+    _cr in _STOP_LIKE_PAPER_REASONS
+    or (_cr.startswith("rapid_") and pnl < 0.0)  # 수익 청산 제외
+)
+```
+
+수정 후 bear_oversold 재계산: stop_like=3/6=50% < 80% → `repeated_stop_like=False` → `candidate`
+
+---
+
 ## 0. Claude - 2026-05-26 (일봉 전략 SL 전면 재점검 — tick false trigger 제거 + 슬리피지 보정)
 
 ### 작업 내용
