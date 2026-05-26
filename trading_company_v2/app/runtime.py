@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.config import DATA_DIR, settings
-from app.core.state_store import rapid_guard_crypto_positions
+from app.core.state_store import rapid_guard_crypto_positions, rapid_guard_korea_positions
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 from app.services.hot_path_guard import (
@@ -17,6 +17,12 @@ from app.services.hot_path_guard import (
     refresh_hot_entry_candidates,
 )
 from app.services.hot_path_metrics import record_hot_path_event, reset_hot_path_metrics
+from app.services.kis_stream_cache import (
+    ensure_stream_started as _kis_ensure_stream,
+    get_latest_prices as _kis_get_latest_prices,
+    register_tick_callback as _kis_register_tick_callback,
+    subscribe_tickers as _kis_subscribe_tickers,
+)
 from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
 from app.services.upbit_stream_cache import register_trade_callback, start_upbit_ticker_stream, upbit_stream_status
@@ -27,6 +33,11 @@ _tick_guard_symbols: set[str] = set()
 _tick_guard_symbols_loaded_at = 0.0
 _tick_guard_last_by_symbol: dict[str, float] = {}
 _runtime_lock_handle = None
+
+# ── Korea KIS tick guard ─────────────────────────────────────────────────────
+_korea_tick_guard_lock = threading.Lock()
+_korea_tick_last_by_symbol: dict[str, float] = {}
+_KOREA_TICK_THROTTLE_S = 0.5   # 종목당 최소 0.5초 간격 (연속 틱 중복 차단)
 
 
 def _acquire_runtime_singleton_lock() -> bool:
@@ -156,6 +167,60 @@ def _run_crypto_tick_guard_from_trade(row: dict) -> None:
         _tick_guard_lock.release()
 
 
+def _run_korea_tick_guard_from_tick(tick: dict) -> None:
+    """KIS H0STCNT0 체결 틱 → Korea 포지션 즉시 stop/trail 체크.
+
+    Upbit _run_crypto_tick_guard_from_trade 와 동일 구조:
+      - 종목당 0.5s 쓰로틀
+      - 비차단 잠금(blocking=False): 기존 처리 중이면 틱 스킵
+    """
+    ticker = str(tick.get("ticker") or "").strip()
+    price = float(tick.get("price") or 0.0)
+    if not ticker or price <= 0:
+        return
+    now = time.monotonic()
+    last = _korea_tick_last_by_symbol.get(ticker, 0.0)
+    if now - last < _KOREA_TICK_THROTTLE_S:
+        return
+    _korea_tick_last_by_symbol[ticker] = now
+    if not _korea_tick_guard_lock.acquire(blocking=False):
+        return
+    try:
+        summary = rapid_guard_korea_positions({ticker: price})
+        if summary.get("paper_closed"):
+            print(
+                f"[runtime] korea tick guard closed {ticker} "
+                f"paper={summary['paper_closed']}"
+            )
+    except Exception as exc:
+        print(f"[runtime] korea tick guard failed: {exc}")
+    finally:
+        _korea_tick_guard_lock.release()
+
+
+def _refresh_korea_kis_subscriptions() -> None:
+    """오픈 Korea 포지션을 KIS WebSocket에 구독 (신규 진입 종목 자동 추가)."""
+    if not settings.kis_app_key or not settings.kis_app_secret:
+        return
+    try:
+        from app.core.state_store import SessionLocal, PaperPositionRecord
+        from sqlalchemy import select
+        with SessionLocal() as db:
+            tickers = [
+                row.symbol for row in db.execute(
+                    select(PaperPositionRecord).where(
+                        PaperPositionRecord.status == "open",
+                        PaperPositionRecord.desk == "korea",
+                    )
+                ).scalars().all()
+                if row.symbol
+            ]
+        if tickers:
+            _kis_subscribe_tickers(tickers)
+    except Exception as exc:
+        print(f"[runtime] KIS subscription refresh failed: {exc}")
+
+
 def _determine_runtime_interval_seconds(session: dict) -> int:
     if settings.active_desk_set == {"crypto"}:
         return max(5, settings.crypto_fast_cycle_seconds)
@@ -204,7 +269,9 @@ def run_company_loop() -> None:
         print("[runtime] another trading runtime is already active; exiting duplicate process")
         return
     orchestrator = CompanyOrchestrator()
-    if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
+
+    # ── Upbit WebSocket 틱 스트림 (코인) — active_desk 무관하게 항상 기동 ──────
+    if settings.upbit_ws_enabled:
         reset_hot_path_metrics()
         refresh_hot_crypto_positions(force=True)
         refresh_hot_entry_candidates({}, force=True)
@@ -215,6 +282,14 @@ def run_company_loop() -> None:
             "[runtime] upbit websocket cache "
             f"started={started} running={status.get('running')} cached={status.get('cached_count')}"
         )
+
+    # ── KIS WebSocket 틱 스트림 (한국 주식) ────────────────────────────────────
+    if settings.kis_app_key and settings.kis_app_secret:
+        _kis_register_tick_callback(_run_korea_tick_guard_from_tick)
+        _kis_ensure_stream()
+        _refresh_korea_kis_subscriptions()
+        print("[runtime] KIS tick stream registered (korea rapid guard active)")
+
     print(
         "[runtime] starting reactive company loop "
         f"(active={settings.realtime_active_interval_seconds}s, "
@@ -228,9 +303,12 @@ def run_company_loop() -> None:
         try:
             result = orchestrator.run_cycle()
             state = result["state"]
-            if settings.active_desk_set == {"crypto"} and settings.upbit_ws_enabled:
+            if settings.upbit_ws_enabled:
                 refresh_hot_crypto_positions(force=True)
                 refresh_hot_entry_candidates(state, force=True)
+            # 신규 Korea 포지션 → KIS WebSocket 구독 갱신
+            if settings.kis_app_key and settings.kis_app_secret:
+                _refresh_korea_kis_subscriptions()
             session = state.get("session_state", {}) or current_session_snapshot()
             interval_seconds = _determine_runtime_interval_seconds(session)
             print(

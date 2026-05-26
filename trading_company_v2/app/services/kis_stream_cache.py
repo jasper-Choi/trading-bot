@@ -15,6 +15,7 @@ import logging
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from typing import Any
 
 import requests
@@ -49,6 +50,9 @@ _stream_started_at: float = 0.0
 _approval_key: str = ""
 _approval_key_ts: float = 0.0
 _APPROVAL_KEY_TTL = 82800.0  # 23시간
+
+# ── 틱 콜백 (upbit_stream_cache.register_trade_callback 과 동일 구조) ─────────
+_tick_callbacks: list[Callable[[dict[str, Any]], None]] = []
 
 # H0STCNT0 응답 필드 인덱스 ('^' 분리 후)
 _F_CODE   = 0   # 종목코드
@@ -174,6 +178,7 @@ def _process_message(raw_text: str) -> None:
     records = data_block.strip().split("\n") if cnt > 1 else [data_block]
 
     if tr_id == "H0STCNT0":
+        fired_ticks: list[dict[str, Any]] = []
         for record in records:
             tick = _parse_tick(record.strip())
             if tick is None:
@@ -183,6 +188,17 @@ def _process_message(raw_text: str) -> None:
                 if ticker not in _tick_cache:
                     _tick_cache[ticker] = deque(maxlen=_TICK_BUFFER)
                 _tick_cache[ticker].append(tick)
+            fired_ticks.append(tick)
+        # ── 콜백 발화 (lock 밖에서, tick guard 지연 방지) ──────────────────
+        if fired_ticks:
+            with _lock:
+                callbacks = list(_tick_callbacks)
+            for tick in fired_ticks:
+                for cb in callbacks:
+                    try:
+                        cb(dict(tick))
+                    except Exception as exc:
+                        _log.debug("KIS tick callback error: %s", exc)
 
     elif tr_id == "H0STASP0":
         for record in records:
@@ -304,6 +320,32 @@ def get_orderbook_imbalance(ticker: str) -> float:
     if total == 0:
         return 0.5
     return round(total_bid / total, 3)
+
+
+def register_tick_callback(callback: Callable[[dict[str, Any]], None]) -> None:
+    """H0STCNT0 체결 틱마다 호출되는 콜백 등록 (upbit_stream_cache 와 동일 구조).
+
+    콜백 인수: dict with keys ticker, time, price, volume, side, ts
+    """
+    with _lock:
+        if callback not in _tick_callbacks:
+            _tick_callbacks.append(callback)
+
+
+def get_latest_prices(tickers: list[str]) -> dict[str, float]:
+    """구독 중인 종목의 최신 체결가 반환. {ticker: price}
+
+    틱이 없거나 가격이 0이면 포함하지 않음.
+    """
+    result: dict[str, float] = {}
+    with _lock:
+        for ticker in tickers:
+            buf = _tick_cache.get(ticker.strip())
+            if buf:
+                p = float(buf[-1].get("price", 0.0) or 0.0)
+                if p > 0:
+                    result[ticker.strip()] = p
+    return result
 
 
 def get_stream_status() -> dict[str, Any]:

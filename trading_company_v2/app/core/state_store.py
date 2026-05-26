@@ -2210,6 +2210,75 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
     return {"checked": checked, "paper_closed": paper_closed, "live_closed": live_closed}
 
 
+def rapid_guard_korea_positions(prices: dict[str, float]) -> dict:
+    """KIS 체결 틱 가격으로 Korea 포지션 즉시 stop/trail 체크.
+
+    `rapid_guard_crypto_positions` 와 동일 구조.
+    cycle 사이(8~20초) 공백에서 급락/급등 시 포지션 보호.
+    """
+    if not prices:
+        return {"checked": 0, "paper_closed": 0}
+    init_db()
+    checked = 0
+    paper_closed = 0
+    closed_symbols: list[tuple[str, str]] = []
+    with SessionLocal() as db:
+        rows = db.execute(
+            select(PaperPositionRecord).where(
+                PaperPositionRecord.status == "open",
+                PaperPositionRecord.desk == "korea",
+            )
+        ).scalars().all()
+        for position in rows:
+            current_price = float(prices.get(position.symbol, 0.0) or 0.0)
+            if current_price <= 0 or position.entry_price <= 0:
+                continue
+            checked += 1
+            position.current_price = current_price
+            position.pnl_pct = round(
+                ((current_price - position.entry_price) / position.entry_price) * 100, 2
+            )
+            position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
+            pos_focus = " ".join(
+                str(part or "")
+                for part in (position.focus, position.entry_profile, position.strategy_id)
+            )
+            target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action, pos_focus)
+            peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
+            # 전략별 trail 규칙
+            if "new_high_breakout" in pos_focus:
+                trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
+            elif "mongtata_airborne" in pos_focus:
+                trail_giveback, profit_floor = _mongtata_trail_rules(peak_pnl)
+            elif "rsi2_mean_reversion" in pos_focus or "nday_pullback" in pos_focus or "dual_rsi" in pos_focus:
+                trail_giveback, profit_floor = _mean_reversion_trail_rules(peak_pnl)
+            else:
+                trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
+            protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+            # 청산 판단 — swing_recovery는 넓은 stop 유지하므로 별도 처리 없음
+            if position.pnl_pct >= target_pct and target_pct < 25.0:
+                # target이 25%인 probe_longs 같은 경우는 TP는 full-cycle에서만 처리
+                closed_symbols.append((position.symbol, "rapid_korea_target"))
+                _close_position(position, "rapid_korea_target")
+                paper_closed += 1
+            elif position.pnl_pct <= stop_pct:
+                closed_symbols.append((position.symbol, "rapid_korea_stop"))
+                _close_position(position, "rapid_korea_stop")
+                paper_closed += 1
+            elif trail_giveback and position.pnl_pct <= protect_level:
+                closed_symbols.append((position.symbol, "rapid_korea_trail"))
+                _close_position(position, "rapid_korea_trail")
+                paper_closed += 1
+        db.commit()
+    if closed_symbols:
+        _log.info(
+            "rapid_guard_korea: closed %d position(s): %s",
+            len(closed_symbols),
+            [(sym, rsn) for sym, rsn in closed_symbols],
+        )
+    return {"checked": checked, "paper_closed": paper_closed}
+
+
 def load_recent_orders(limit: int = 10) -> list[dict]:
     init_db()
     try:
