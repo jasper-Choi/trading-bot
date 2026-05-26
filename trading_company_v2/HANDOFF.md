@@ -1,5 +1,57 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-26 (틱 단위 진입/청산 구현 — KIS + Upbit 양방향)
+
+### 작업 내용
+
+**틱 단위 즉시 stop/trail 체크 구현 (커밋 `93bd230`)**
+
+#### 배경 & 필요성
+- `sync_paper_positions()` 는 8~20s 주기로 실행 → 그 사이 급락 시 stop 발동이 늦음
+- Korea 포지션: KIS WebSocket (`kis_stream_cache.py`) 이미 있었지만 position guard에 미연결
+- Crypto 포지션: Upbit tick guard 이미 있었지만 `active_desk_set == {"crypto"}` 일 때만 동작
+  → Korea + Crypto 동시 운용 시 Upbit tick guard가 아예 꺼져 있었음 (버그!)
+
+#### 구현 내용
+
+**`app/services/kis_stream_cache.py`**
+- `register_tick_callback(callback)` 추가 — H0STCNT0 체결 틱마다 콜백 발화
+- `get_latest_prices(tickers)` 추가 — 최신 체결가 조회
+- `_process_message()` 수정 — H0STCNT0 처리 후 lock 밖에서 콜백 emit (지연 최소화)
+
+**`app/core/state_store.py`**
+- `rapid_guard_korea_positions(prices: dict[str, float]) -> dict` 신규 추가
+  - `rapid_guard_crypto_positions` 와 동일 구조
+  - 전략별 trail 규칙: `new_high_breakout` / `mongtata_airborne` / `mean_reversion` / 기본
+  - stop_hit / trail / target 즉시 청산 → `db.commit()`
+
+**`app/runtime.py`**
+- `_run_korea_tick_guard_from_tick(tick)` 신규 — 종목당 0.5s 쓰로틀 + `blocking=False` 잠금
+- `_refresh_korea_kis_subscriptions()` 신규 — 오픈 Korea 포지션 KIS WebSocket 자동 구독
+- `active_desk_set == {"crypto"}` 게이트 제거 → Korea + Crypto 동시 모드에서도 Upbit tick guard 항상 동작
+- 루프마다 `_refresh_korea_kis_subscriptions()` 호출 → 신규 진입 종목 자동 구독
+
+#### 동작 흐름
+```
+Korea 포지션 진입
+  → _refresh_korea_kis_subscriptions() → kis_subscribe_tickers(["006260", ...])
+  → KIS WebSocket H0STCNT0 수신
+  → _run_korea_tick_guard_from_tick(tick)  (0.5s 쓰로틀)
+  → rapid_guard_korea_positions({"006260": 12450})
+  → stop/trail 조건 충족 시 즉시 _close_position() + db.commit()
+  → Telegram exit 알림
+```
+
+#### 파일 변경
+
+| 파일 | 변경 |
+|------|------|
+| `app/services/kis_stream_cache.py` | `register_tick_callback`, `get_latest_prices`, 콜백 emit |
+| `app/core/state_store.py` | `rapid_guard_korea_positions` 신규 |
+| `app/runtime.py` | Korea tick guard 배선, Upbit 게이트 제거 |
+
+---
+
 ## 0. Claude - 2026-05-26 (손실 급증 패치 + 코인 S17 신호 발동 완료)
 
 ### 작업 내용
