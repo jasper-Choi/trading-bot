@@ -384,17 +384,19 @@ class ExecutionAgent(BaseAgent):
             entry_profile = "gap_momentum"
             strategy_id = "korea.gap_momentum"
         elif "breakout" in base_focus:
-            _focus_tag = str(snapshot.get("focus_tag", "") or "").lower()
-            if _focus_tag == "new_high_breakout":
+            # plan.focus_tag가 최우선, 없으면 snapshot.focus_tag, 없으면 base_focus 텍스트로 판단
+            _focus_tag = str(
+                mapped.get("focus_tag", "") or snapshot.get("focus_tag", "") or ""
+            ).lower()
+            if _focus_tag == "new_high_breakout" or "new_high_breakout" in base_focus:
                 # 2026-05-19: 신고점 돌파 전략 B — 60-day high + vol surge + RSI 55-80
                 # 백테스트 검증: WR 84.6%, Sharpe 6.16, 연 +89.5%, MDD -4.0% (152종목, 3년)
                 focus = f"new_high_breakout: {name} ({symbol}) 60-day new high breakout"
                 entry_profile = "new_high_breakout"
                 strategy_id = "korea.new_high_breakout"
             else:
-                focus = f"breakout: {name} ({symbol}) momentum breakout candidate"
-                entry_profile = "breakout"
-                strategy_id = "korea.breakout"
+                # 백테스트 미검증 일반 breakout — 진입 차단
+                return plan
         elif "opening drive" in base_focus or "attack_opening_drive" in str(mapped.get("entry_profile", "")).lower():
             focus = f"opening_drive: {name} ({symbol}) opening drive follow-through"
             entry_profile = "attack_opening_drive"
