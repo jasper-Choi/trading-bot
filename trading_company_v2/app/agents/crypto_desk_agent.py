@@ -605,6 +605,8 @@ class CryptoDeskAgent(BaseAgent):
                 **nday,
                 # Strategy S17 fields
                 **bear_oversold,
+                # signal_score — orchestrator uses this for crypto_signal
+                "signal_score": _score,
                 # ATR for active signal — flows to position focus for dynamic SL
                 "atr_pct": _signal_atr,
                 # ── 미국 시장 컨텍스트 (다른 에이전트/엔진에서 참조) ──
