@@ -939,6 +939,10 @@ def _candidate_is_hot_entry_eligible(item: dict[str, Any]) -> bool:
     else:
         _vb_stream_score = _vb_cached_stream
 
+    # vol_breakout 전략에서 사용 — Batch 4/6 선언(line ~1010)보다 먼저 필요하므로 여기서도 선언
+    # (RANGING return False 이후 이 코드에 도달하는 non-RANGING 경로에서 NameError 방지)
+    vol_surge_long_signal = bool(item.get("vol_surge_long", False))
+    breakout_vol_confirm_signal = bool(item.get("breakout_vol_confirm", False))
     _vb_breakout_score = float(item.get("breakout_score", 0.0) or 0.0)
     _vb_ema_stack = bool(item.get("ema_stack_bullish", False))
     _vb_bsl_sweep = bool(item.get("bsl_sweep_confirmed", False))

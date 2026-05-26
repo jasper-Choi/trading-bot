@@ -278,7 +278,7 @@ _CRYPTO_NAMES: dict[str, str] = {
     "KRW-NEAR": "니어프로토콜", "KRW-WLD": "월드코인", "KRW-PENGU": "펭구",
     "KRW-BERA": "베라체인", "KRW-VIRTUAL": "버추얼", "KRW-ONDO": "온도",
     "KRW-XLM": "스텔라루멘", "KRW-CHZ": "칠리즈", "KRW-USDT": "테더",
-    "KRW-JTO": "지토", "KRW-SUI": "수이", "KRW-IP": "스토리",
+    "KRW-JTO": "지토", "KRW-IP": "스토리",
 }
 _korea_name_cache: dict[str, str] = {}
 _korea_name_cache_ts: float = 0.0
@@ -1712,9 +1712,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "momentum_no_lift")
                     continue
                 elif "bear_oversold" in pos_focus:
-                    # ── S17 Bear Market Oversold Bounce 청산 (2026-05-20) ──
-                    # Daily: TP +4%, SL -0.8%, max 5일
-                    # 타이트한 TP/SL — 트레일 없이 목표가/손절가 도달 즉시 청산
+                    # ── S17 Bear Market Oversold Bounce 청산 ──
+                    # Daily: TP +4%, SL -1.0% (slip adj), max 5일
+                    # 트레일 없음 — 목표가/손절가 도달 즉시 청산 (full-cycle에서만 SL 체크)
                     # 시간 기반 상한: cycle_interval 독립 (5일 = 7200분)
                     _S17_MAX_MINUTES = 5 * 24 * 60  # 5 거래일 = 7200분
                     if position.pnl_pct >= target_pct:
