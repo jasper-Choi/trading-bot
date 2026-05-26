@@ -1,5 +1,55 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-26 (코인 P/L 개선 — bear_oversold trail 버그 수정 + giveback 완화)
+
+### 작업 내용
+
+**커밋 `30c2463`**
+
+#### 배경 & 진단
+Oracle VM DB에서 코인 5건 성과 분석:
+- bear_oversold: WR=60%, avg_win=+0.170%, avg_loss=-0.660%, P/L ratio=0.26x (매우 나쁨)
+- rapid_profit_protect 3건: avg_peak=+0.420%에서 avg=+0.170%에 조기청산 → trail 버그
+
+#### 수정 1 — `rapid_guard_crypto_positions` 일봉 전략 trail 제거
+**파일**: `app/core/state_store.py`
+
+`bear_oversold`, `momentum_breakout` 포지션은 full-cycle에서도 trail 없음(TP/SL만).
+rapid guard에서도 동일하게 적용해야 하는데, 기존에는 `_crypto_trail_rules`가 모든 포지션에 적용되어
+peak +0.42%에서 trail이 발동해 +0.17%에 조기청산되는 버그 발생.
+
+```python
+# range_scalp continue 직후 추가
+is_daily_strategy = (
+    "bear_oversold" in pos_focus_rapid or "momentum_breakout" in pos_focus_rapid
+)
+if is_daily_strategy:
+    if position.pnl_pct >= target_pct:
+        _close_position(position, "rapid_daily_target"); paper_closed += 1
+    elif position.pnl_pct <= stop_pct:
+        _close_position(position, "rapid_daily_stop"); paper_closed += 1
+    continue  # trail 없이 SL/TP만
+```
+
+#### 수정 2 — `_crypto_trail_rules` giveback 완화 (peak 0.25~0.80%)
+**파일**: `app/core/state_store.py`
+
+peak < 1% 구간에서 giveback이 너무 타이트해 정상 조정에도 청산됨.
+
+| peak 구간 | 변경 전 giveback | 변경 후 giveback |
+|-----------|-----------------|-----------------|
+| >= 0.55%  | 0.20            | 0.30            |
+| >= 0.40%  | 0.20            | 0.30            |
+| >= 0.25%  | 0.15            | 0.22            |
+
+#### 파일 변경
+
+| 파일 | 변경 |
+|------|------|
+| `app/core/state_store.py` | rapid_guard 일봉 전략 trail 제거, _crypto_trail_rules giveback 완화 |
+
+---
+
 ## 0. Claude - 2026-05-26 (틱 단위 진입/청산 구현 — KIS + Upbit 양방향)
 
 ### 작업 내용
