@@ -792,11 +792,11 @@ def _crypto_trail_rules(peak_pnl: float) -> tuple[float, float]:
     if peak_pnl >= 0.80:
         return 0.35, 0.18
     if peak_pnl >= 0.55:
-        return 0.20, 0.08  # 0.30→0.20 giveback: peak=0.55% → floor 0.35% (was 0.25%)
+        return 0.30, 0.08  # 0.20→0.30 giveback: 수익 반납 공간 확보 (조기청산 방지)
     if peak_pnl >= 0.40:
-        return 0.20, 0.05  # 0.30→0.20 giveback: peak=0.40% → floor 0.20% (was 0.10%)
+        return 0.30, 0.05  # 0.20→0.30 giveback: 소폭 반락 허용으로 더 긴 수익 보유
     if peak_pnl >= 0.25:
-        return 0.15, 0.00  # 신규 tier: 소폭 수익이라도 원금 보호 시작
+        return 0.22, 0.00  # 0.15→0.22 giveback: 원금 보호 시작, 단 여유 확대
     return 0.0, 0.0
 
 
@@ -2082,6 +2082,21 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                     # 소폭 반등 후 다시 낙하 → 1.0min 후 -0.18%에서 청산 (1.5min/-0.22에서 단축)
                     closed_symbols.append((position.symbol, "rapid_range_scalp_no_lift"))
                     _close_position(position, "rapid_range_scalp_no_lift")
+                    paper_closed += 1
+                continue
+            # ── 일봉 전략 (bear_oversold, momentum_breakout): trail 없이 SL/TP만 ──
+            # 이 전략들은 full-cycle에서도 trail 없음 — rapid에서도 trail 적용 금지
+            is_daily_strategy = (
+                "bear_oversold" in pos_focus_rapid or "momentum_breakout" in pos_focus_rapid
+            )
+            if is_daily_strategy:
+                if position.pnl_pct >= target_pct:
+                    closed_symbols.append((position.symbol, "rapid_daily_target"))
+                    _close_position(position, "rapid_daily_target")
+                    paper_closed += 1
+                elif position.pnl_pct <= stop_pct:
+                    closed_symbols.append((position.symbol, "rapid_daily_stop"))
+                    _close_position(position, "rapid_daily_stop")
                     paper_closed += 1
                 continue
             if position.pnl_pct >= target_pct:
