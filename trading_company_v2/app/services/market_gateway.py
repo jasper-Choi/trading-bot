@@ -529,6 +529,32 @@ def build_market_snapshot() -> MarketSnapshot:
     )
 
 
+_naver_intraday_cache: dict[str, tuple[float, float]] = {}  # ticker -> (ts, change_pct)
+
+def get_naver_intraday_change(ticker: str) -> float:
+    """당일 등락률(%) 실시간 조회 — Naver mobile API.
+
+    진입 전 "이미 너무 올랐는지" 체크용 (뒤늦게 올라타기 방지).
+    캐시 TTL: 60초 (사이클 간 재조회 최소화).
+    실패 시 0.0 반환 (차단하지 않음 — fail-open).
+    """
+    _now_ts = time.monotonic()
+    _cached = _naver_intraday_cache.get(ticker)
+    if _cached and (_now_ts - _cached[0]) < 60.0:
+        return _cached[1]
+    try:
+        url = f"https://m.stock.naver.com/api/stock/{ticker}/basic"
+        resp = requests.get(url, timeout=4, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        data = resp.json()
+        # fluctuationsRatio: 등락률 문자열 (예: "+2.34" / "-1.52")
+        ratio = float(data.get("fluctuationsRatio", 0) or 0)
+        _naver_intraday_cache[ticker] = (_now_ts, ratio)
+        return ratio
+    except Exception:
+        return 0.0
+
+
 def get_naver_daily_prices(ticker: str, count: int = 20) -> list[dict[str, Any]]:
     if not ticker:
         return []

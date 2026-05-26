@@ -11,7 +11,7 @@ from app.services.korea_supply_demand import (
     get_supply_demand_score,
 )
 from app.services.korea_universe import get_korea_universe
-from app.services.market_gateway import get_naver_daily_prices, get_us_market_context
+from app.services.market_gateway import get_naver_daily_prices, get_naver_intraday_change, get_us_market_context
 from app.services.signal_engine import summarize_breakout_signal, summarize_equity_signal
 
 _FETCH_WORKERS = 12
@@ -207,6 +207,16 @@ class KoreaStockDeskAgent(BaseAgent):
                 _breakout_pct = (_last_close - _period_high) / _period_high * 100
                 if _breakout_pct < _min_breakout_pct:
                     continue  # 노이즈 수준 돌파 제외
+
+            # ── 당일 상승률 필터 (뒤늦게 올라타기 방지) ──────────────────────
+            # 일봉 데이터는 전일 종가 기준 → 장중에 이미 N% 급등한 종목은 모멘텀 소진
+            # Naver mobile API로 실시간 등락률 조회, 3% 이상이면 진입 차단
+            try:
+                _intraday_chg = get_naver_intraday_change(ticker)
+                if _intraday_chg >= 3.0:
+                    continue  # 이미 3% 이상 상승 — 뒤늦게 올라타기 차단
+            except Exception:
+                pass  # 조회 실패 시 통과 (fail-open)
 
             signal = summarize_equity_signal(candles)
             signal_score = float(signal.get("score", 0.5) or 0.5)

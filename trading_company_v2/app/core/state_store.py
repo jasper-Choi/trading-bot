@@ -1737,6 +1737,19 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             # ── Korea 주식 청산 (stock_backtest_v3: 트레일링 스탑 포함) ──
             if position.desk == "korea":
                 peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
+
+                # ── 진입 직후 모멘텀 없음 → 즉시 컷 (뒤늦게 올라타기 2차 방어선) ──
+                # 조건: 5사이클(~75초) 이내 + peak < 0.3% + 현재 -0.5% 이하
+                # 의미: 진입 후 전혀 올라가지 않고 바로 밀리는 종목 = 모멘텀 소진
+                if (
+                    position.cycles_open <= 5
+                    and peak_pnl < 0.3
+                    and position.pnl_pct <= -0.5
+                    and "pyramid" not in pos_focus
+                ):
+                    _close_position(position, "no_momentum_cut")
+                    continue
+
                 # 전략별 전용 trail 규칙 사용 (백테스트 검증값)
                 if "new_high_breakout" in pos_focus:
                     trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
