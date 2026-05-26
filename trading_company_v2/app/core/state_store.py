@@ -623,27 +623,29 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "crypto" and "eth_4h_breakout" in focus:
         # ETH 4H 신고점 돌파 전략 백테스트 검증값 (2026-05-19)
         # 코인 전략 v4: Sharpe 2.33, WR 61.1%, MDD -7.08%, n=18
-        # TP +7.0%, SL -3.0%, trail_trigger +4% / max 20봉 (80h)
+        # TP +7.0%, SL -3.0%→-3.5%: 백테스트 fee-only(0.10%) vs 실전 fee+slip(0.30%)
+        # → 백테스트 raw SL -2.9% ≈ 실전 net -3.2% → -3.5%로 여유 확보
         # @ ~8s/cycle: 80h × 3600s / 8s = 36000 cycles
-        return 7.0, -3.0, 36000
+        return 7.0, -3.5, 36000
     if desk == "crypto" and "momentum_breakout" in focus:
         # S15 Momentum Breakout (2026-05-20):
         # Crypto: Sh 11.27, WR 66.7%, P/L 2.32, MDD -5.1%, n=51
-        # 조건: 10일 신고가 + EMA50>EMA200 + close>EMA20 + vol≥1.5x
-        # TP +7.0%, SL -2.0%, max 15봉 (15일) = 2700 cycles @ 8s/cycle
-        return 7.0, -2.0, 2700
+        # TP +7.0%, SL -2.0%→-2.4%: 백테스트 raw SL -1.9% → 실전 net -2.4% (slip +0.20% adj)
+        # 일봉 전략: rapid guard에서 SL 미체크 (tick false trigger 방지)
+        return 7.0, -2.4, 2700
     if desk == "crypto" and "bear_oversold" in focus:
         # S17 Bear Market Oversold Bounce (2026-05-20):
         # Crypto: Sh 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15
-        # 조건: RSI(2)<5 + RSI(14)<25 + close<EMA200×0.97 + close<EMA20×0.975
-        # TP +4.0%, SL -0.8%, max 5일 = 900 cycles
-        return 4.0, -0.8, 900
+        # 조건: RSI(2)<10 + RSI(14)<38 + close<EMA200×0.97 + close<EMA20×0.975
+        # TP +4.0%, SL -0.8%→-1.0%: 백테스트 raw SL -0.7% → 실전 net -1.0% (slip +0.20% adj)
+        # 일봉 전략: rapid guard에서 SL 미체크 (tick false trigger 방지)
+        return 4.0, -1.0, 900
     if desk == "crypto" and "dual_rsi" in focus:
         # S13 Dual RSI 이중 확인 (2026-05-20):
         # Crypto: Sh 7.28, WR 51.2%, PnL 3.20, MDD -8.7% | Korea: Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
         # 진입 조건: RSI(2)<10 + RSI(14)<40 + close>EMA200 + close<EMA20
-        # stop -1.4% (S9와 동일 — 같은 자산군, 같은 수수료 구조)
-        return 10.0, -1.4, 2700
+        # SL -1.4%→-1.7%: slip cost adj (백테스트 raw -1.3% → 실전 net -1.7%)
+        return 10.0, -1.7, 2700
     # ── Phase 2: Swing Recovery 모드 — 회복 가능성 평가 후 중장투 전환 ──────
     # new_high_breakout 포지션이 stop(-4%)에 닿기 전, 시장/뉴스 조건 충족 시 전환
     # target +15%, stop -7%, max ~5거래일 (wall-clock 기준 확인)
@@ -651,15 +653,15 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         return 15.0, -7.0, 7200  # 7200 cycles (~50h @ 25s/cycle ≈ 5 trading days)
 
     if desk == "crypto" and "rsi2_mean_reversion" in focus:
-        # S9 RSI(2) Connors (fee-adjusted 2026-05-20):
+        # S9 RSI(2) Connors:
         # Crypto: Sh 2.76, WR 48.1%, PnL 1.58, MDD -6.3% | Stocks: Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
-        # stop -1.4% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
-        return 10.0, -1.4, 2700
+        # SL -1.4%→-1.7%: 백테스트 fee-only → 실전 fee+slip 보정 (+0.20%)
+        return 10.0, -1.7, 2700
     if desk == "crypto" and "nday_pullback" in focus:
-        # S10 N-Day Pullback (fee-adjusted 2026-05-20):
+        # S10 N-Day Pullback:
         # Crypto: Sh 5.21, WR 55.8%, PnL 1.91, MDD -6.7% | Stocks: Sh 3.52, WR 51.0%, PnL 1.64, MDD -13.6%
-        # stop -1.2% (tightened from -1.5% to maintain P&L≥1.5 after 0.10% round-trip fee)
-        return 10.0, -1.2, 2700
+        # SL -1.2%→-1.5%: 백테스트 fee-only → 실전 fee+slip 보정 (+0.20%)
+        return 10.0, -1.5, 2700
     if desk == "crypto":
         # Trend mode: cut failed ignitions fast, let winners run with trailing.
         return 10.0, -2.0, 180
@@ -2084,20 +2086,26 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                     _close_position(position, "rapid_range_scalp_no_lift")
                     paper_closed += 1
                 continue
-            # ── 일봉 전략 (bear_oversold, momentum_breakout): trail 없이 SL/TP만 ──
-            # 이 전략들은 full-cycle에서도 trail 없음 — rapid에서도 trail 적용 금지
+            # ── 일봉/시간봉 전략: tick-level rapid guard에서 SL 미체크 ──────────
+            # 백테스트는 daily close 기준 SL → tick마다 체크하면 intraday noise에 false 발동
+            # (BTC/ETH 일중 -0.5~1% 조정은 정상, 그때마다 SL 발동하면 WR 급락)
+            # SL은 full-cycle sync_paper_positions에서만 (20~120s 간격)
+            # TP는 즉시 체크 유지 (수익 기회 포착)
+            # trail도 제거: 일봉/시간봉 전략의 peak 흐름은 시간 단위, tick trail 무의미
             is_daily_strategy = (
-                "bear_oversold" in pos_focus_rapid or "momentum_breakout" in pos_focus_rapid
+                "bear_oversold" in pos_focus_rapid
+                or "momentum_breakout" in pos_focus_rapid
+                or "rsi2_mean_reversion" in pos_focus_rapid
+                or "nday_pullback" in pos_focus_rapid
+                or "dual_rsi" in pos_focus_rapid
+                or "eth_4h_breakout" in pos_focus_rapid
             )
             if is_daily_strategy:
                 if position.pnl_pct >= target_pct:
                     closed_symbols.append((position.symbol, "rapid_daily_target"))
                     _close_position(position, "rapid_daily_target")
                     paper_closed += 1
-                elif position.pnl_pct <= stop_pct:
-                    closed_symbols.append((position.symbol, "rapid_daily_stop"))
-                    _close_position(position, "rapid_daily_stop")
-                    paper_closed += 1
+                # SL 미체크 — full-cycle에서만 처리 (false trigger 방지)
                 continue
             if position.pnl_pct >= target_pct:
                 closed_symbols.append((position.symbol, "rapid_target_hit"))
