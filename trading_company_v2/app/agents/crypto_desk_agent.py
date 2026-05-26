@@ -347,8 +347,8 @@ def _check_bear_oversold_bounce_crypto() -> dict:
 
     Daily 캔들 기준 (EMA200 아래 하락장 전용):
       1. close < EMA200 × 0.97    -- EMA200 아래 3% 이상
-      2. RSI(2) < 12              -- 단기 과매도 (2026-05-26: 5→12 완화)
-      3. RSI(14) < 42             -- 중기 과매도 확인 (2026-05-26: 25→42 완화)
+      2. RSI(2) < 10              -- 단기 과매도 (12→10 조정)
+      3. RSI(14) < 38             -- 중기 과매도 확인 (42→38 조정)
       4. close < EMA20 × 0.975   -- 단기 추세 하락 확인
 
     백테스트 결과 (2022-2026, fee 0.10%, 원래 RSI2<5 / RSI14<25):
@@ -393,14 +393,14 @@ def _check_bear_oversold_bounce_crypto() -> dict:
             if closes[-1] >= ema20 * 0.975:
                 continue
 
-            # 2. RSI(2) < 12 (5→12: 완만한 하락장 과매도 포착)
+            # 2. RSI(2) < 10 (12→10: DOGE 턱걸이 진입 차단)
             rsi2_val = _rsi(closes, 2)
-            if rsi2_val is None or rsi2_val >= 12.0:
+            if rsi2_val is None or rsi2_val >= 10.0:
                 continue
 
-            # 3. RSI(14) < 42 (25→42: 중기 과매도 범위 확장)
+            # 3. RSI(14) < 38 (42→38: 경계선 종목 차단)
             rsi14_val = _rsi(closes, 14)
-            if rsi14_val is None or rsi14_val >= 42.0:
+            if rsi14_val is None or rsi14_val >= 38.0:
                 continue
 
             gap_pct = round((ema200 - closes[-1]) / ema200 * 100, 2)
