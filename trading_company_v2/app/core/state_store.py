@@ -938,23 +938,29 @@ def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
     hard target 없이 트레일링만으로 청산 — 상승 추세 최대한 탑승.
     protect_level = max(floor, peak - giveback)
 
-    peak >= 15% → giveback 3.5%, floor 10%   (대세 상승)
-    peak >=  8% → giveback 2.5%, floor  5.5%
-    peak >=  4% → giveback 1.5%, floor  3.0%  (2026-05-19: 2.5→3.0 상향)
-    peak >=  2% → giveback 0.9%, floor  1.5%  (2026-05-19: 1.2→1.5 상향, 수익보호 강화)
-    peak >= 1.5% → giveback 0.6%, floor  0.7%  (작은 수익도 보호)
-    peak <  1.5% → 트레일 없음
+    2026-05-26: floor 전반 상향 — peak +1.79% → -0.45% 반납 방지
+    (overnight 갭다운으로 trail 발동 전 손실 전환 사례 → floor를 수익구간으로 진입 즉시 잠금)
+
+    peak >= 15% → giveback 3.5%, floor 11.0%  (10.0 → 11.0)
+    peak >=  8% → giveback 2.5%, floor  6.0%  (5.5 → 6.0)
+    peak >=  4% → giveback 1.5%, floor  3.5%  (3.0 → 3.5)
+    peak >=  2% → giveback 0.9%, floor  1.8%  (1.5 → 1.8)
+    peak >= 1.5% → giveback 0.5%, floor  1.1%  (0.7 → 1.1: 수익 진입 즉시 잠금)
+    peak >= 1.0% → giveback 0.4%, floor  0.6%  (신규 tier: 소폭 수익 조기 보호)
+    peak <  1.0% → 트레일 없음
     """
     if peak_pnl >= 15.0:
-        return 3.5, 10.0
+        return 3.5, 11.0
     if peak_pnl >= 8.0:
-        return 2.5, 5.5
+        return 2.5, 6.0
     if peak_pnl >= 4.0:
-        return 1.5, 3.0  # floor 2.5 → 3.0: peak=4% 도달 시 3.0% 확보
+        return 1.5, 3.5
     if peak_pnl >= 2.0:
-        return 0.9, 1.5  # floor 1.2 → 1.5: peak=2% 도달 시 1.5% 확보 (기존 1.2%)
+        return 0.9, 1.8
     if peak_pnl >= 1.5:
-        return 0.6, 0.7
+        return 0.5, 1.1  # giveback 0.6→0.5 타이트, floor 0.7→1.1 대폭 상향
+    if peak_pnl >= 1.0:
+        return 0.4, 0.6  # 신규: peak 1%만 넘어도 0.6% 확보
     return 0.0, 0.0
 
 

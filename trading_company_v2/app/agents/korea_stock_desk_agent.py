@@ -151,22 +151,13 @@ class KoreaStockDeskAgent(BaseAgent):
         super().__init__("korea_stock_desk_agent")
 
     def run(self) -> AgentResult:
-        # ── 시간대별 vol 기준 ────────────────────────────────────────────────
-        # 09:00-09:30: 개장 직후 구조적 저거래량 → 1.0x 예외
-        # 09:30+: 정상 장중 → 2.0x 필수 (거래량 없는 돌파 = false breakout)
-        # RSI: 50-85 (원래 55-80에서 소폭 완화)
-        try:
-            from datetime import datetime
-            from zoneinfo import ZoneInfo
-            _kst = datetime.now(ZoneInfo("Asia/Seoul"))
-            _kst_min = _kst.hour * 60 + _kst.minute
-        except Exception:
-            _kst_min = 600  # 10:00 KST 기본값
-        if _kst_min < 9 * 60 + 30:   # 09:00 ~ 09:30 (개장 직후)
-            _vol_mult = 1.0
-        else:                          # 09:30 이후 (정상 장중)
-            _vol_mult = 2.0
-        _rsi_min, _rsi_max = 50.0, 85.0  # 원래 55-80에서 소폭 완화 유지
+        # ── vol 기준 ──────────────────────────────────────────────────────────
+        # 전 시간대 2.0x 통일 (2026-05-26: 개장 직후 1.0x 예외 폐지)
+        # 근거: KST 09:xx WR=0%(3전 3패) — 저거래량 구간의 false breakout 필터 실패
+        #       개장 직후 저거래량은 예외가 아니라 오히려 더 엄격한 필터가 필요함
+        # RSI: 50-85
+        _vol_mult = 2.0
+        _rsi_min, _rsi_max = 50.0, 85.0
         _min_breakout_pct = 0.5  # 60일 신고점 대비 최소 0.5% 돌파 (노이즈 차단)
 
         # ── Strategy B: 60일 신고점 돌파 스캔 ────────────────────────────────

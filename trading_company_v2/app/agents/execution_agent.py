@@ -428,9 +428,15 @@ class ExecutionAgent(BaseAgent):
         return mapped
 
     def _recent_loss_cooldown(self, desk: str, symbol: str) -> bool:
+        """동일 종목 최근 손실 쿨다운.
+
+        2026-05-26: 체크 범위 4→10건 확장.
+        근거: 039030(이오테크닉스) 1차 손실(5/24) 후 2차 진입(5/26)이 쿨다운 4건 창 밖으로
+        벗어나 재진입 → -1.92% 추가 손실. 10건 체크로 확장해 동일 종목 연속 손실 방지.
+        """
         if not symbol:
             return False
-        recent = [item for item in self.closed_positions if not self._is_retired_strategy_trade(item)][:4]
+        recent = [item for item in self.closed_positions if not self._is_retired_strategy_trade(item)][:10]
         for item in recent:
             if item.get("desk") != desk or item.get("symbol") != symbol:
                 continue
