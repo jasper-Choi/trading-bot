@@ -1298,7 +1298,15 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
             bucket["losses"] += 1
         if float(row.peak_pnl_pct or 0.0) <= 0.0001:
             bucket["peak0_count"] += 1
-        if row.closed_reason in _STOP_LIKE_PAPER_REASONS or str(row.closed_reason or "").startswith("rapid_"):
+        _cr = str(row.closed_reason or "")
+        _is_stop_like = (
+            _cr in _STOP_LIKE_PAPER_REASONS
+            or (
+                _cr.startswith("rapid_")
+                and pnl < 0.0  # 수익 청산(rapid_profit_protect, rapid_trend_trail 등)은 stop-like 아님
+            )
+        )
+        if _is_stop_like:
             bucket["stop_like_count"] += 1
 
     results: list[dict] = []
