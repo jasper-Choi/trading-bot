@@ -1,5 +1,43 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-26 (전체 버그 점검 — NameError + KRW-SUI 중복 제거)
+
+### 작업 내용
+
+**커밋 `b00564e`**
+
+#### 버그 1 — `hot_path_guard.py` NameError 크래시
+
+`_candidate_is_hot_entry_eligible` 함수에서 `vol_surge_long_signal`, `breakout_vol_confirm_signal`이 line ~1010에서 선언되지만 line ~946에서 먼저 사용됨.
+RANGING 분기에서는 `return False`로 조기 탈출해 문제없었으나, non-RANGING 경로에서 `_vol_breakout_ok` 호출 시 NameError 크래시 발생.
+
+**수정**: `_vb_breakout_score` 선언 직전에 early declarations 추가:
+```python
+# (RANGING return False 이후 non-RANGING 경로 NameError 방지)
+vol_surge_long_signal = bool(item.get("vol_surge_long", False))
+breakout_vol_confirm_signal = bool(item.get("breakout_vol_confirm", False))
+```
+
+#### 버그 2 — `state_store.py` KRW-SUI 중복 딕셔너리 키
+
+`_CRYPTO_NAMES` dict에서 `"KRW-SUI": "수이"` 중복 선언.
+Python은 마지막 값을 채택하므로 기능 오류는 없으나, SyntaxWarning 및 혼란 가능성.
+
+**수정**: 중복 키 1개 제거.
+
+#### 기타 — bear_oversold 주석 업데이트
+
+`sync_paper_positions` 내 bear_oversold 주석을 `SL -1.0% (slip adj), full-cycle에서만 SL 체크` 로 현행화.
+
+#### 파일 변경
+
+| 파일 | 변경 |
+|------|------|
+| `app/services/hot_path_guard.py` | vol_surge_long_signal, breakout_vol_confirm_signal early declarations 추가 |
+| `app/core/state_store.py` | _CRYPTO_NAMES KRW-SUI 중복 제거, bear_oversold 주석 업데이트 |
+
+---
+
 ## 0. Claude - 2026-05-26 (strategy health 오진단 수정 — rapid 수익 청산 stop-like 오분류)
 
 ### 작업 내용
