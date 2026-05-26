@@ -877,19 +877,31 @@ def _check_swing_recovery_eligible(position: Any, minutes_open: float) -> bool:
 
 
 def _korea_newhi_trail_rules(peak_pnl: float) -> tuple[float, float]:
-    """신고점 돌파 전략 전용 트레일 — 백테스트 검증값 (2026-05-19).
+    """신고점 돌파 전략 전용 트레일 — 타이트 버전 (2026-05-26 강화).
 
-    Strategy B: target 10%, stop -4%, trail_trigger 5%, trail_pct 4%
     protect_level = max(floor, peak - giveback)
+    giveback 0.5% 이내로 타이트하게 — 수익을 빠르게 잠금
 
-    peak >= 10% → giveback 6%, floor  6%   (대형 추세 보호)
-    peak >=  5% → giveback 4%, floor  2%   (백테스트 핵심 구간)
-    peak <   5% → 트레일 없음 (hard stop -4%만 작동)
+    peak >= 10% → giveback 0.5%, floor  9.0%
+    peak >=  7% → giveback 0.5%, floor  6.5%
+    peak >=  5% → giveback 0.5%, floor  4.5%
+    peak >=  3% → giveback 0.5%, floor  2.5%
+    peak >=  2% → giveback 0.4%, floor  1.5%
+    peak >=  1% → giveback 0.3%, floor  0.7%
+    peak <   1% → 트레일 없음 (hard stop -4%만 작동)
     """
     if peak_pnl >= 10.0:
-        return 6.0, 6.0
+        return 0.5, 9.0
+    if peak_pnl >= 7.0:
+        return 0.5, 6.5
     if peak_pnl >= 5.0:
-        return 4.0, 2.0
+        return 0.5, 4.5
+    if peak_pnl >= 3.0:
+        return 0.5, 2.5
+    if peak_pnl >= 2.0:
+        return 0.4, 1.5
+    if peak_pnl >= 1.0:
+        return 0.3, 0.7
     return 0.0, 0.0
 
 
