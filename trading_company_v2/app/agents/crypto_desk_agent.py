@@ -191,8 +191,8 @@ def _check_rsi2_mean_reversion_crypto() -> dict:
         "dual_rsi_long": False,   # S13: RSI(2)<10 AND RSI(14)<40
         "dual_rsi_rsi14": 0.0,
     }
-    # KRW-XRP 추가 (2026-05-20): 스캔 유니버스 확장으로 신호 빈도 개선
-    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP"):
+    # 2026-05-26: DOGE, ADA 추가 — 유니버스 확장으로 레인징 구간 신호 빈도 개선
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ADA"):
         try:
             daily = get_upbit_daily_candles(market, count=220)
             if len(daily) < 205:
@@ -233,12 +233,15 @@ def _check_nday_pullback_crypto() -> dict:
 
     Daily 캔들 기준:
       1. close > EMA200 (상승장 레짐 필터)
-      2. 3일 연속 하락 마감
+      2. 2일 연속 하락 마감  (2026-05-26: 3→2일, 레인징 장세 신호 빈도 개선)
       3. close < EMA5 (단기 하락 추세 확인)
 
-    백테스트 결과:
+    백테스트 결과 (3일 기준):
       Crypto: Sharpe 4.78, WR 55.8%, P/L 1.73, MDD -7.7%
       Stocks: Sharpe 4.52, WR 54.1%, P/L 1.69, MDD -12.1%
+
+    2026-05-26 조정: 3→2일 — 레인징 구간에서 코인 거래가 전무해 빈도 개선.
+    2일 기준은 3일과 같은 방향성 필터를 유지하면서 신호 발동 시기를 앞당김.
     """
     result: dict = {
         "nday_long": False,
@@ -247,7 +250,8 @@ def _check_nday_pullback_crypto() -> dict:
         "nday_ema5": 0.0,
         "nday_deviation_pct": 0.0,
     }
-    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP"):  # XRP 추가
+    # 2026-05-26: DOGE, ADA 추가 — 유니버스 확장으로 신호 빈도 개선
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ADA"):
         try:
             daily = get_upbit_daily_candles(market, count=220)
             if len(daily) < 210:
@@ -261,13 +265,13 @@ def _check_nday_pullback_crypto() -> dict:
             ema5 = _ema(closes[-10:], 5)
             if ema5 <= 0:
                 continue
-            # 3일 연속 하락
+            # 2일 연속 하락 (3→2일 완화)
             consec = sum(
                 1 for i in range(-3, 0)
                 if closes[i] < closes[i - 1]
             )
             deviation_pct = round((closes[-1] - ema5) / ema5 * 100, 2)
-            if consec >= 3 and closes[-1] < ema5:
+            if consec >= 2 and closes[-1] < ema5:
                 result["nday_long"] = True
                 result["nday_symbol"] = market
                 result["nday_consec_down"] = consec
@@ -302,8 +306,8 @@ def _check_mongtata_airborne_crypto() -> dict:
         "mongtata_lower_bb": 0.0,
         "mongtata_deviation_pct": 0.0,
     }
-    # BTC → ETH → SOL 순서로 신호 탐색 (첫 번째 신호만 반환)
-    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL"):
+    # 2026-05-26: XRP, DOGE 추가 — 레인징 구간 신호 빈도 개선
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE"):
         try:
             daily = get_upbit_daily_candles(market, count=220)
             if len(daily) < 205:
@@ -428,7 +432,8 @@ def _check_momentum_breakout_crypto() -> dict:
         "momentum_breakout_ema_trend": False,   # EMA50 > EMA200
         "momentum_breakout_high10": 0.0,        # 이전 10봉 최고가
     }
-    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP"):
+    # 2026-05-26: DOGE, ADA 추가 — 신고가 돌파 유니버스 확장
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ADA"):
         try:
             daily = get_upbit_daily_candles(market, count=220)
             if len(daily) < 215:
