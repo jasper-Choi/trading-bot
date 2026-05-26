@@ -347,14 +347,18 @@ def _check_bear_oversold_bounce_crypto() -> dict:
 
     Daily 캔들 기준 (EMA200 아래 하락장 전용):
       1. close < EMA200 × 0.97    -- EMA200 아래 3% 이상
-      2. RSI(2) < 5               -- 극단 단기 과매도
-      3. RSI(14) < 25             -- 중기 과매도 확인
+      2. RSI(2) < 12              -- 단기 과매도 (2026-05-26: 5→12 완화)
+      3. RSI(14) < 42             -- 중기 과매도 확인 (2026-05-26: 25→42 완화)
       4. close < EMA20 × 0.975   -- 단기 추세 하락 확인
 
-    백테스트 결과 (2022-2026, fee 0.10%):
+    백테스트 결과 (2022-2026, fee 0.10%, 원래 RSI2<5 / RSI14<25):
       Crypto: Sharpe 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15 ✅
 
-    파라미터: TP=+4%, SL=-0.8%, HOLD=5일, Size=0.50x (하락장 경감)
+    2026-05-26 조정: RSI 조건 완화 + 유니버스 확장
+    - 배경: 전 코인 EMA200 아래 (하락장), RSI2 6~20 / RSI14 34~44 구간에서 거래 전무
+    - RSI2<5, RSI14<25는 시장 붕괴 수준에서만 발동 → 완만한 하락장 커버 불가
+    - DOGE RSI2=6.7, ADA RSI2=9.1 같이 충분히 과매도인데 미발동
+    - 파라미터: TP=+4%, SL=-0.8%, HOLD=5일
     """
     result: dict = {
         "bear_oversold_long": False,
@@ -363,7 +367,8 @@ def _check_bear_oversold_bounce_crypto() -> dict:
         "bear_oversold_rsi14": 0.0,
         "bear_oversold_ema200_gap_pct": 0.0,
     }
-    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP"):
+    # 2026-05-26: DOGE, ADA 추가 — 하락장 스캔 유니버스 확장
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ADA"):
         try:
             daily = get_upbit_daily_candles(market, count=220)
             if len(daily) < 215:
@@ -376,7 +381,7 @@ def _check_bear_oversold_bounce_crypto() -> dict:
             if ema200 <= 0:
                 continue
 
-            # 1. EMA200 아래 3% 이상
+            # 1. EMA200 아래 3% 이상 (하락장 필터 유지)
             if closes[-1] >= ema200 * 0.97:
                 continue
 
@@ -388,14 +393,14 @@ def _check_bear_oversold_bounce_crypto() -> dict:
             if closes[-1] >= ema20 * 0.975:
                 continue
 
-            # 2. RSI(2) < 5
+            # 2. RSI(2) < 12 (5→12: 완만한 하락장 과매도 포착)
             rsi2_val = _rsi(closes, 2)
-            if rsi2_val is None or rsi2_val >= 5.0:
+            if rsi2_val is None or rsi2_val >= 12.0:
                 continue
 
-            # 3. RSI(14) < 25
+            # 3. RSI(14) < 42 (25→42: 중기 과매도 범위 확장)
             rsi14_val = _rsi(closes, 14)
-            if rsi14_val is None or rsi14_val >= 25.0:
+            if rsi14_val is None or rsi14_val >= 42.0:
                 continue
 
             gap_pct = round((ema200 - closes[-1]) / ema200 * 100, 2)
