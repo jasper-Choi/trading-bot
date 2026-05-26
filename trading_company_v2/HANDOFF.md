@@ -1,5 +1,49 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-26 (일봉 전략 SL 전면 재점검 — tick false trigger 제거 + 슬리피지 보정)
+
+### 작업 내용
+
+**커밋 `b939cd8`**
+
+#### 근본 원인 진단
+
+| 문제 | 내용 |
+|------|------|
+| **tick-level SL 미스매치** | 백테스트: daily close 기준 SL. 봇: tick마다 체크. BTC/ETH 일중 -0.5~1% 조정은 완전 정상인데 SL 발동 |
+| **슬리피지 미보정** | 백테스트 비용 0.10% (수수료만). 실전 0.30~0.40% (수수료+슬리피지). 실질 SL이 훨씬 타이트 |
+
+bear_oversold SL=-0.8%의 경우: 실전에서 raw price -0.5% 하락만으로 SL 발동 (costs 포함 net = -0.8%)
+
+#### 수정 1 — `rapid_guard_crypto_positions` daily strategy SL 제거
+
+`is_daily_strategy` 대상 전략 확장 (기존: bear_oversold, momentum_breakout):
+```
+bear_oversold, momentum_breakout, rsi2_mean_reversion,
+nday_pullback, dual_rsi, eth_4h_breakout
+```
+
+이 전략들은 rapid guard에서 **TP만 체크** (수익 즉시 포착). SL은 full-cycle (20~120s)에서만.
+
+#### 수정 2 — `_position_thresholds` SL 슬리피지 보정
+
+| 전략 | 기존 SL | 새 SL | 근거 |
+|------|---------|-------|------|
+| bear_oversold | -0.8% | **-1.0%** | raw SL -0.7% → net 보정 |
+| momentum_breakout | -2.0% | **-2.4%** | raw SL -1.9% → net 보정 |
+| eth_4h_breakout | -3.0% | **-3.5%** | raw SL -2.9% → net 보정 |
+| dual_rsi | -1.4% | **-1.7%** | slip +0.20% 보정 |
+| rsi2_mean_reversion | -1.4% | **-1.7%** | slip +0.20% 보정 |
+| nday_pullback | -1.2% | **-1.5%** | slip +0.20% 보정 |
+
+#### 파일 변경
+
+| 파일 | 변경 |
+|------|------|
+| `app/core/state_store.py` | is_daily_strategy SL 제거 + 대상 확장, _position_thresholds SL 보정 |
+
+---
+
 ## 0. Claude - 2026-05-26 (코인 P/L 개선 — bear_oversold trail 버그 수정 + giveback 완화)
 
 ### 작업 내용
