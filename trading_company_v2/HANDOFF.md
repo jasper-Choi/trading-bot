@@ -1,5 +1,56 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-05-26 (손실 급증 패치 + 코인 S17 신호 발동 완료)
+
+### 작업 내용
+
+**1. 손실 급증 원인 진단 및 패치 (커밋 `d431aba`)**
+
+Oracle VM DB 분석 결과 손실 급증 원인 3가지:
+- **09:00-09:30 vol_mult=1.0x** → 개장 직후 false breakout 허용 (KST 09:xx 구간 WR=0%)
+- **Trail floor 미흡** → peak 수익 후 overnight 갭다운 시 수익 보호 실패
+- **Cooldown 4건 창** → 동일 종목(039030) 4건 벗어나 재진입 → 추가 손실
+
+패치 내용:
+- vol_mult: 09:00-09:30 1.0x 예외 제거 → 전 시간대 2.0x 통일
+- trail floor 강화: peak≥2.0 → floor 1.5→1.8 / peak≥1.5 → floor 0.7→1.1 / peak≥1.0 신규 tier(floor 0.6)
+- cooldown 창 확장: recent[:4] → recent[:10]
+
+**2. 코인 거래 전무 원인 진단 및 수정 (커밋 `a1103a1`)**
+
+근본 원인: 전 코인 daily EMA200 이하 (하락장) → 기존 bull 전략(S2/S9/S10/S15) 전부 블록
+→ S17 bear_oversold 조건 완화로 하락장 전용 신호 발동
+
+- S17 RSI 조건 완화: RSI(2) < 5→12, RSI(14) < 25→42
+- 유니버스 확장 (S10/S9/S15/MONGTATA): + KRW-DOGE, KRW-ADA
+- S10 연속 하락 기준: 3일→2일
+
+**3. crypto_signal=0.00 버그 수정 (커밋 `e939f31`)**
+
+- 원인: `orchestrator.py`가 `payload["signal_score"]`를 읽는데 `crypto_desk_agent.py`가 `AgentResult.score`에만 점수를 넣고 payload에 `signal_score` 키가 없었음
+- 수정: payload에 `"signal_score": _score` 추가
+- 효과: S17 SOL 신호 시 crypto_signal=0.68 (trigger 0.58 통과) → 즉시 진입
+
+**최종 결과:**
+- `[crypto] KRW-SOL  crypto.bear_oversold_bounce` 포지션 오픈 (2026-05-26T01:52:26)
+- crypto_signal=0.68, S17_bear=True, S17_symbol=KRW-SOL
+
+**파일 변경:**
+
+| 파일 | 변경 | 커밋 |
+|------|------|------|
+| `app/agents/korea_stock_desk_agent.py` | vol_mult 통일, S18/S19 inst_foreign 통합 | `d431aba` |
+| `app/agents/execution_agent.py` | cooldown[:10], S18/S19 라우팅 | `d431aba` |
+| `app/core/state_store.py` | trail floor 강화, S18/S19 threshold | `d431aba` |
+| `app/agents/crypto_desk_agent.py` | S17 RSI 완화, 유니버스 확장, signal_score payload | `a1103a1`, `e939f31` |
+
+**미결 사항:**
+- S17 SOL 포지션 결과 모니터링 (TP=+4%, SL=-0.8%, max 5일)
+- ADA/DOGE RSI2 조건 충족 시 추가 S17 신호 가능
+- 코인 신호 발동 후 shadow period 누적 현황 확인 필요
+
+---
+
 ## 0. Claude - 2026-05-22 (기관+외국인 수급 전략 S18/S19 구현)
 
 ### 작업 내용
