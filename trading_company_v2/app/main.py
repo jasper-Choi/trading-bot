@@ -2564,10 +2564,10 @@ def _performance_html() -> str:  # noqa: PLR0915
     <!-- 코인별 성과 -->
     <section class="grid section">
       <div class="card full">
-        <h2>코인별 성과 분석 <span style="font-weight:400;color:var(--muted);font-size:.8rem">(클릭으로 정렬)</span></h2>
-        <h2 style="margin-top:10px;font-size:.9rem;color:var(--blue)">코인</h2>
-        <div class="table-wrap" id="symbol-table-crypto"></div>
-        <h2 style="margin-top:18px;font-size:.9rem;color:var(--yellow)">한국주식</h2>
+        <h2>종목별 성과 분석 <span style="font-weight:400;color:var(--muted);font-size:.8rem">(클릭으로 정렬)</span></h2>
+        <div style="display:none"><h2 style="margin-top:10px;font-size:.9rem;color:var(--blue)">코인</h2>
+        <div class="table-wrap" id="symbol-table-crypto"></div></div>
+        <h2 style="margin-top:10px;font-size:.9rem;color:var(--yellow)">한국주식</h2>
         <div class="table-wrap" id="symbol-table-korea"></div>
         <h2 style="margin-top:18px;font-size:.9rem;color:var(--muted)">미국주식</h2>
         <div class="table-wrap" id="symbol-table-us"></div>
@@ -3258,7 +3258,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
 
   <!-- 데스크 카드 -->
   <div class="desk-grid" id="desk-grid">
-    <button type="button" class="desk-card" data-desk="crypto" onclick="toggleDeskDetail('crypto')"><div class="desk-name">코인 <span class="desk-bk-badge" id="dk-crypto-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-crypto-act">--</div><div class="desk-focus" id="dk-crypto-focus">--</div><div class="desk-size" id="dk-crypto-size">0.00x</div></button>
+    <button type="button" class="desk-card" data-desk="crypto" onclick="toggleDeskDetail('crypto')" style="display:none"><div class="desk-name">코인 <span class="desk-bk-badge" id="dk-crypto-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-crypto-act">--</div><div class="desk-focus" id="dk-crypto-focus">--</div><div class="desk-size" id="dk-crypto-size">0.00x</div></button>
     <button type="button" class="desk-card" data-desk="korea" onclick="toggleDeskDetail('korea')"><div class="desk-name">한국주식 <span class="desk-bk-badge" id="dk-korea-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-korea-act">--</div><div class="desk-focus" id="dk-korea-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-korea-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-korea-qval">품질 --</span><span id="dk-korea-qthr">기준 --</span></div></div><div class="desk-size" id="dk-korea-size">0.00x</div></button>
     <button type="button" class="desk-card" data-desk="us" onclick="toggleDeskDetail('us')"><div class="desk-name">미국주식 <span class="desk-bk-badge" id="dk-us-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-us-act">--</div><div class="desk-focus" id="dk-us-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-us-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-us-qval">품질 --</span><span id="dk-us-qthr">기준 --</span></div></div><div class="desk-size" id="dk-us-size">0.00x</div></button>
   </div>
@@ -3741,7 +3741,7 @@ def _scanner_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>코인 스캐너</title>
+  <title>마켓 스캐너</title>
   <style>
     :root{
       --bg:#0d1117;--surface:rgba(22,27,34,.95);--border:rgba(48,54,61,1);--border-sub:rgba(48,54,61,.5);
@@ -3915,7 +3915,7 @@ def _scanner_html() -> str:
     <div class="hdr-left">
       <div class="refresh-dot" id="rdot"></div>
       <div>
-        <div class="hdr-title">📡 코인 스캐너</div>
+        <div class="hdr-title">📡 마켓 스캐너</div>
         <div class="hdr-sub" id="hdr-sub">로딩 중…</div>
       </div>
     </div>
@@ -3930,7 +3930,8 @@ def _scanner_html() -> str:
     <a href="/performance">Performance</a>
   </nav>
 
-  <!-- 시장 개요 바 -->
+  <!-- 코인 스캐너 UI (비활성, 숨김) -->
+  <div style="display:none">
   <div class="market-bar" id="market-bar">
     <div class="mbar-card"><div class="mbar-label">방향</div><div class="mbar-val neutral" id="mb-dir">—</div></div>
     <div class="mbar-card"><div class="mbar-label">스캔 코인</div><div class="mbar-val neutral" id="mb-cnt">—</div></div>
@@ -3940,8 +3941,6 @@ def _scanner_html() -> str:
     <div class="mbar-card"><div class="mbar-label">스트림 점화</div><div class="mbar-val" id="mb-si">—</div></div>
     <div class="mbar-card"><div class="mbar-label">세력흐름</div><div class="mbar-val" id="mb-sm">—</div></div>
   </div>
-
-  <!-- 필터 칩 -->
   <div class="filter-row">
     <span class="filter-label">필터:</span>
     <button class="chip active" data-f="all" onclick="setFilter('all',this)">전체</button>
@@ -3954,8 +3953,6 @@ def _scanner_html() -> str:
     <button class="chip c-smart" data-f="smart" onclick="setFilter('smart',this)">💜 세력흐름</button>
   </div>
   <div class="sort-hint">컬럼 클릭으로 정렬 · 현재 정렬: <span id="sort-label">Combined ↓</span></div>
-
-  <!-- 테이블 -->
   <div class="tbl-wrap">
     <table id="scan-tbl">
       <thead>
@@ -3977,13 +3974,9 @@ def _scanner_html() -> str:
           <th>상태</th>
         </tr>
       </thead>
-      <tbody id="scan-body">
-        <tr><td colspan="15" style="text-align:center;padding:30px;color:var(--muted)">로딩 중…</td></tr>
-      </tbody>
+      <tbody id="scan-body"></tbody>
     </table>
   </div>
-
-  <!-- 자동발견 섹션 -->
   <div class="discovery-section">
     <div class="disc-title">🚀 브레이크아웃 확정 <span class="disc-count" id="disc-bk-cnt">0</span></div>
     <div class="disc-grid" id="disc-bk"></div>
@@ -4004,9 +3997,10 @@ def _scanner_html() -> str:
     <div class="disc-title">💜 세력흐름 / 작도 돌파 <span class="disc-count" id="disc-sm-cnt">0</span></div>
     <div class="disc-grid" id="disc-sm"></div>
   </div>
+  </div><!-- end coin scanner hidden -->
 
   <!-- 한국 주식 스캐너 섹션 -->
-  <div id="korea-section" style="display:none;margin-top:22px">
+  <div id="korea-section" style="margin-top:22px">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:6px">
       <div class="disc-title" style="margin:0">🇰🇷 한국 주식 <span class="disc-count" id="korea-cnt">0</span></div>
       <div class="sort-hint" style="margin:0">컬럼 클릭으로 정렬 · 현재 정렬: <span id="korea-sort-label">점수 ↓</span></div>
@@ -4463,7 +4457,7 @@ async function loadScanner(){
     _data = json.candidates || [];
     _koreaData = json.korea_candidates || [];
     document.getElementById('hdr-sub').textContent =
-      toKST(json.updated_at)+' KST · '+_data.length+'개 코인 스캔'+(_koreaData.length?' · 주식 '+_koreaData.length+'개':'');
+      toKST(json.updated_at)+' KST · 한국주식 '+_koreaData.length+'개 후보';
     renderMarketBar(json);
     renderTable();
     renderDiscovery();

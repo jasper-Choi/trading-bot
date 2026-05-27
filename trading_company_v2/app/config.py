@@ -33,7 +33,7 @@ class Settings:
     company_name: str = os.environ.get("COMPANY_NAME", "Solo Trading Company")
     app_env: str = os.environ.get("APP_ENV", "local")
     execution_mode: str = os.environ.get("EXECUTION_MODE", "paper")
-    active_desks: str = os.environ.get("ACTIVE_DESKS", "crypto")
+    active_desks: str = os.environ.get("ACTIVE_DESKS", "korea,us")
     paper_fee_bps: float = float(os.environ.get("PAPER_FEE_BPS", "5"))
     paper_slippage_min_bps: float = float(os.environ.get("PAPER_SLIPPAGE_MIN_BPS", "5"))
     paper_slippage_max_bps: float = float(os.environ.get("PAPER_SLIPPAGE_MAX_BPS", "15"))
@@ -88,7 +88,7 @@ class Settings:
     @property
     def active_desk_set(self) -> set[str]:
         desks = {item.strip().lower() for item in self.active_desks.split(",") if item.strip()}
-        return desks or {"crypto"}
+        return desks or {"korea", "us"}
 
 
 settings = Settings()

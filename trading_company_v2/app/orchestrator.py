@@ -141,10 +141,15 @@ def _manage_positions(paper_orders: list[PaperOrder], market_snapshot: dict, ski
 
 
 def _live_desks_for_mode(execution_mode: str) -> set[str]:
+    active = settings.active_desk_set
+    live_desks: set[str] = set()
     if execution_mode == "upbit_live":
-        live_desks = {"crypto"}
+        # crypto가 active_desks에 있을 때만 live 거래
+        if "crypto" in active:
+            live_desks.add("crypto")
         if (
-            settings.kis_allow_live
+            "korea" in active
+            and settings.kis_allow_live
             and settings.kis_app_key
             and settings.kis_app_secret
             and settings.kis_account_no
@@ -153,7 +158,9 @@ def _live_desks_for_mode(execution_mode: str) -> set[str]:
             live_desks.add("korea")
         return live_desks
     if execution_mode == "kis_live":
-        return {"korea"}
+        if "korea" in active:
+            return {"korea"}
+        return set()
     return set()
 
 
@@ -303,14 +310,19 @@ class CompanyOrchestrator:
             MacroSentimentAgent(),
             TrendStructureAgent(),
             StrategyAllocatorAgent(),
-            CryptoDeskAgent(),
             CIOAgent(),
             RiskCommitteeAgent(),
         ]
+        # 데스크 에이전트 조건부 삽입 (CIO/Risk 앞에 삽입)
+        _desk_idx = 4  # CIOAgent 자리 앞
+        if "crypto" in active_desks:
+            self.analysis_agents.insert(_desk_idx, CryptoDeskAgent())
+            _desk_idx += 1
         if "korea" in active_desks:
-            self.analysis_agents.insert(5, KoreaStockDeskAgent())
+            self.analysis_agents.insert(_desk_idx, KoreaStockDeskAgent())
+            _desk_idx += 1
         if "us" in active_desks:
-            self.analysis_agents.insert(6 if "korea" in active_desks else 5, USStockDeskAgent())
+            self.analysis_agents.insert(_desk_idx, USStockDeskAgent())
         self.execution_agent = ExecutionAgent()
         self.ops_agent = OpsAgent()
 

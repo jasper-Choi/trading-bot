@@ -28,6 +28,29 @@ _NAVER_SISE_MARKET_SUM_URL = (
 
 _UNIVERSE_TTL = 4 * 3600.0  # 4 hours
 
+# ── 한국 ETF 고정 유니버스 ──────────────────────────────────────────────────
+# KIS API로 거래 가능한 주요 ETF (KODEX / TIGER 계열)
+# 지수 추종 + 섹터 ETF 위주로 선정 — 레버리지/인버스 제외 (방향성 포지션용 아님)
+_KOREA_ETF_UNIVERSE: list[dict[str, Any]] = [
+    # 지수 ETF
+    {"ticker": "069500", "name": "KODEX 200",          "market": "ETF"},
+    {"ticker": "102110", "name": "TIGER 200",          "market": "ETF"},
+    {"ticker": "229200", "name": "KODEX 코스닥150",     "market": "ETF"},
+    {"ticker": "329200", "name": "TIGER 코스닥150",     "market": "ETF"},
+    {"ticker": "379800", "name": "KODEX MSCI Korea",   "market": "ETF"},
+    # 섹터 ETF
+    {"ticker": "091160", "name": "KODEX 반도체",        "market": "ETF"},
+    {"ticker": "091180", "name": "KODEX 자동차",        "market": "ETF"},
+    {"ticker": "091170", "name": "KODEX 은행",          "market": "ETF"},
+    {"ticker": "143850", "name": "TIGER 200 IT",       "market": "ETF"},
+    {"ticker": "139260", "name": "TIGER 200 금융",      "market": "ETF"},
+    {"ticker": "130730", "name": "TIGER 헬스케어",      "market": "ETF"},
+    # 해외지수 ETF (KIS 거래 가능, 국내 상장)
+    {"ticker": "133690", "name": "TIGER 나스닥100",     "market": "ETF"},
+    {"ticker": "379810", "name": "KODEX 나스닥100",     "market": "ETF"},
+    {"ticker": "195930", "name": "TIGER 선진국MSCI",    "market": "ETF"},
+]
+
 _lock = threading.Lock()
 _cache: list[dict[str, Any]] = []
 _cache_ts: float = 0.0
@@ -79,7 +102,7 @@ def _fetch_market(sosok: int, market_name: str, top_n: int) -> list[dict[str, An
 def _build_universe() -> list[dict[str, Any]]:
     kospi = _fetch_market(0, "KOSPI", 60)
     kosdaq = _fetch_market(1, "KOSDAQ", 60)
-    combined = kospi + kosdaq
+    combined = kospi + kosdaq + _KOREA_ETF_UNIVERSE
     # deduplicate by ticker
     seen: set[str] = set()
     deduped: list[dict[str, Any]] = []
@@ -88,7 +111,11 @@ def _build_universe() -> list[dict[str, Any]]:
         if t not in seen:
             seen.add(t)
             deduped.append(item)
-    _log.info("korea_universe refreshed: %d KOSPI + %d KOSDAQ = %d total", len(kospi), len(kosdaq), len(deduped))
+    etf_count = len(_KOREA_ETF_UNIVERSE)
+    _log.info(
+        "korea_universe refreshed: %d KOSPI + %d KOSDAQ + %d ETF = %d total",
+        len(kospi), len(kosdaq), etf_count, len(deduped),
+    )
     return deduped
 
 
