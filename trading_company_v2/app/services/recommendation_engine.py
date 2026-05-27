@@ -201,7 +201,7 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
     # ── 6. Strategy S17: Bear Market Oversold Bounce (하락장 전용) ─────────
     # 백테스트: Sharpe 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15 (2022-2026)
-    # 조건: RSI(2)<5 + RSI(14)<25 + close<EMA200×0.97 + close<EMA20×0.975
+    # 조건: RSI(2)<10 + RSI(14)<38 + close<EMA200×0.97 + close<EMA20×0.975 (2026-05-26 완화)
     # 하락장 전용 — EMA200 아래에서만 발동 (상승장 전략과 상호배타)
     # NOTE: panic 레짐은 이미 위에서 차단됨. fear 구간도 0.35x로 추가 축소.
     if payload.get("bear_oversold_long") and not _is_paused("crypto.bear_oversold_bounce"):

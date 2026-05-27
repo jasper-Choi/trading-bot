@@ -636,10 +636,11 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "crypto" and "bear_oversold" in focus:
         # S17 Bear Market Oversold Bounce (2026-05-20):
         # Crypto: Sh 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15
-        # 조건: RSI(2)<10 + RSI(14)<38 + close<EMA200×0.97 + close<EMA20×0.975
-        # TP +4.0%, SL -0.8%→-1.0%: 백테스트 raw SL -0.7% → 실전 net -1.0% (slip +0.20% adj)
-        # 일봉 전략: rapid guard에서 SL 미체크 (tick false trigger 방지)
-        return 4.0, -1.0, 900
+        # 조건: RSI(2)<10 + RSI(14)<38 + close<EMA200×0.97 + close<EMA20×0.975 (2026-05-26 완화)
+        # TP +4.0%, SL -1.0% (백테스트 raw -0.7% + slip 0.20% + 여유 0.10%)
+        # 일봉 전략: rapid guard SL 미체크, time exit은 wall-clock 5일만 사용 (cycles 무관)
+        # max_cycles=50000: 실질적 미사용 — time exit은 _S17_MAX_MINUTES(7200분)로만 판단
+        return 4.0, -1.0, 50000
     if desk == "crypto" and "dual_rsi" in focus:
         # S13 Dual RSI 이중 확인 (2026-05-20):
         # Crypto: Sh 7.28, WR 51.2%, PnL 3.20, MDD -8.7% | Korea: Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
@@ -1721,7 +1722,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "target_hit")
                     elif position.pnl_pct <= stop_pct:
                         _close_position(position, "stop_hit")
-                    elif minutes_open >= _S17_MAX_MINUTES or position.cycles_open >= max_cycles:
+                    elif minutes_open >= _S17_MAX_MINUTES:
+                        # cycles_open 기반 컷 제거: max_cycles=900 ≈ 5h → 5일 hold 의도 파괴
+                        # 오직 wall-clock 기반 시간만 사용 (cycle 속도 독립)
                         _close_position(position, "time_exit")
                     continue
                 # ── 추세추종 청산 로직 (기존) ──
