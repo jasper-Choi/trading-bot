@@ -194,6 +194,11 @@ class ExecutionAgent(BaseAgent):
         # suffocated by desk-level losses from unrelated experimental routes.
         if health == "candidate" and count >= 2 and (capital_pnl > 0 or raw_pnl > 0) and win_rate >= 45.0:
             return True
+        # 버그성 청산(rapid guard false exit 등)으로 P&L이 일시 음수가 됐지만
+        # WR·거래수 기준으로 검증된 전략: stop_pressure 데드락 방지
+        # 조건: n≥4, WR≥45%, raw_pnl≥-2.5% (전략 파탄 수준 아님)
+        if health == "candidate" and count >= 4 and win_rate >= 45.0 and raw_pnl >= -2.5:
+            return True
         if desk == "korea" and strategy_id in {"korea.selective_probe", "korea.attack_opening_drive"}:
             # selective_probe: 38% WR이지만 이익 크기>손실 크기 패턴, 회복 허용
             # attack_opening_drive: 67% WR, 검증됨
@@ -964,11 +969,13 @@ class ExecutionAgent(BaseAgent):
         strategy_disabled = self._strategy_disabled(strategy_id) if action in actionable_entries else None
         strategy_recovery_allowed = self._strategy_recovery_allowed(desk, strategy_id, action)
         if strategy_recovery_allowed:
-            # 검증된 전략: loss_pressure + chronic_drawdown + performance_lock 모두 해제
+            # 검증된 전략: loss_pressure + chronic_drawdown + performance_lock + stop_pressure 모두 해제
             # chronic/performance_lock이 loss_pressure만 풀고 chronic은 블록 → 회복 기회 자체가 없는 데드락 방지
+            # blocked_by_stop_pressure: 버그성 청산이 stop_like를 오염시킨 경우 데드락 차단
             desk_loss_pressure_blocks = False
             desk_chronic_drawdown = False
             desk_performance_lock = False
+            blocked_by_stop_pressure = False  # stop_pressure 데드락 해제 (검증된 전략만)
         meta = {
             "symbol": symbol,
             "reference_price": reference_price,
