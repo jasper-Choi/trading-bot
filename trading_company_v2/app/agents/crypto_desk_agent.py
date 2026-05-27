@@ -404,6 +404,12 @@ def _check_bear_oversold_bounce_crypto() -> dict:
                 continue
 
             gap_pct = round((ema200 - closes[-1]) / ema200 * 100, 2)
+
+            # EMA200 gap 상한: -25% 초과 = 장기 폭락장 → 계속 하락 위험, 패스
+            # (-3% ~ -25% 구간: 하락장이되 반등 가능성 유효)
+            if gap_pct > 25.0:
+                continue
+
             result["bear_oversold_long"]          = True
             result["bear_oversold_symbol"]         = market
             result["bear_oversold_rsi2"]           = rsi2_val

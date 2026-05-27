@@ -1022,6 +1022,15 @@ class ExecutionAgent(BaseAgent):
             and not high_corr_cap_hit
             and not stale_signal_block
             and not strategy_disabled
+            # bear_oversold: 상관 코인 동시 복수 진입 방지 — 1개 포지션만 허용
+            and not (
+                strategy_id == "crypto.bear_oversold_bounce"
+                and any(
+                    p.get("desk") == "crypto"
+                    and str(p.get("entry_profile", "") or "") == "bear_oversold_bounce"
+                    for p in self.open_positions
+                )
+            )
             else exit_status,
             "pnl_estimate_pct": pnl_estimate_pct,
         }
