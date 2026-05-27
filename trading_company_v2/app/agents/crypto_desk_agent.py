@@ -410,6 +410,25 @@ def _check_bear_oversold_bounce_crypto() -> dict:
             if gap_pct > 25.0:
                 continue
 
+            # ── 시장 방향 필터 (추세 가속 차단) ─────────────────────────────
+            # 과매도 타이밍이어도 하락 추세가 '가속 중'이면 반등보다 추세 연속이 위험
+            # EMA20 기울기: 최근 5일 대비 EMA20 하락폭
+            # -5% 초과 하락 = EMA20 자체가 급락 중 → 추세 하락 구간, 진입 자제
+            if len(closes) >= 26:  # EMA20(5일 전) 계산에 최소 25 데이터 필요
+                ema20_5d_ago = _ema(closes[:-5], 20)
+                if ema20_5d_ago > 0:
+                    ema20_slope_pct = (ema20 - ema20_5d_ago) / ema20_5d_ago * 100
+                    if ema20_slope_pct < -5.0:
+                        # EMA20이 5일에 5% 이상 하락 = 하락 가속 구간
+                        continue
+
+            # 10일 낙폭 상한: -20% 초과 = 패닉 국면 → 반등 전략 부적합
+            # (EMA200 갭 상한 -25%와 결합: 구조적 + 단기 양쪽에서 과도한 낙폭 차단)
+            if len(closes) >= 12 and closes[-11] > 0:
+                ret_10d = (closes[-1] - closes[-11]) / closes[-11] * 100
+                if ret_10d < -20.0:
+                    continue
+
             result["bear_oversold_long"]          = True
             result["bear_oversold_symbol"]         = market
             result["bear_oversold_rsi2"]           = rsi2_val
