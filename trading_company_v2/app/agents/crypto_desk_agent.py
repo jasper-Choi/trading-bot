@@ -347,18 +347,23 @@ def _check_bear_oversold_bounce_crypto() -> dict:
 
     Daily 캔들 기준 (EMA200 아래 하락장 전용):
       1. close < EMA200 × 0.97    -- EMA200 아래 3% 이상
-      2. RSI(2) < 10              -- 단기 과매도 (12→10 조정)
-      3. RSI(14) < 38             -- 중기 과매도 확인 (42→38 조정)
+      2. RSI(2) < 7               -- 단기 극과매도 (10→7 강화: 단기 조정 차단)
+      3. RSI(14) < 35             -- 중기 과매도 확인 (38→35 강화)
       4. close < EMA20 × 0.975   -- 단기 추세 하락 확인
+      5. EMA20 slope 5d > -3.5%  -- 하락 가속 구간 차단 (단기 조정 예측)
+      6. 5일 낙폭 > -10%         -- 단기 추세 강도 필터
+      7. 10일 낙폭 > -20%        -- 패닉 구간 차단
+      8. EMA200 gap -3% ~ -25%   -- 구조적 낙폭 범위
 
     백테스트 결과 (2022-2026, fee 0.10%, 원래 RSI2<5 / RSI14<25):
       Crypto: Sharpe 10.60, WR 60%, P/L 3.63, MDD -8.9%, n=15 ✅
 
-    2026-05-26 조정: RSI 조건 완화 + 유니버스 확장
-    - 배경: 전 코인 EMA200 아래 (하락장), RSI2 6~20 / RSI14 34~44 구간에서 거래 전무
-    - RSI2<5, RSI14<25는 시장 붕괴 수준에서만 발동 → 완만한 하락장 커버 불가
-    - DOGE RSI2=6.7, ADA RSI2=9.1 같이 충분히 과매도인데 미발동
-    - 파라미터: TP=+4%, SL=-0.8%, HOLD=5일
+    2026-05-27 강화: 단기 조정 필터 추가
+    - RSI2 10→7: 더 극단적 과매도만 진입 (ETH RSI2=7.7 수준 차단)
+    - RSI14 38→35: 중기 과매도 더 엄격
+    - EMA20 slope 5d -5%→-3.5%: 단기 하락 추세 더 빠르게 감지
+    - 5일 낙폭 -10% 상한 신규: 단기 조정 모멘텀 과도 시 차단
+    - 파라미터: TP=+4%, SL=-1.0%, HOLD=5일
     """
     result: dict = {
         "bear_oversold_long": False,
@@ -393,14 +398,14 @@ def _check_bear_oversold_bounce_crypto() -> dict:
             if closes[-1] >= ema20 * 0.975:
                 continue
 
-            # 2. RSI(2) < 10 (12→10: DOGE 턱걸이 진입 차단)
+            # 2. RSI(2) < 7 (10→7 강화: 단기 조정 차단, 극과매도만 진입)
             rsi2_val = _rsi(closes, 2)
-            if rsi2_val is None or rsi2_val >= 10.0:
+            if rsi2_val is None or rsi2_val >= 7.0:
                 continue
 
-            # 3. RSI(14) < 38 (42→38: 경계선 종목 차단)
+            # 3. RSI(14) < 35 (38→35 강화)
             rsi14_val = _rsi(closes, 14)
-            if rsi14_val is None or rsi14_val >= 38.0:
+            if rsi14_val is None or rsi14_val >= 35.0:
                 continue
 
             gap_pct = round((ema200 - closes[-1]) / ema200 * 100, 2)
@@ -418,12 +423,17 @@ def _check_bear_oversold_bounce_crypto() -> dict:
                 ema20_5d_ago = _ema(closes[:-5], 20)
                 if ema20_5d_ago > 0:
                     ema20_slope_pct = (ema20 - ema20_5d_ago) / ema20_5d_ago * 100
-                    if ema20_slope_pct < -5.0:
-                        # EMA20이 5일에 5% 이상 하락 = 하락 가속 구간
+                    if ema20_slope_pct < -3.5:
+                        # EMA20이 5일에 3.5% 이상 하락 = 단기 하락 추세 (5%→3.5% 강화)
                         continue
 
+            # 5일 낙폭 상한: -10% 초과 = 단기 조정 모멘텀 과도 → 추세 지속 위험
+            if len(closes) >= 7 and closes[-6] > 0:
+                ret_5d = (closes[-1] - closes[-6]) / closes[-6] * 100
+                if ret_5d < -10.0:
+                    continue
+
             # 10일 낙폭 상한: -20% 초과 = 패닉 국면 → 반등 전략 부적합
-            # (EMA200 갭 상한 -25%와 결합: 구조적 + 단기 양쪽에서 과도한 낙폭 차단)
             if len(closes) >= 12 and closes[-11] > 0:
                 ret_10d = (closes[-1] - closes[-11]) / closes[-11] * 100
                 if ret_10d < -20.0:
