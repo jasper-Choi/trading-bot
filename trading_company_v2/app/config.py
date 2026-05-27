@@ -72,6 +72,7 @@ class Settings:
     kis_allow_live: bool = os.environ.get("KIS_ALLOW_LIVE", "false").lower() == "true"
     kis_mock: bool = os.environ.get("KIS_MOCK", "false").lower() == "true"
     kis_capital_krw: int = int(os.environ.get("KIS_CAPITAL_KRW", os.environ.get("LIVE_CAPITAL_KRW", "0")))
+    kis_us_capital_usd: float = float(os.environ.get("KIS_US_CAPITAL_USD", "0"))
     telegram_bot_token: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.environ.get("TELEGRAM_CHAT_ID", "")
     telegram_notify_every_cycle: bool = os.environ.get("TELEGRAM_NOTIFY_EVERY_CYCLE", "false").lower() == "true"

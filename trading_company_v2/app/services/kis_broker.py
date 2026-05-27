@@ -22,6 +22,27 @@ KIS_ORDER_CASH_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_DAILY_CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
 KIS_MINUTE_CHART_PATH = "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
+# 해외주식 (미국)
+KIS_US_ORDER_PATH = "/uapi/overseas-stock/v1/trading/order"
+KIS_US_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance"
+KIS_US_CCLD_PATH = "/uapi/overseas-stock/v1/trading/inquire-ccnl"
+
+# 미국 주식 거래소 코드 매핑 (KIS 기준)
+# 매핑에 없으면 NASD(나스닥) 기본값 사용
+_US_EXCHANGE_MAP: dict[str, str] = {
+    # NYSE / NYSE Arca ETF
+    "SPY": "AMEX", "IVV": "AMEX", "VOO": "AMEX", "VTI": "AMEX",
+    "GLD": "AMEX", "SLV": "AMEX", "DIA": "AMEX", "IWM": "AMEX",
+    "EEM": "AMEX", "EFA": "AMEX", "HYG": "AMEX", "LQD": "AMEX",
+    # NYSE 개별주
+    "JPM": "NYSE", "BAC": "NYSE", "V": "NYSE", "MA": "NYSE",
+    "JNJ": "NYSE", "WMT": "NYSE", "PG": "NYSE", "HD": "NYSE",
+    "XOM": "NYSE", "CVX": "NYSE", "KO": "NYSE", "PFE": "NYSE",
+    "MRK": "NYSE", "DIS": "NYSE", "MCD": "NYSE", "IBM": "NYSE",
+    "GS": "NYSE", "UNH": "NYSE", "BRK-B": "NYSE", "AXP": "NYSE",
+    "CAT": "NYSE", "BA": "NYSE", "MMM": "NYSE", "GE": "NYSE",
+    "C": "NYSE", "WFC": "NYSE", "MS": "NYSE", "BLK": "NYSE",
+}
 REQUEST_TIMEOUT = 8
 _TOKEN_CACHE: dict[str, Any] = {"access_token": "", "expires_at": None}
 _TOKEN_CACHE_FILE = DATA_DIR / "kis_access_token_cache.json"
@@ -35,6 +56,8 @@ class KisOrderResult:
 
 
 def place_order(order: PaperOrder) -> KisOrderResult:
+    if order.desk == "us":
+        return _place_us_order(order)
     if order.desk != "korea":
         return KisOrderResult(
             ok=False,
@@ -287,6 +310,230 @@ def normalize_order_state(payload: dict[str, Any]) -> dict[str, str]:
         "avg_fill_price": _format_decimal(avg_price) if avg_price > 0 else "",
     }
 
+
+# ── 해외주식 (미국) ──────────────────────────────────────────────────────────
+
+def _us_exchange_code(symbol: str) -> str:
+    """티커 → KIS 거래소 코드 (기본값 NASD)."""
+    return _US_EXCHANGE_MAP.get(symbol.upper().strip(), "NASD")
+
+
+def _us_order_tr_id(action: str) -> str:
+    """해외주식 주문 TR ID.
+
+    KIS 모의투자(VTS)는 해외주식 미지원 → 호출 전에 막아야 함.
+    실전: 매수 TTTS0002U / 매도 TTTS0001U (미국 주간)
+    """
+    return "TTTS0002U" if _is_buy_action(action) else "TTTS0001U"
+
+
+def _build_us_order_payload(order: PaperOrder) -> dict[str, str] | None:
+    """KIS 해외주식 주문 payload 생성 (USD 기준)."""
+    symbol = str(order.symbol or "").strip().upper()
+    if not symbol:
+        return None
+    cano, product_code = _account_parts()
+
+    if _is_buy_action(order.action):
+        reference_price = _order_reference_price(order)   # USD 가격
+        notional_pct = _order_notional_pct(order)
+        capital_usd = float(settings.kis_us_capital_usd or 0)
+        if reference_price <= 0 or notional_pct <= 0 or capital_usd <= 0:
+            return None
+        budget_usd = capital_usd * notional_pct
+        qty = math.floor(budget_usd / reference_price)
+        if qty <= 0 and budget_usd >= reference_price * 0.70:
+            qty = 1   # 소수점 불가 → 예산이 1주 가격의 70% 이상이면 1주
+        if qty <= 0:
+            return None
+        return {
+            "CANO": cano,
+            "ACNT_PRDT_CD": product_code,
+            "OVRS_EXCG_CD": _us_exchange_code(symbol),
+            "PDNO": symbol,
+            "ORD_DVSN": "00",               # 지정가
+            "ORD_QTY": str(qty),
+            "OVRS_ORD_UNPR": f"{reference_price:.2f}",
+            "ORD_SVR_DVSN_CD": "0",
+        }
+
+    if _is_sell_action(order.action):
+        qty = _get_available_us_stock_quantity(symbol)
+        if qty <= 0:
+            return None
+        reference_price = _order_reference_price(order)
+        if reference_price <= 0:
+            return None
+        return {
+            "CANO": cano,
+            "ACNT_PRDT_CD": product_code,
+            "OVRS_EXCG_CD": _us_exchange_code(symbol),
+            "PDNO": symbol,
+            "ORD_DVSN": "00",
+            "ORD_QTY": str(qty),
+            "OVRS_ORD_UNPR": f"{reference_price:.2f}",
+            "SLL_TYPE": "00",
+            "ORD_SVR_DVSN_CD": "0",
+        }
+    return None
+
+
+def _place_us_order(order: PaperOrder) -> KisOrderResult:
+    """해외주식(미국) 주문 실행."""
+    # KIS 모의투자는 해외주식 미지원 → paper fallback
+    if settings.kis_mock:
+        return KisOrderResult(
+            ok=False,
+            request_mode="paper_fallback",
+            detail={
+                "desk": order.desk,
+                "symbol": order.symbol,
+                "action": order.action,
+                "reason": "kis_mock_unsupported_for_us",
+                "message": "KIS VTS does not support overseas stock orders; paper fallback",
+            },
+        )
+
+    if float(settings.kis_us_capital_usd or 0) <= 0:
+        return KisOrderResult(
+            ok=False,
+            request_mode="paper_fallback",
+            detail={
+                "desk": order.desk,
+                "symbol": order.symbol,
+                "action": order.action,
+                "reason": "kis_us_capital_not_configured",
+                "message": "KIS_US_CAPITAL_USD is 0; set it in .env to enable US live trading",
+            },
+        )
+
+    payload = _build_us_order_payload(order)
+    if payload is None:
+        return KisOrderResult(
+            ok=False,
+            request_mode="paper_fallback",
+            detail={
+                "desk": order.desk,
+                "symbol": order.symbol,
+                "action": order.action,
+                "reason": "unsupported_order_shape",
+                "message": "Could not build US order payload (missing price/qty/capital)",
+            },
+        )
+
+    try:
+        response = _request(
+            "POST",
+            KIS_US_ORDER_PATH,
+            json_body=payload,
+            tr_id=_us_order_tr_id(order.action),
+            include_hashkey=True,
+        )
+        output = _extract_output(response)
+        broker_order_id = str(
+            output.get("ODNO") or output.get("odno")
+            or response.get("ODNO") or response.get("odno") or ""
+        )
+        return KisOrderResult(
+            ok=True,
+            request_mode="kis_live",
+            detail={
+                "desk": order.desk,
+                "symbol": order.symbol,
+                "action": order.action,
+                "side": "buy" if _is_buy_action(order.action) else "sell",
+                "exchange": payload.get("OVRS_EXCG_CD", ""),
+                "ord_dvsn": payload.get("ORD_DVSN", ""),
+                "requested_qty": payload.get("ORD_QTY", ""),
+                "requested_price_usd": payload.get("OVRS_ORD_UNPR", ""),
+                "broker_order_id": broker_order_id,
+                "broker_state": "submitted",
+                "rt_cd": str(response.get("rt_cd", "") or ""),
+                "msg1": str(response.get("msg1", "") or ""),
+            },
+        )
+    except RequestException as exc:
+        return KisOrderResult(
+            ok=False,
+            request_mode="paper_fallback",
+            detail={
+                "desk": order.desk,
+                "symbol": order.symbol,
+                "action": order.action,
+                "reason": "request_exception",
+                "message": _request_exception_message(exc),
+            },
+        )
+    except RuntimeError as exc:
+        return KisOrderResult(
+            ok=False,
+            request_mode="paper_fallback",
+            detail={
+                "desk": order.desk,
+                "symbol": order.symbol,
+                "action": order.action,
+                "reason": "kis_error",
+                "message": str(exc),
+            },
+        )
+
+
+def get_us_account_positions() -> list[dict[str, Any]]:
+    """KIS 해외주식 보유 잔고 조회."""
+    cano, product_code = _account_parts()
+    try:
+        response = _request(
+            "GET",
+            KIS_US_BALANCE_PATH,
+            params={
+                "CANO": cano,
+                "ACNT_PRDT_CD": product_code,
+                "OVRS_EXCG_CD": "NASD",   # 전체 조회용 (KIS는 거래소별 조회)
+                "TR_CRCY_CD": "USD",
+                "CTX_AREA_FK200": "",
+                "CTX_AREA_NK200": "",
+            },
+            tr_id="TTTS3012R",
+        )
+    except Exception:
+        return []
+    rows = _extract_rows(response, "output1")
+    positions: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row.get("ovrs_pdno") or row.get("pdno") or "").strip().upper()
+        if not symbol:
+            continue
+        qty = _safe_float(row.get("ovrs_cblc_qty") or row.get("hldg_qty") or row.get("ord_psbl_qty"))
+        if qty <= 0:
+            continue
+        avg_buy_price = _safe_float(row.get("pchs_avg_pric") or row.get("avg_unpr3"))
+        current_price = _safe_float(row.get("now_pric2") or row.get("prpr"))
+        positions.append({
+            "market": symbol,
+            "symbol": symbol,
+            "currency": "USD",
+            "unit_currency": "USD",
+            "balance": qty,
+            "locked": 0.0,
+            "total_volume": qty,
+            "avg_buy_price": avg_buy_price or current_price,
+        })
+    return positions
+
+
+def _get_available_us_stock_quantity(symbol: str) -> int:
+    """해외주식 매도 가능 수량 조회."""
+    try:
+        positions = get_us_account_positions()
+    except Exception:
+        return 0
+    for item in positions:
+        if str(item.get("symbol", "")).strip().upper() == symbol.upper():
+            return int(max(_safe_float(item.get("total_volume")), 0.0))
+    return 0
+
+
+# ── 국내주식 ──────────────────────────────────────────────────────────────────
 
 def _build_order_payload(order: PaperOrder) -> dict[str, str] | None:
     symbol = str(order.symbol or "").strip()

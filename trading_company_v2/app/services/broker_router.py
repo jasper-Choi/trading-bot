@@ -33,6 +33,19 @@ def _kis_ready() -> bool:
     )
 
 
+def _kis_us_ready() -> bool:
+    """KIS 해외주식 실전 조건: 기본 KIS 자격증명 + 미국주식 전용 USD 예산."""
+    return bool(
+        settings.kis_allow_live
+        and not settings.kis_mock          # VTS는 해외주식 미지원
+        and settings.kis_app_key
+        and settings.kis_app_secret
+        and settings.kis_account_no
+        and settings.kis_product_code
+        and settings.kis_us_capital_usd > 0
+    )
+
+
 def _tag_detail(detail: dict, *, applied_mode: str, broker_live: bool) -> dict:
     updated = dict(detail)
     updated["applied_mode"] = applied_mode
@@ -107,6 +120,9 @@ def _route_mixed_upbit_mode(active_orders: list[PaperOrder], *, requested_mode: 
         if order.desk == "korea" and _kis_ready():
             result = place_kis_order(order)
             target_mode = "kis_live"
+        elif order.desk == "us" and _kis_us_ready():
+            result = place_kis_order(order)   # kis_broker.place_order handles desk=="us"
+            target_mode = "kis_live_us"
         else:
             result = place_upbit_order(order)
             target_mode = "upbit_live"
@@ -129,6 +145,8 @@ def _route_mixed_upbit_mode(active_orders: list[PaperOrder], *, requested_mode: 
         warnings.append("Upbit live is not ready for crypto orders; affected orders used paper fallback")
     if any(order.desk == "korea" for order in active_orders) and not _kis_ready():
         warnings.append("KIS mock/live is not ready for Korea orders; affected orders used paper fallback")
+    if any(order.desk == "us" for order in active_orders) and not _kis_us_ready():
+        warnings.append("KIS US live not ready (check KIS_US_CAPITAL_USD > 0 and KIS_MOCK=false); US orders used paper fallback")
     if unsupported_upbit_orders:
         warnings.append(f"{unsupported_upbit_orders} order(s) target desks unsupported by Upbit and were not routed")
     if unsupported_kis_orders:
