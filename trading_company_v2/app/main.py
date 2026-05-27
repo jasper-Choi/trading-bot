@@ -1118,7 +1118,7 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
     """Human-readable control-room summary for non-technical dashboard use."""
     daily = state.daily_summary or {}
     strategy_book = state.strategy_book or {}
-    active_desks = set(strategy_book.get("active_desks") or settings.active_desk_set)
+    active_desks = (set(strategy_book.get("active_desks") or settings.active_desk_set) - {"crypto"})
     debate = (strategy_book.get("decision_debate", {}) or {}).get("portfolio_manager", {}) or {}
     decisions = [item for item in list(debate.get("decisions") or []) if str(item.get("desk") or "") in active_desks]
     open_positions = [item for item in list(state.open_positions or []) if str(item.get("desk") or "") in active_desks]
@@ -1169,7 +1169,7 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
     }
     decision_map = {str(item.get("desk") or ""): item for item in decisions}
     desk_messages: list[dict] = []
-    for desk in ("crypto", "korea", "us"):
+    for desk in ("korea", "us"):  # crypto 비활성
         if desk not in active_desks:
             continue
         plan = plan_map.get(desk, {}) or {}
