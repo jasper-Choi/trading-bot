@@ -82,6 +82,7 @@ class Settings:
     telegram_risk_enabled: bool = os.environ.get("TELEGRAM_RISK_ENABLED", "true").lower() == "true"
     telegram_stale_enabled: bool = os.environ.get("TELEGRAM_STALE_ENABLED", "true").lower() == "true"
     telegram_error_enabled: bool = os.environ.get("TELEGRAM_ERROR_ENABLED", "true").lower() == "true"
+    telegram_market_close_enabled: bool = os.environ.get("TELEGRAM_MARKET_CLOSE_ENABLED", "true").lower() == "true"
     operator_name: str = os.environ.get("OPERATOR_NAME", "Owner")
     app_username: str = os.environ.get("APP_USERNAME", "")
     app_password: str = os.environ.get("APP_PASSWORD", "")

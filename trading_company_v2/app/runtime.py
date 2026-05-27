@@ -5,6 +5,7 @@ import time
 import os
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.config import DATA_DIR, settings
 from app.core.state_store import rapid_guard_crypto_positions, rapid_guard_korea_positions
@@ -27,6 +28,10 @@ from app.services.market_gateway import get_upbit_ticker_prices
 from app.services.session_clock import current_session_snapshot
 from app.services.upbit_stream_cache import register_trade_callback, start_upbit_ticker_stream, upbit_stream_status
 
+
+# ── 장 마감 리포트 중복 방지 ─────────────────────────────────────────────────
+_korea_close_reported: str = ""   # 마지막 리포트 보낸 날짜 "YYYY-MM-DD" (KST)
+_us_close_reported: str = ""      # 마지막 리포트 보낸 날짜 "YYYY-MM-DD" (ET)
 
 _tick_guard_lock = threading.Lock()
 _tick_guard_symbols: set[str] = set()
@@ -264,6 +269,45 @@ def _sleep_with_rapid_guards(interval_seconds: int) -> None:
             print(f"[runtime] crypto rapid guard failed: {exc}")
 
 
+def _check_market_close_reports() -> None:
+    """한국/미국 장 마감 직후 당일 거래 종합 요약을 텔레그램으로 발송.
+
+    - 한국: KST 15:35~16:15 사이에 오늘 KST 날짜로 1회
+    - 미국: ET  16:05~17:00 사이에 오늘 ET  날짜로 1회
+    """
+    global _korea_close_reported, _us_close_reported
+
+    try:
+        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        kst_date = now_kst.strftime("%Y-%m-%d")
+        kst_hm = (now_kst.hour, now_kst.minute)
+
+        # 한국 장 마감: 15:30 KST → 15:35~16:15 사이 전송
+        if (15, 35) <= kst_hm <= (16, 15):
+            if _korea_close_reported != kst_date:
+                if "korea" in settings.active_desk_set:
+                    sent = notifier.send_market_close_report("korea", kst_date)
+                    if sent:
+                        print(f"[runtime] korea market close report sent for {kst_date}")
+                _korea_close_reported = kst_date
+
+        now_et = datetime.now(ZoneInfo("America/New_York"))
+        et_date = now_et.strftime("%Y-%m-%d")
+        et_hm = (now_et.hour, now_et.minute)
+
+        # 미국 장 마감: 16:00 ET → 16:05~17:00 사이 전송
+        if (16, 5) <= et_hm <= (17, 0):
+            if _us_close_reported != et_date:
+                if "us" in settings.active_desk_set:
+                    sent = notifier.send_market_close_report("us", et_date)
+                    if sent:
+                        print(f"[runtime] us market close report sent for {et_date}")
+                _us_close_reported = et_date
+
+    except Exception as exc:
+        print(f"[runtime] market close report check failed: {exc}")
+
+
 def run_company_loop() -> None:
     if not _acquire_runtime_singleton_lock():
         print("[runtime] another trading runtime is already active; exiting duplicate process")
@@ -316,6 +360,7 @@ def run_company_loop() -> None:
                 f"regime={state['regime']} risk_budget={state['risk_budget']} "
                 f"phase={session.get('market_phase', 'n/a')} next={interval_seconds}s"
             )
+            _check_market_close_reports()
         except Exception as exc:
             print(f"[runtime] {started_at} cycle failed: {exc}")
             notifier.send_error(f"{started_at} cycle failed: {exc}")

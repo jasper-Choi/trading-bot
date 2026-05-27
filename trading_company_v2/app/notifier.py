@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import time
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -460,6 +461,114 @@ class TelegramNotifier:
             "\n".join(lines),
             cooldown_seconds=6 * 24 * 60 * 60,  # 6일 재발송 방지
             suppress_duplicate_seconds=6 * 24 * 60 * 60,
+        )
+
+
+    def send_market_close_report(self, desk: str, report_date: str) -> bool:
+        """한국/미국 장 마감 후 당일 거래 종합 요약 보고.
+
+        Args:
+            desk        : "korea" 또는 "us"
+            report_date : KST(한국) 또는 ET(미국) 기준 날짜 문자열 "YYYY-MM-DD"
+        """
+        if not self.enabled or not settings.telegram_market_close_enabled:
+            return False
+
+        try:
+            from app.core.state_store import SessionLocal, PaperPositionRecord
+            from sqlalchemy import select
+            from datetime import timezone as _tz, timedelta as _td
+
+            # report_date 기준 해당 장의 자정~자정 UTC 범위 계산
+            if desk == "korea":
+                # KST(UTC+9) 기준 하루
+                offset = +9
+                desk_label = "🇰🇷 한국주식"
+            else:
+                # ET(UTC-4 or -5) 기준 — 넉넉하게 UTC-5 로 계산(DST 무관)
+                offset = -5
+                desk_label = "🇺🇸 미국주식"
+
+            local_tz = ZoneInfo("Asia/Seoul") if desk == "korea" else ZoneInfo("America/New_York")
+            y, m, d = int(report_date[:4]), int(report_date[5:7]), int(report_date[8:10])
+            day_start_utc = datetime(y, m, d, 0, 0, 0, tzinfo=local_tz).astimezone(timezone.utc).isoformat()
+            day_end_utc   = datetime(y, m, d, 23, 59, 59, tzinfo=local_tz).astimezone(timezone.utc).isoformat()
+
+            with SessionLocal() as db:
+                closed_rows = db.execute(
+                    select(PaperPositionRecord)
+                    .where(
+                        PaperPositionRecord.status == "closed",
+                        PaperPositionRecord.desk == desk,
+                        PaperPositionRecord.closed_at >= day_start_utc,
+                        PaperPositionRecord.closed_at <= day_end_utc,
+                    )
+                    .order_by(PaperPositionRecord.closed_at.desc())
+                ).scalars().all()
+
+                open_rows = db.execute(
+                    select(PaperPositionRecord)
+                    .where(
+                        PaperPositionRecord.status == "open",
+                        PaperPositionRecord.desk == desk,
+                    )
+                ).scalars().all()
+        except Exception as exc:
+            return self.send(f"[{settings.company_name}] 장 마감 리포트 오류 ({desk}): {exc}")
+
+        lines: list[str] = [f"[{settings.company_name}] {desk_label} 장 마감 — {report_date}"]
+
+        if not closed_rows:
+            lines.append("오늘 청산 거래: 0건")
+        else:
+            total = len(closed_rows)
+            wins = sum(1 for r in closed_rows if float(r.pnl_pct or 0) > 0)
+            losses = total - wins
+            win_rate = wins / total * 100
+            pnl_list = [float(r.pnl_pct or 0) for r in closed_rows]
+            total_pnl = sum(pnl_list)
+            avg_pnl = total_pnl / total
+
+            lines += [
+                f"거래: {total}건 | 승률: {win_rate:.0f}% ({wins}승 {losses}패)",
+                f"누적 P&L: {total_pnl:+.2f}% | 평균: {avg_pnl:+.2f}%",
+            ]
+
+            sorted_rows = sorted(closed_rows, key=lambda r: float(r.pnl_pct or 0), reverse=True)
+
+            # 수익 상위 3
+            top = sorted_rows[:3]
+            if top:
+                lines.append("📈 수익 상위:")
+                for r in top:
+                    reason = r.closed_reason or "-"
+                    lines.append(f"  {r.symbol}  {float(r.pnl_pct or 0):+.2f}%  ({reason})")
+
+            # 손실 하위 3
+            bottom = [r for r in sorted_rows if float(r.pnl_pct or 0) < 0][-3:]
+            if bottom:
+                lines.append("📉 손실 하위:")
+                for r in reversed(bottom):
+                    reason = r.closed_reason or "-"
+                    lines.append(f"  {r.symbol}  {float(r.pnl_pct or 0):+.2f}%  ({reason})")
+
+        # 오픈 포지션
+        open_list = list(open_rows)
+        if open_list:
+            lines.append(f"보유 중: {len(open_list)}개")
+            for r in open_list[:5]:
+                lines.append(
+                    f"  {r.symbol}  미실현 {float(r.unrealized_pnl_pct or 0):+.2f}%"
+                )
+        else:
+            lines.append("보유 포지션: 없음 (전량 현금)")
+
+        key = f"market_close_{desk}_{report_date}"
+        return self._send_keyed(
+            key,
+            "\n".join(lines),
+            cooldown_seconds=0,
+            suppress_duplicate_seconds=12 * 60 * 60,
         )
 
 
