@@ -372,8 +372,13 @@ def _check_bear_oversold_bounce_crypto() -> dict:
         "bear_oversold_rsi14": 0.0,
         "bear_oversold_ema200_gap_pct": 0.0,
     }
+    # ── 2026-05-27: 일시 정지 ──────────────────────────────────────────────
+    # 백테스트 결과: intraday SL 체크 방식에서 WR 22%, Sharpe -1.64 → 미통과
+    # SL 체크를 일봉 종가 기준으로 변경 후 재검증까지 신규 진입 중단
+    return result
+    # ──────────────────────────────────────────────────────────────────────
     # 2026-05-26: DOGE, ADA 추가 — 하락장 스캔 유니버스 확장
-    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ADA"):
+    for market in ("KRW-BTC", "KRW-ETH", "KRW-SOL", "KRW-XRP", "KRW-DOGE", "KRW-ADA"):  # noqa: unreachable
         try:
             daily = get_upbit_daily_candles(market, count=220)
             if len(daily) < 215:

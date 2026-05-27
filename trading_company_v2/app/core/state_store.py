@@ -1714,17 +1714,27 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     continue
                 elif "bear_oversold" in pos_focus:
                     # ── S17 Bear Market Oversold Bounce 청산 ──
-                    # Daily: TP +4%, SL -1.0% (slip adj), max 5일
-                    # 트레일 없음 — 목표가/손절가 도달 즉시 청산 (full-cycle에서만 SL 체크)
-                    # 시간 기반 상한: cycle_interval 독립 (5일 = 7200분)
+                    # Daily: TP +4%, SL -1.0%, max 5일
+                    # 백테스트 근거: 일봉 종가 기준 SL 체크 → 매 사이클 체크는 intraday noise 오발동
+                    # SL은 Upbit 일봉 마감(자정 KST = UTC 15:00) 전후 30분 창에서만 1일 1회 체크
+                    # TP는 즉시 체크 유지 (수익 기회 포착)
+                    # 긴급 SL: -8% 초과 시 즉시 청산 (시장 붕괴·블랙스완 대응)
                     _S17_MAX_MINUTES = 5 * 24 * 60  # 5 거래일 = 7200분
+                    _now_utc = datetime.now(timezone.utc)
+                    # Upbit 일봉 마감 = 자정 KST = UTC 15:00
+                    _daily_sl_window = (
+                        (_now_utc.hour == 14 and _now_utc.minute >= 45)
+                        or (_now_utc.hour == 15 and _now_utc.minute <= 15)
+                    )
                     if position.pnl_pct >= target_pct:
                         _close_position(position, "target_hit")
-                    elif position.pnl_pct <= stop_pct:
+                    elif position.pnl_pct <= -8.0:
+                        # 긴급 손절: 시장 붕괴 수준 즉시 청산
+                        _close_position(position, "emergency_stop")
+                    elif _daily_sl_window and position.pnl_pct <= stop_pct:
+                        # 일봉 마감 창에서만 SL 체크 — intraday noise 오발동 방지
                         _close_position(position, "stop_hit")
                     elif minutes_open >= _S17_MAX_MINUTES:
-                        # cycles_open 기반 컷 제거: max_cycles=900 ≈ 5h → 5일 hold 의도 파괴
-                        # 오직 wall-clock 기반 시간만 사용 (cycle 속도 독립)
                         _close_position(position, "time_exit")
                     continue
                 # ── 추세추종 청산 로직 (기존) ──
