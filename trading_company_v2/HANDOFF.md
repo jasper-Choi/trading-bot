@@ -1,5 +1,57 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-06-01 (추세 탑승 전략 — 소액 수익 조기청산 방지)
+
+### 커밋 `a238781`
+
+### 이번 세션에서 해결한 문제들
+
+#### 1. 소액 수익 조기청산 문제 (핵심 불만 해결)
+- **문제**: `selective_probe` hard target 3% → 3% 도달 즉시 청산 (trail 작동 전)
+- **원인**: `rapid_guard target<25 조건` + hard target 3% → rapid_guard에서 즉시 exit
+
+**수정 — `_position_thresholds` Korea 전략 target 전면 상향:**
+| 전략 | 이전 | 이후 | 변경 이유 |
+|------|-----|-----|---------|
+| selective_probe | 3%, -0.8%, 200cy | 25%, -1.5%, 2700cy | trail이 청산 제어 |
+| new_high_breakout | 10%, -2.5%, 2700cy | 25%, -2.5%, 2700cy | 추세 끝까지 탑승 |
+| gap_momentum | 12%, -3.0%, 1300cy | 25%, -3.0%, 2700cy | 추세 끝까지 탑승 |
+| inst_foreign_breakout | 7%, -3.0%, 2700cy | 25%, -3.0%, 2700cy | 추세 끝까지 탑승 |
+| inst_foreign_gap | 6%, -2.5%, 1300cy | 25%, -2.5%, 2700cy | 추세 끝까지 탑승 |
+
+target=25%: rapid_guard `target < 25.0` 조건 미충족 → 조기청산 없음 → trail이 청산 제어
+
+**수정 — `_korea_newhi_trail_rules` 확대 (0.5% → 2-6% giveback):**
+- peak >=25%: giveback 6%, floor 19% (신규)
+- peak >=20%: giveback 5%, floor 15% (신규)
+- peak >=15%: giveback 4%, floor 11% (신규)
+- peak >=10%: giveback 3%, floor 7.5% (신규)
+- peak >= 5%: giveback 2%, floor 3.5% (기존 0.5%)
+- peak >= 3%: giveback 1.5%, floor 2% (기존 0.5%)
+
+**수정 — `_korea_trail_rules` 상위 tier 추가:**
+- peak >=30%: giveback 7%, floor 23% (신규)
+- peak >=25%: giveback 6%, floor 19% (신규)
+- peak >=20%: giveback 5%, floor 15% (신규)
+
+**수정 — 피라미딩 트리거 완화:** peak 3→2%, pnl 2→1.5%
+
+### 작동 메커니즘
+```
+진입 → 1.5% 상승: trail floor 0.6% 잠금
+     → 4% 상승: trail floor 3.5% 잠금 (수익 보호하며 계속 보유)
+     → 10% 상승: trail floor 7.5% 잠금
+     → 20% 상승: trail floor 15% 잠금
+     → 피크에서 giveback만큼 내리면 청산
+```
+
+### 내일 확인 사항
+1. 진입 종목이 4% 수익일 때 청산 안 되고 계속 보유하는지 확인
+2. trail 발동 후 "korea_trail" 로그로 청산되는지 확인 (target_hit/rapid_korea_target 아님)
+3. 피라미딩이 peak 2%+ 도달 시 0.10x 추가 진입하는지 확인
+
+---
+
 ## 0. Claude - 2026-06-01 (Korea 대형주 미포착 수정 — S20 신설 + 앵커 유니버스 + RSI 수정)
 
 ### 커밋 `50c25cd` (이전 세션: `89f6e7f`, `ff2c688`, `3f2b2fe`)
