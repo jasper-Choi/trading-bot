@@ -244,14 +244,19 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
 
 def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
-    """한국 주식 데스크 추천 — Strategy B (60일 신고점 돌파) 전용.
+    """한국 주식 데스크 추천 — Strategy B / S15 / S18/S19 / S2 / S9 / S10 통합.
 
-    검증된 전략만 진입. 신호 없으면 stand_by.
+    우선순위: inst_foreign > confirmed_breakout > partial_breakout > gap_momentum
+             > mongtata > dual_rsi > rsi2 > nday_pullback > stand_by
     """
     breakout_candidates = payload.get("new_high_breakout_candidates", []) or []
     breakout_confirmed_count = int(payload.get("breakout_confirmed_count", 0) or 0)
     breakout_partial_count = int(payload.get("breakout_partial_count", 0) or 0)
     quality_score = float(payload.get("quality_score", 0.0) or 0.0)
+
+    # S15 gap momentum / S18/S19 inst_foreign
+    gap_momentum_candidates = payload.get("gap_momentum_candidates", []) or []
+    inst_foreign_candidates = payload.get("inst_foreign_candidates", []) or []
 
     # Best candidate (confirmed ≥ 3 conditions)
     bk_leader = next(
@@ -264,10 +269,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         if str(c.get("ticker", "")).strip()
     ]
     # 종목별 현재가 맵 — execution_agent에서 symbol rotation 시 올바른 가격 사용 보장
-    # 버그 방지: primary 종목(이오테크닉스) reference_price를 rotation 대상(파두)에 잘못 적용하는 문제
+    # breakout + gap_momentum + inst_foreign 모두 포함
     _bk_candidate_prices: dict[str, float] = {
         str(c.get("ticker", "")): float(c.get("current_price", 0.0) or 0.0)
-        for c in breakout_candidates
+        for c in (breakout_candidates + gap_momentum_candidates + inst_foreign_candidates)
         if c.get("ticker") and float(c.get("current_price", 0.0) or 0.0) > 0
     }
 
@@ -324,7 +329,40 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 3. Strategy B: 60일 신고점 돌파 (full confirm — 3/3 조건) ───────────
+    # ── 3. Strategy S18/S19: 기관+외국인 동시 매수 (신고점/갭 동반) ─────────
+    # S18: inst_foreign_breakout — 신고점 돌파 + 기관 레이더 + 외국인 순매수
+    # S19: inst_foreign_gap     — 갭 모멘텀 + 기관 레이더 + 외국인 순매수
+    # 스마트머니 동반 → 가장 높은 우선순위 (기술+수급 이중 확인)
+    if inst_foreign_candidates and stance != "DEFENSE" and not _is_paused("korea.inst_foreign"):
+        _if = inst_foreign_candidates[0]
+        _if_ticker = str(_if.get("ticker", ""))
+        _if_name = str(_if.get("name", _if_ticker))
+        _if_tag = str(_if.get("focus_tag", "inst_foreign"))
+        _if_price = float(_if.get("current_price", 0.0) or 0.0)
+        _if_syms = [str(c.get("ticker", "")) for c in inst_foreign_candidates if c.get("ticker")]
+        _if_base_size = "0.60x" if stance == "OFFENSE" else "0.45x"
+        _if_size = "0.30x" if (_k_vix_fear or _k_us_risk_off) else _if_base_size
+        return {
+            "action": "probe_longs",
+            "size": _if_size,
+            "focus": f"inst_foreign: {_if_name} 기관+외국인 동시 매수 ({_if_tag})",
+            "symbol": _if_ticker,
+            "reference_price": _if_price,
+            "candidate_prices": _bk_candidate_prices,
+            "candidate_symbols": _if_syms[:3],
+            "focus_tag": _if_tag,
+            "strategy_id": "korea.inst_foreign",
+            "entry_profile": "inst_foreign",
+            "notes": [
+                f"기관 레이더 + 외국인 순매수 동시 확인 / 총 {len(inst_foreign_candidates)}종목",
+                f"vol_ratio {_if.get('vol_ratio', _if.get('vol_surge_ratio', 0)):.1f}x / rsi={_if.get('rsi', _if.get('rsi14', 'n/a'))}",
+                f"gap_pct={_if.get('gap_pct', 0):.1f}% chg1d={_if.get('chg1d', 0):.1f}%",
+                "S18/S19: 스마트머니(기관+외국인) 동반 진입 — 최고 우선순위",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 4. Strategy B: 20일 신고점 돌파 (full confirm — 3/3 조건) ───────────
     # 백테스트 검증: Sharpe 6.16, WR 84.6%, MDD -4.0%
     if breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
@@ -504,16 +542,49 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 8. 신호 없음 → 관망 ───────────────────────────────────────────────
+    # ── 8. Strategy S15: Gap Momentum (갭업 + 추세 지속) ────────────────────
+    # 백테스트: Sharpe 3.32, WR 48.9%, P/F 1.97, MDD -2.7% (n=47)
+    # 조건: gap>=1%+chg1d>=2% + EMA200>0,EMA20>EMA60>EMA200 + close_strength>=0.65
+    #       vol>=1.5x + RSI(14) 40-72 + 5일 변화 <15%
+    if gap_momentum_candidates and stance != "DEFENSE" and not _is_paused("korea.gap_momentum"):
+        _gm = gap_momentum_candidates[0]
+        _gm_ticker = str(_gm.get("ticker", ""))
+        _gm_name = str(_gm.get("name", _gm_ticker))
+        _gm_price = float(_gm.get("current_price", 0.0) or 0.0)
+        _gm_syms = [str(c.get("ticker", "")) for c in gap_momentum_candidates if c.get("ticker")]
+        # gap_momentum은 추세 추종이므로 selective_probe (작은 포지션으로 추세 확인)
+        _gm_base_size = "0.40x" if stance == "OFFENSE" else "0.30x"
+        _gm_size = "0.20x" if (_k_vix_fear or _k_us_risk_off) else _gm_base_size
+        return {
+            "action": "probe_longs",
+            "size": _gm_size,
+            "focus": f"gap_momentum: {_gm_name} 갭업+추세 지속 vol={_gm.get('vol_ratio',0):.1f}x",
+            "symbol": _gm_ticker,
+            "reference_price": _gm_price,
+            "candidate_prices": _bk_candidate_prices,
+            "candidate_symbols": _gm_syms[:3],
+            "focus_tag": "gap_momentum",
+            "strategy_id": "korea.gap_momentum",
+            "entry_profile": "gap_momentum",
+            "notes": [
+                f"gap={_gm.get('gap_pct',0):.1f}% / chg1d={_gm.get('chg1d',0):.1f}% / vol={_gm.get('vol_ratio',0):.1f}x",
+                f"RSI(14)={_gm.get('rsi14','n/a')} / close_strength={_gm.get('close_strength',0):.2f}",
+                f"EMA20={_gm.get('ema20',0):,.0f} EMA200={_gm.get('ema200',0):,.0f} (정배열)",
+                f"총 {len(gap_momentum_candidates)}종목 / 백테스트: Sharpe 3.32 / WR 48.9% / MDD -2.7%",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 9. 신호 없음 → 관망 ───────────────────────────────────────────────
     return {
         "action": "stand_by",
         "size": "0.00x",
-        "focus": "No signal. B/S2/S9/S10 not triggered.",
+        "focus": "No signal. B/S15/S18/S2/S9/S10 not triggered.",
         "symbol": candidate_symbols[0] if candidate_symbols else "",
         "candidate_symbols": candidate_symbols,
         "notes": [
-            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)}",
-            "Waiting for B/S2/S9/S10/S13 signal.",
+            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S15={len(gap_momentum_candidates)} S18/19={len(inst_foreign_candidates)} S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)}",
+            "Waiting for B/S15/S18/S19/S2/S9/S10/S13 signal.",
         ],
         "quality_score": quality_score,
     }

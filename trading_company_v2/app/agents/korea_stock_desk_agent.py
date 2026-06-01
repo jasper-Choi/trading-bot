@@ -212,12 +212,15 @@ class KoreaStockDeskAgent(BaseAgent):
                     continue  # 노이즈 수준 돌파 제외
 
             # ── 당일 상승률 필터 (뒤늦게 올라타기 방지) ──────────────────────
-            # 일봉 데이터는 전일 종가 기준 → 장중에 이미 N% 급등한 종목은 모멘텀 소진
-            # Naver mobile API로 실시간 등락률 조회, 3% 이상이면 진입 차단
+            # 2026-06-01: 3% → 5% 완화
+            # 근거: 한국 장 강세장에서 KOSPI 대형주(현대차+6.6%, 삼성전자+9.6% 등)는
+            #       3% 이상 상승 중에도 신고점 돌파 + 추세 지속 가능성 높음.
+            #       5%는 모멘텀 소진보다는 강한 추세 확인 구간 — 진입 허용.
+            #       7% 이상은 단기 과열 — 차단 유지.
             try:
                 _intraday_chg = get_naver_intraday_change(ticker)
-                if _intraday_chg >= 3.0:
-                    continue  # 이미 3% 이상 상승 — 뒤늦게 올라타기 차단
+                if _intraday_chg >= 7.0:
+                    continue  # 7% 이상 당일 급등 — 모멘텀 소진 가능성 차단
             except Exception:
                 pass  # 조회 실패 시 통과 (fail-open)
 
@@ -445,7 +448,11 @@ class KoreaStockDeskAgent(BaseAgent):
                     continue
 
                 rsi14_val = _rsi(closes, 14)
-                if rsi14_val is None or not (40.0 <= rsi14_val <= 65.0):
+                # 2026-06-01: RSI 상한 65 → 72 완화
+                # 근거: KOSPI 대형주(SK하이닉스, 현대차 등) 강세장에서
+                #       RSI 65-72 구간은 과열이 아니라 모멘텀 지속 확인 구간.
+                #       72 이상은 단기 과열 — 차단 유지.
+                if rsi14_val is None or not (40.0 <= rsi14_val <= 72.0):
                     continue
 
                 chg5d = (cur_close / closes[-6] - 1.0) * 100 if len(closes) >= 6 else 0.0
