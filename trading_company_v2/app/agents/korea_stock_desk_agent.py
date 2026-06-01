@@ -159,11 +159,13 @@ class KoreaStockDeskAgent(BaseAgent):
         # RSI: 50-85
         _vol_mult = 1.5
         _rsi_min, _rsi_max = 50.0, 85.0
-        _min_breakout_pct = 0.5  # 60일 신고점 대비 최소 0.5% 돌파 (노이즈 차단)
+        _min_breakout_pct = 0.3  # 20일 신고점 대비 최소 0.3% 돌파 (노이즈 차단)
 
-        # ── Strategy B: 60일 신고점 돌파 스캔 ────────────────────────────────
-        # 백테스트 검증: Sharpe 6.16, WR 84.6%, MDD -4.0%
-        # 조건: 60일 신고점 돌파 + vol 기준(시간대별) + RSI 50-85
+        # ── Strategy B: 20일 신고점 돌파 스캔 ────────────────────────────────
+        # 2026-06-01: 60일 → 20일 완화
+        # 근거: 60일(3개월) 신고가는 진입 조건이 너무 타이트해 신호 빈도 극히 낮음
+        #       20일(1개월)이 업계 표준 — 추세 확인 + 진입 빈도 균형
+        #       _min_breakout_pct도 0.5 → 0.3으로 완화 (20일 기준에서는 더 작은 돌파도 의미 있음)
         universe = get_korea_universe()
         watchlist_items = [
             (item["ticker"], item["name"])
@@ -172,7 +174,7 @@ class KoreaStockDeskAgent(BaseAgent):
 
         def _fetch(ticker_name: tuple[str, str]) -> tuple[str, str, list[dict]]:
             ticker, name = ticker_name
-            # 220일: EMA200 계산(Strategy S2) + 60일 신고점(Strategy B) 모두 지원
+            # 220일: EMA200 계산(Strategy S2) + 20일 신고점(Strategy B) 모두 지원
             return ticker, name, get_naver_daily_prices(ticker, count=220)
 
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
@@ -186,13 +188,13 @@ class KoreaStockDeskAgent(BaseAgent):
 
         breakout_candidates: list[dict] = []
         for ticker, name, candles in results:
-            if len(candles) < 62:  # 60일 신고점 계산 최소 요건
+            if len(candles) < 22:  # 20일 신고점 계산 최소 요건
                 continue
 
             # 시간대별 vol 기준 적용 (개장 초반 완화)
             bk = summarize_breakout_signal(
                 candles,
-                breakout_period=60,
+                breakout_period=20,
                 vol_surge_mult=_vol_mult,
                 rsi_min=_rsi_min,
                 rsi_max=_rsi_max,
