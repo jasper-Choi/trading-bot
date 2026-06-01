@@ -69,10 +69,14 @@ class ExecutionAgent(BaseAgent):
         ns = desk if desk in {"crypto", "korea", "us"} else "crypto"
         # Korea-specific patterns
         if ns == "korea":
+            if "inst_foreign_catalyst" in text:
+                return "korea.inst_foreign_catalyst"
             if "inst_foreign_breakout" in text:
                 return "korea.inst_foreign_breakout"
             if "inst_foreign_gap" in text:
                 return "korea.inst_foreign_gap"
+            if "catalyst_gap" in text:
+                return "korea.catalyst_gap"
             if "new_high_breakout" in text:
                 return "korea.new_high_breakout"
             if "mongtata_airborne" in text:
@@ -81,6 +85,8 @@ class ExecutionAgent(BaseAgent):
                 return "korea.rsi2_mean_reversion"
             if "nday_pullback" in text:
                 return "korea.nday_pullback"
+            if "gap_momentum" in text:
+                return "korea.gap_momentum"
             if "breakout" in text or "돌파" in text:
                 return "korea.breakout"
             if "gap" in text or "갭" in text:
@@ -336,6 +342,7 @@ class ExecutionAgent(BaseAgent):
                 + (self.market_snapshot.get("pullback_ma_candidates", []) or [])
                 + (self.market_snapshot.get("gap_momentum_candidates", []) or [])
                 + (self.market_snapshot.get("inst_foreign_candidates", []) or [])
+                + (self.market_snapshot.get("catalyst_gap_candidates", []) or [])
             )
             key = "ticker"
         for item in pools:
@@ -389,6 +396,15 @@ class ExecutionAgent(BaseAgent):
             )
             entry_profile = "inst_foreign_gap"
             strategy_id = "korea.inst_foreign_gap"
+        elif "catalyst_gap" in base_focus or "catalyst_gap" in str(mapped.get("focus_tag", "") or ""):
+            _cg_gap = float(snapshot.get("gap_pct", 0.0) or 0.0)
+            _cg_chg = float(snapshot.get("chg1d", 0.0) or 0.0)
+            focus = (
+                f"catalyst_gap: {name} ({symbol}) "
+                f"강한 갭업 gap={_cg_gap:.1f}% chg={_cg_chg:.1f}%"
+            )
+            entry_profile = "catalyst_gap"
+            strategy_id = "korea.catalyst_gap"
         elif "gap_momentum" in base_focus:
             focus = f"gap_momentum: {name} ({symbol}) S15 gap momentum breakout"
             entry_profile = "gap_momentum"

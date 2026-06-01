@@ -447,12 +447,17 @@ class KoreaStockDeskAgent(BaseAgent):
                 if vol20_avg <= 0 or volumes[-1] < vol20_avg * 1.5:
                     continue
 
-                rsi14_val = _rsi(closes, 14)
-                # 2026-06-01: RSI 상한 65 → 72 완화
-                # 근거: KOSPI 대형주(SK하이닉스, 현대차 등) 강세장에서
-                #       RSI 65-72 구간은 과열이 아니라 모멘텀 지속 확인 구간.
-                #       72 이상은 단기 과열 — 차단 유지.
-                if rsi14_val is None or not (40.0 <= rsi14_val <= 72.0):
+                # 2026-06-01: RSI 필터 — pre-gap RSI 기준으로 변경
+                # 근거: 당일 큰 갭 이후 RSI는 급등하여 72+ 초과.
+                #       갭 전날 RSI(갭 직전 컨디션)를 기준으로 필터해야
+                #       NAVER(+26.7%), 현대차(+6.6%) 같은 catalyst 갭업 포착 가능.
+                #       갭 이후 RSI는 과열 방지용 상한(85)만 적용.
+                pre_gap_rsi14 = _rsi(closes[:-1], 14)  # 전일까지의 RSI
+                rsi14_val = _rsi(closes, 14)            # 당일 포함 RSI (상한 체크용)
+                # 갭 전 RSI: 30-75 (약간 눌림~모멘텀) / 갭 후 RSI: <= 85 (극과열 차단)
+                if pre_gap_rsi14 is None or not (30.0 <= pre_gap_rsi14 <= 75.0):
+                    continue
+                if rsi14_val is not None and rsi14_val > 85.0:
                     continue
 
                 chg5d = (cur_close / closes[-6] - 1.0) * 100 if len(closes) >= 6 else 0.0
@@ -481,6 +486,89 @@ class KoreaStockDeskAgent(BaseAgent):
                     "ema20":          round(ema20_val, 0),
                     "ema200":         round(ema200_val, 0),
                     "focus_tag":      "gap_momentum",
+                })
+            except Exception:
+                continue
+
+        # ── Strategy S20: Catalyst Gap (강한 갭업 촉매 모멘텀) ──────────────────
+        # 2026-06-01 신설 — NAVER(+26.7%), 현대차(+6.6%), 삼성전자우(+14.1%) 미포착 교훈
+        # 기존 gap_momentum(S15)는 EMA20>EMA60>EMA200 완전 정렬 요구 → 촉매성 갭은 차단됨
+        # S20 조건: 강한 갭(gap>=5%) + 거래량 폭증(vol>=2.5x) + 상승 종가 유지(strength>=0.70)
+        #           + EMA200 위에서 거래 (1차 추세 확인만) + 전일 RSI 75 이하 (극과열 제외)
+        # 백테스트 없음 — 포워드 테스트로 시작, 사이즈 작게(0.25x~0.35x) 설정
+        catalyst_gap_candidates: list[dict] = []
+        for ticker, name, candles in results:
+            if len(candles) < 22:
+                continue
+            try:
+                closes  = [float(c.get("close")  or 0.0) for c in candles]
+                highs   = [float(c.get("high")   or 0.0) for c in candles]
+                lows    = [float(c.get("low")    or 0.0) for c in candles]
+                opens   = [float(c.get("open")   or 0.0) for c in candles]
+                volumes = [float(c.get("volume") or 0.0) for c in candles]
+
+                if len(closes) < 22 or closes[-1] <= 0:
+                    continue
+
+                # EMA200: 1차 장기 추세 확인만 (EMA20/60 스택 불필요)
+                ema200_val = _ema(closes, 200) if len(closes) >= 200 else 0.0
+                if ema200_val <= 0 or closes[-1] <= ema200_val:
+                    continue
+
+                prev_close = closes[-2] if len(closes) >= 2 else 0.0
+                cur_open   = opens[-1]
+                cur_close  = closes[-1]
+                cur_high   = highs[-1]
+                cur_low    = lows[-1]
+
+                if prev_close <= 0 or cur_open <= 0:
+                    continue
+
+                gap_pct  = (cur_open / prev_close - 1.0) * 100
+                chg1d    = (cur_close / prev_close - 1.0) * 100
+
+                # 강한 갭업 + 당일 등락 유지
+                if gap_pct < 5.0 or chg1d < 5.0:
+                    continue
+
+                # 상승 유지력
+                price_range = cur_high - cur_low
+                close_strength = (cur_close - cur_low) / price_range if price_range > 0 else 0.5
+                if close_strength < 0.70:
+                    continue
+
+                # 거래량 폭증 (20일 평균 2.5배 이상)
+                vol20_avg = (sum(volumes[-21:-1]) / 20) if len(volumes) >= 21 else 0.0
+                if vol20_avg <= 0 or volumes[-1] < vol20_avg * 2.5:
+                    continue
+
+                # 전일 RSI <= 75 (촉매 전 극과열 종목 제외)
+                pre_gap_rsi14 = _rsi(closes[:-1], 14)
+                if pre_gap_rsi14 is not None and pre_gap_rsi14 > 75.0:
+                    continue
+
+                # 5일 수익률 과열 방지
+                chg5d = (cur_close / closes[-6] - 1.0) * 100 if len(closes) >= 6 else 0.0
+                if chg5d >= 25.0:
+                    continue
+
+                # 이미 gap_momentum에 포함된 종목 제외 (중복 방지)
+                if any(str(c.get("ticker","")) == ticker for c in gap_momentum_candidates):
+                    continue
+
+                vol_ratio = round(volumes[-1] / vol20_avg, 2) if vol20_avg > 0 else 0.0
+                catalyst_gap_candidates.append({
+                    "ticker":         ticker,
+                    "name":           name,
+                    "current_price":  cur_close,
+                    "gap_pct":        round(gap_pct, 2),
+                    "chg1d":          round(chg1d, 2),
+                    "close_strength": round(close_strength, 3),
+                    "vol_ratio":      vol_ratio,
+                    "pre_gap_rsi14":  round(pre_gap_rsi14 or 0.0, 1),
+                    "chg5d":          round(chg5d, 2),
+                    "ema200":         round(ema200_val, 0),
+                    "focus_tag":      "catalyst_gap",
                 })
             except Exception:
                 continue
@@ -518,6 +606,9 @@ class KoreaStockDeskAgent(BaseAgent):
         rsi2_candidates        = _apply_catalyst_filter(rsi2_candidates)
         nday_candidates        = _apply_catalyst_filter(nday_candidates)
         gap_momentum_candidates = _apply_catalyst_filter(gap_momentum_candidates)
+        # S20 catalyst_gap: 악재 뉴스 필터 후 등락률 내림차순 정렬
+        catalyst_gap_candidates = _apply_catalyst_filter(catalyst_gap_candidates)
+        catalyst_gap_candidates.sort(key=lambda x: x.get("chg1d", 0.0), reverse=True)
 
         # ── Strategy S18/S19: 기관+외국인 스마트머니 확인 전략 ────────────────────
         # S18 (inst_foreign_breakout): 신고점 돌파 후보 중 기관 레이더 포함 + 외국인 순매수
@@ -554,6 +645,20 @@ class KoreaStockDeskAgent(BaseAgent):
                         "foreign_streak": int(flow.get("foreign_streak", 0)),
                     })
                     _seen_tickers.add(tkr)
+            # S20 catalyst_gap도 기관+외국인 확인 가능
+            for c in catalyst_gap_candidates[:_SMART_MONEY_CHECK_LIMIT]:
+                tkr = str(c.get("ticker", "") or "").strip()
+                if not tkr or tkr in _seen_tickers:
+                    continue
+                if get_smart_money_confirmed(tkr, inst_tickers, min_foreign_net_bn=0.0):
+                    flow = get_investor_flow_today(tkr)
+                    inst_foreign_candidates.append({
+                        **c,
+                        "focus_tag":      "inst_foreign_catalyst",
+                        "foreign_net_bn": round(float(flow.get("foreign_net", 0.0)), 2),
+                        "foreign_streak": int(flow.get("foreign_streak", 0)),
+                    })
+                    _seen_tickers.add(tkr)
         except Exception:
             pass
 
@@ -573,8 +678,10 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.25
         if gap_momentum_candidates:
             score += 0.15  # S15 갭 모멘텀 신호 존재 시 추가 점수
+        if catalyst_gap_candidates:
+            score += 0.15  # S20 촉매 갭 신호 존재 시 추가 점수 (강한 당일 신호)
         if inst_foreign_candidates:
-            score += 0.10  # S18/S19 기관+외국인 동시 확인 시 추가 점수
+            score += 0.10  # S18/S19/S21 기관+외국인 동시 확인 시 추가 점수
         if breakout_candidates:
             top_sd = float(breakout_candidates[0].get("supply_demand_score", 0.0) or 0.0)
             if top_sd >= 0.7:
@@ -606,7 +713,7 @@ class KoreaStockDeskAgent(BaseAgent):
                 f"B:{breakout_confirmed_count}c/{breakout_partial_count}p "
                 f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} S10:{len(nday_candidates)} "
                 f"S15:{len(gap_momentum_candidates)} S16:{len(close_panic_candidates)} "
-                f"S18/19:{len(inst_foreign_candidates)} "
+                f"S18/19:{len(inst_foreign_candidates)} S20:{len(catalyst_gap_candidates)} "
                 f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
                 f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
@@ -632,10 +739,14 @@ class KoreaStockDeskAgent(BaseAgent):
                 # Strategy S16 Close Panic Reversal (포워드 테스트 — 신호 수집만)
                 "close_panic_candidates": close_panic_candidates[:3],
                 "close_panic_count": len(close_panic_candidates),
-                # Strategy S18 inst_foreign_breakout / S19 inst_foreign_gap
+                # Strategy S18 inst_foreign_breakout / S19 inst_foreign_gap / S21 inst_foreign_catalyst
                 # 기관 레이더 + 외국인 순매수 동시 확인 후보 (우선순위 상위)
                 "inst_foreign_candidates": inst_foreign_candidates[:5],
                 "inst_foreign_count": len(inst_foreign_candidates),
+                # Strategy S20 Catalyst Gap (2026-06-01 신설)
+                # 강한 갭업(gap>=5%) + EMA200 위 + 거래량 폭증 — 포워드 테스트
+                "catalyst_gap_candidates": catalyst_gap_candidates[:5],
+                "catalyst_gap_count": len(catalyst_gap_candidates),
                 # ── 미국 시장 컨텍스트 ──
                 "us_regime":      us_ctx.get("us_regime", "unknown"),
                 "vix":            us_ctx.get("vix", 0.0),

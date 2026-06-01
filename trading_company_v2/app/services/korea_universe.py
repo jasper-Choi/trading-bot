@@ -28,6 +28,37 @@ _NAVER_SISE_MARKET_SUM_URL = (
 
 _UNIVERSE_TTL = 4 * 3600.0  # 4 hours
 
+# ── 한국 대형주 앵커 유니버스 ───────────────────────────────────────────────
+# KOSPI 시총 상위 핵심 종목 — 동적 universe 스크랩 실패/순위 누락 시 보완
+# 2026-06-01: 추가 — 현대차(+6.6%), 삼성전자우(+14.1%), NAVER(+26.7%) 등 미포착 방지
+_KOREA_ANCHOR_UNIVERSE: list[dict[str, Any]] = [
+    {"ticker": "005930", "name": "삼성전자",          "market": "KOSPI"},
+    {"ticker": "005935", "name": "삼성전자우",         "market": "KOSPI"},
+    {"ticker": "000660", "name": "SK하이닉스",         "market": "KOSPI"},
+    {"ticker": "207940", "name": "삼성바이오로직스",   "market": "KOSPI"},
+    {"ticker": "373220", "name": "LG에너지솔루션",     "market": "KOSPI"},
+    {"ticker": "035420", "name": "NAVER",              "market": "KOSPI"},
+    {"ticker": "005380", "name": "현대차",             "market": "KOSPI"},
+    {"ticker": "000270", "name": "기아",               "market": "KOSPI"},
+    {"ticker": "035720", "name": "카카오",             "market": "KOSPI"},
+    {"ticker": "051910", "name": "LG화학",             "market": "KOSPI"},
+    {"ticker": "006400", "name": "삼성SDI",            "market": "KOSPI"},
+    {"ticker": "068270", "name": "셀트리온",           "market": "KOSPI"},
+    {"ticker": "105560", "name": "KB금융",             "market": "KOSPI"},
+    {"ticker": "055550", "name": "신한지주",           "market": "KOSPI"},
+    {"ticker": "086790", "name": "하나금융지주",       "market": "KOSPI"},
+    {"ticker": "032830", "name": "삼성생명",           "market": "KOSPI"},
+    {"ticker": "005490", "name": "POSCO홀딩스",        "market": "KOSPI"},
+    {"ticker": "003670", "name": "포스코퓨처엠",       "market": "KOSPI"},
+    {"ticker": "096770", "name": "SK이노베이션",       "market": "KOSPI"},
+    {"ticker": "028260", "name": "삼성물산",           "market": "KOSPI"},
+    {"ticker": "012330", "name": "현대모비스",         "market": "KOSPI"},
+    {"ticker": "247540", "name": "에코프로비엠",       "market": "KOSDAQ"},
+    {"ticker": "086520", "name": "에코프로",           "market": "KOSDAQ"},
+    {"ticker": "091990", "name": "셀트리온헬스케어",   "market": "KOSDAQ"},
+    {"ticker": "263750", "name": "펄어비스",           "market": "KOSDAQ"},
+]
+
 # ── 한국 ETF 고정 유니버스 ──────────────────────────────────────────────────
 # KIS API로 거래 가능한 주요 ETF (KODEX / TIGER 계열)
 # 지수 추종 + 섹터 ETF 위주로 선정 — 레버리지/인버스 제외 (방향성 포지션용 아님)
@@ -102,8 +133,9 @@ def _fetch_market(sosok: int, market_name: str, top_n: int) -> list[dict[str, An
 def _build_universe() -> list[dict[str, Any]]:
     kospi = _fetch_market(0, "KOSPI", 60)
     kosdaq = _fetch_market(1, "KOSDAQ", 60)
-    combined = kospi + kosdaq + _KOREA_ETF_UNIVERSE
-    # deduplicate by ticker
+    # 앵커 종목을 먼저 배치해 동적 스크랩 누락 시에도 항상 포함
+    combined = _KOREA_ANCHOR_UNIVERSE + kospi + kosdaq + _KOREA_ETF_UNIVERSE
+    # deduplicate by ticker (앵커가 먼저이므로 동적 결과 중복은 제거됨)
     seen: set[str] = set()
     deduped: list[dict[str, Any]] = []
     for item in combined:
@@ -112,9 +144,10 @@ def _build_universe() -> list[dict[str, Any]]:
             seen.add(t)
             deduped.append(item)
     etf_count = len(_KOREA_ETF_UNIVERSE)
+    anchor_count = len(_KOREA_ANCHOR_UNIVERSE)
     _log.info(
-        "korea_universe refreshed: %d KOSPI + %d KOSDAQ + %d ETF = %d total",
-        len(kospi), len(kosdaq), etf_count, len(deduped),
+        "korea_universe refreshed: %d anchor + %d KOSPI + %d KOSDAQ + %d ETF = %d total",
+        anchor_count, len(kospi), len(kosdaq), etf_count, len(deduped),
     )
     return deduped
 

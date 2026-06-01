@@ -98,7 +98,15 @@ def _extract_prices(market_snapshot: dict) -> dict[str, float]:
         price = item.get("trade_price")
         if market and price:
             prices[str(market)] = float(price)
-    for item in list(market_snapshot.get("stock_leaders", [])) + list(market_snapshot.get("gap_candidates", [])):
+    _korea_pools = (
+        list(market_snapshot.get("stock_leaders", []))
+        + list(market_snapshot.get("gap_candidates", []))
+        + list(market_snapshot.get("gap_momentum_candidates", []))
+        + list(market_snapshot.get("inst_foreign_candidates", []))
+        + list(market_snapshot.get("catalyst_gap_candidates", []))
+        + list(market_snapshot.get("new_high_breakout_candidates", []))
+    )
+    for item in _korea_pools:
         ticker = item.get("ticker")
         price = item.get("current_price")
         if ticker and price:
@@ -683,6 +691,7 @@ class CompanyOrchestrator:
             _tk = str(_g.get("ticker", "")).strip()
             if _tk:
                 _gap_by_ticker[_tk] = _g
+        _korea_payload = stock_desk_result.payload if "korea" in active_desks else {}
         state.market_snapshot = {
             "as_of": market_data_result.payload.get("as_of"),
             "crypto_leaders": market_data_result.payload.get("crypto_leaders", []),
@@ -690,6 +699,11 @@ class CompanyOrchestrator:
             "stock_leaders": market_data_result.payload.get("stock_leaders", []),
             "gap_candidates": list(_gap_by_ticker.values()),
             "us_leaders": market_data_result.payload.get("us_leaders", []),
+            # Korea candidate pools — execution_agent symbol rotation에 필요
+            "gap_momentum_candidates": _korea_payload.get("gap_momentum_candidates", []),
+            "inst_foreign_candidates": _korea_payload.get("inst_foreign_candidates", []),
+            "catalyst_gap_candidates": _korea_payload.get("catalyst_gap_candidates", []),
+            "new_high_breakout_candidates": _korea_payload.get("new_high_breakout_candidates", []),
         }
         state.session_state = strategy_allocator_result.payload.get("session", {})
         state.desk_views = {

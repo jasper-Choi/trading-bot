@@ -254,9 +254,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     breakout_partial_count = int(payload.get("breakout_partial_count", 0) or 0)
     quality_score = float(payload.get("quality_score", 0.0) or 0.0)
 
-    # S15 gap momentum / S18/S19 inst_foreign
+    # S15 gap momentum / S18/S19 inst_foreign / S20 catalyst_gap
     gap_momentum_candidates = payload.get("gap_momentum_candidates", []) or []
     inst_foreign_candidates = payload.get("inst_foreign_candidates", []) or []
+    catalyst_gap_candidates = payload.get("catalyst_gap_candidates", []) or []
 
     # Best candidate (confirmed ≥ 3 conditions)
     bk_leader = next(
@@ -269,10 +270,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         if str(c.get("ticker", "")).strip()
     ]
     # 종목별 현재가 맵 — execution_agent에서 symbol rotation 시 올바른 가격 사용 보장
-    # breakout + gap_momentum + inst_foreign 모두 포함
+    # breakout + gap_momentum + inst_foreign + catalyst_gap 모두 포함
     _bk_candidate_prices: dict[str, float] = {
         str(c.get("ticker", "")): float(c.get("current_price", 0.0) or 0.0)
-        for c in (breakout_candidates + gap_momentum_candidates + inst_foreign_candidates)
+        for c in (breakout_candidates + gap_momentum_candidates + inst_foreign_candidates + catalyst_gap_candidates)
         if c.get("ticker") and float(c.get("current_price", 0.0) or 0.0) > 0
     }
 
@@ -575,16 +576,49 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 9. 신호 없음 → 관망 ───────────────────────────────────────────────
+    # ── 9. Strategy S20: Catalyst Gap (강한 갭업 촉매 모멘텀) ────────────────
+    # 2026-06-01 신설 — NAVER(+26.7%), 현대차(+6.6%), 삼성전자우(+14.1%) 미포착 교훈
+    # EMA 정배열 없어도 진입 — gap>=5% + vol>=2.5x + close_strength>=0.70 + EMA200 위
+    # 포워드 테스트 단계: 사이즈 작게(0.25x~0.35x), 백테스트 누적 후 상향 예정
+    if catalyst_gap_candidates and stance != "DEFENSE" and not _is_paused("korea.catalyst_gap"):
+        _cg = catalyst_gap_candidates[0]
+        _cg_ticker = str(_cg.get("ticker", ""))
+        _cg_name = str(_cg.get("name", _cg_ticker))
+        _cg_price = float(_cg.get("current_price", 0.0) or 0.0)
+        _cg_syms = [str(c.get("ticker", "")) for c in catalyst_gap_candidates if c.get("ticker")]
+        # 촉매 갭은 포워드 테스트 — 사이즈 보수적 설정
+        _cg_base_size = "0.35x" if stance == "OFFENSE" else "0.25x"
+        _cg_size = "0.15x" if (_k_vix_fear or _k_us_risk_off) else _cg_base_size
+        return {
+            "action": "probe_longs",
+            "size": _cg_size,
+            "focus": f"catalyst_gap: {_cg_name} 강한 갭업+촉매 gap={_cg.get('gap_pct',0):.1f}% chg={_cg.get('chg1d',0):.1f}%",
+            "symbol": _cg_ticker,
+            "reference_price": _cg_price,
+            "candidate_prices": _bk_candidate_prices,
+            "candidate_symbols": _cg_syms[:3],
+            "focus_tag": "catalyst_gap",
+            "strategy_id": "korea.catalyst_gap",
+            "entry_profile": "catalyst_gap",
+            "notes": [
+                f"gap={_cg.get('gap_pct',0):.1f}% / chg1d={_cg.get('chg1d',0):.1f}% / vol={_cg.get('vol_ratio',0):.1f}x",
+                f"close_strength={_cg.get('close_strength',0):.2f} / 전일RSI={_cg.get('pre_gap_rsi14','n/a')}",
+                f"EMA200={_cg.get('ema200',0):,.0f} 위 거래 (EMA 정배열 불요)",
+                f"총 {len(catalyst_gap_candidates)}종목 / 포워드 테스트 — 사이즈 {_cg_size}",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 10. 신호 없음 → 관망 ──────────────────────────────────────────────
     return {
         "action": "stand_by",
         "size": "0.00x",
-        "focus": "No signal. B/S15/S18/S2/S9/S10 not triggered.",
+        "focus": "No signal. B/S15/S18/S2/S9/S10/S20 not triggered.",
         "symbol": candidate_symbols[0] if candidate_symbols else "",
         "candidate_symbols": candidate_symbols,
         "notes": [
-            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S15={len(gap_momentum_candidates)} S18/19={len(inst_foreign_candidates)} S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)}",
-            "Waiting for B/S15/S18/S19/S2/S9/S10/S13 signal.",
+            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S15={len(gap_momentum_candidates)} S18/19={len(inst_foreign_candidates)} S20={len(catalyst_gap_candidates)} S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)}",
+            "Waiting for B/S15/S18/S19/S2/S9/S10/S13/S20 signal.",
         ],
         "quality_score": quality_score,
     }
