@@ -619,11 +619,15 @@ class CompanyOrchestrator:
         # VIX 레짐 및 활성 신호 — crypto_desk + macro_news 통합
         _vix_regime_ctx = str(crypto_desk_result.payload.get("vix_regime", "") or "")
         # 뉴스 패닉 감지 시 vix_regime 강제 panic (트럼프 관세·연준 서프라이즈 등)
+        # 2026-06-01: macro_sentiment "fear" 오버라이드 제거
+        # 근거: macro_sentiment_agent는 뉴스 텍스트 기반 — 실제 VIX(crypto_desk)가 neutral(15.32)인데도
+        #       뉴스 tone으로 "fear" 리포팅 → 강제 DEFENSE → 한국 장 강세에도 모든 전략 차단.
+        #       "panic"은 시스템 리스크(트럼프 관세 충격, 연준 서프라이즈)이므로 유지.
+        #       "fear"는 실제 VIX 데이터(crypto_desk ≥ 20)와 연동해야 의미 있음.
         _macro_vix = str(macro_result.payload.get("vix_regime", "") or "")
         if _macro_vix == "panic" and _vix_regime_ctx not in ("panic",):
             _vix_regime_ctx = "panic"
-        elif _macro_vix == "fear" and _vix_regime_ctx not in ("panic", "fear"):
-            _vix_regime_ctx = "fear"
+        # NOTE: _macro_vix == "fear" 오버라이드 제거 — 실제 VIX neutral 시 false-DEFENSE 방지
         _any_crypto_signal = any([
             bool(crypto_desk_result.payload.get("eth_4h_breakout", False)),
             bool(crypto_desk_result.payload.get("momentum_breakout_long", False)),
