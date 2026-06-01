@@ -701,10 +701,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # -0.8% stop can cut a valid +2% continuation after only a few minutes.
         return 2.8, -1.3, 540
     if desk == "korea" and action == "selective_probe":
-        # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
-        # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
-        # 2026-06-01: max_cycles 360→200 (7h→4h), stale_exit 41% 감소 목적
-        return 3.0, -0.8, 200
+        # 2026-06-01: 추세 보유 전략으로 전환 — "소액 수익 매도" 방지
+        # target 25%: rapid_guard target 조기청산 비활성화 (target<25 조건) → trail이 청산 제어
+        # stop -1.5%: 진입 초기 노이즈 허용, trail이 floor 잠금하며 손절 상향
+        # 2700 cycles ≈ 2.3 거래일 (20s/cycle)
+        # 진입 → 상승 → trail floor 상향 → 계속 보유하며 수익 극대화
+        return 25.0, -1.5, 2700
     if desk == "korea" and "dual_rsi" in focus:
         # S13 Dual RSI Korea (2026-05-20):
         # Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
@@ -725,24 +727,25 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "korea" and "inst_foreign_breakout" in focus:
         # S18: 신고점 돌파 + 기관 레이더 + 외국인 순매수 동시 확인
         # S_B 백테스트 (WR 84.6%) 위에 스마트머니 필터 추가 → 고확신 신호
-        # TP +7%, SL -3%, trail after +4.5% (기존 new_high_breakout 보다 TP 확장)
-        return 7.0, -3.0, 2700
+        # 2026-06-01: target 7→25% — trail이 청산 제어, 추세 끝까지 탑승
+        return 25.0, -3.0, 2700
     if desk == "korea" and "inst_foreign_gap" in focus:
         # S19: 갭 모멘텀 + 기관 레이더 + 외국인 순매수 동시 확인
         # S15 백테스트 (WR 48.9%) 위에 스마트머니 필터 추가 → 이중 확인
-        # TP +6%, SL -2.5% (S15 기본보다 TP 축소, SL 타이트)
-        return 6.0, -2.5, 1300
+        # 2026-06-01: target 6→25%, cycles 1300→2700 — trail이 청산 제어
+        return 25.0, -2.5, 2700
     if desk == "korea" and "gap_momentum" in focus:
         # S15 Gap Momentum 백테스트 검증 (2026-05-22, 114종목 3년):
         # 갭업 1%+ + 당일 2%+ + 강한종가(0.65) + 거래량 1.5x + EMA 상승추세
         # WR 48.9%, PF 1.97, Sharpe 3.32, MDD_port -2.7%, n=47
-        # stop -3%, target 12%, max_days 10 → ~1300 cycles @ ~20s
-        return 12.0, -3.0, 1300
+        # 2026-06-01: target 12→25%, cycles 1300→2700 — trail이 청산 제어, 추세 끝까지 탑승
+        return 25.0, -3.0, 2700
     if desk == "korea" and "new_high_breakout" in focus:
         # 2026-05-21 백테스트 v3 재검증 (115종목 3년):
         # stop -2.5%: MDD_port -8.2% (기존 -4.0%는 MDD_port -66.2% → 손실 폭 극적 축소)
         # WR 32.9%, PF 1.86, Sharpe 2.73
-        return 10.0, -2.5, 2700
+        # 2026-06-01: target 10→25% — trail이 청산 제어, 추세 끝까지 탑승
+        return 25.0, -2.5, 2700
     if desk == "korea" and action == "probe_longs":
         # 2026-05-19: stop -1.5% → -1.0% (avgLoss 축소 → 손익비 개선)
         return 25.0, -1.0, 2700
@@ -881,31 +884,42 @@ def _check_swing_recovery_eligible(position: Any, minutes_open: float) -> bool:
 
 
 def _korea_newhi_trail_rules(peak_pnl: float) -> tuple[float, float]:
-    """신고점 돌파 전략 전용 트레일 — 타이트 버전 (2026-05-26 강화).
+    """신고점 돌파 전략 전용 트레일 — 추세 탑승 버전 (2026-06-01 개선).
 
     protect_level = max(floor, peak - giveback)
-    giveback 0.5% 이내로 타이트하게 — 수익을 빠르게 잠금
 
-    peak >= 10% → giveback 0.5%, floor  9.0%
-    peak >=  7% → giveback 0.5%, floor  6.5%
-    peak >=  5% → giveback 0.5%, floor  4.5%
-    peak >=  3% → giveback 0.5%, floor  2.5%
-    peak >=  2% → giveback 0.4%, floor  1.5%
-    peak >=  1% → giveback 0.3%, floor  0.7%
-    peak <   1% → 트레일 없음 (hard stop -4%만 작동)
+    2026-06-01: giveback 확대 — 수익 반납 허용폭을 늘려 추세를 끝까지 탑승.
+    "진입 → 상승 → 임계값 상향 및 청산 라인 상향 → 계속 보유" 전략.
+
+    peak >= 25% → giveback 6.0%, floor 19.0%
+    peak >= 20% → giveback 5.0%, floor 15.0%
+    peak >= 15% → giveback 4.0%, floor 11.0%
+    peak >= 10% → giveback 3.0%, floor  7.5%
+    peak >=  7% → giveback 2.5%, floor  5.0%
+    peak >=  5% → giveback 2.0%, floor  3.5%  (기존: 0.5%)
+    peak >=  3% → giveback 1.5%, floor  2.0%  (기존: 0.5%)
+    peak >=  2% → giveback 1.0%, floor  1.2%  (기존: 0.4%)
+    peak >=  1% → giveback 0.5%, floor  0.6%  (기존: 0.3%)
+    peak <   1% → 트레일 없음 (hard stop만 작동)
     """
+    if peak_pnl >= 25.0:
+        return 6.0, 19.0
+    if peak_pnl >= 20.0:
+        return 5.0, 15.0
+    if peak_pnl >= 15.0:
+        return 4.0, 11.0
     if peak_pnl >= 10.0:
-        return 0.5, 9.0
+        return 3.0, 7.5
     if peak_pnl >= 7.0:
-        return 0.5, 6.5
+        return 2.5, 5.0
     if peak_pnl >= 5.0:
-        return 0.5, 4.5
+        return 2.0, 3.5
     if peak_pnl >= 3.0:
-        return 0.5, 2.5
+        return 1.5, 2.0
     if peak_pnl >= 2.0:
-        return 0.4, 1.5
+        return 1.0, 1.2
     if peak_pnl >= 1.0:
-        return 0.3, 0.7
+        return 0.5, 0.6
     return 0.0, 0.0
 
 
@@ -949,22 +963,31 @@ def _mongtata_trail_rules(peak_pnl: float) -> tuple[float, float]:
 
 
 def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
-    """Korea 주식 트레일링 스탑 (기존 전략용).
+    """Korea 주식 트레일링 스탑 (기존 전략용 / selective_probe / catalyst_gap).
 
     hard target 없이 트레일링만으로 청산 — 상승 추세 최대한 탑승.
     protect_level = max(floor, peak - giveback)
 
-    2026-05-26: floor 전반 상향 — peak +1.79% → -0.45% 반납 방지
-    (overnight 갭다운으로 trail 발동 전 손실 전환 사례 → floor를 수익구간으로 진입 즉시 잠금)
+    2026-06-01: 상위 tier 추가 — selective_probe target 25% 전환에 맞춰
+    추세가 20-30%까지 이어질 때도 trail로 커버.
 
-    peak >= 15% → giveback 3.5%, floor 11.0%  (10.0 → 11.0)
-    peak >=  8% → giveback 2.5%, floor  6.0%  (5.5 → 6.0)
-    peak >=  4% → giveback 1.5%, floor  3.5%  (3.0 → 3.5)
-    peak >=  2% → giveback 0.9%, floor  1.8%  (1.5 → 1.8)
-    peak >= 1.5% → giveback 0.5%, floor  1.1%  (0.7 → 1.1: 수익 진입 즉시 잠금)
-    peak >= 1.0% → giveback 0.4%, floor  0.6%  (신규 tier: 소폭 수익 조기 보호)
+    peak >= 30% → giveback 7.0%, floor 23.0%  (신규)
+    peak >= 25% → giveback 6.0%, floor 19.0%  (신규)
+    peak >= 20% → giveback 5.0%, floor 15.0%  (신규)
+    peak >= 15% → giveback 3.5%, floor 11.0%  (기존)
+    peak >=  8% → giveback 2.5%, floor  6.0%  (기존)
+    peak >=  4% → giveback 1.5%, floor  3.5%  (기존)
+    peak >=  2% → giveback 0.9%, floor  1.8%  (기존)
+    peak >= 1.5% → giveback 0.5%, floor  1.1%  (기존)
+    peak >= 1.0% → giveback 0.4%, floor  0.6%  (기존)
     peak <  1.0% → 트레일 없음
     """
+    if peak_pnl >= 30.0:
+        return 7.0, 23.0
+    if peak_pnl >= 25.0:
+        return 6.0, 19.0
+    if peak_pnl >= 20.0:
+        return 5.0, 15.0
     if peak_pnl >= 15.0:
         return 3.5, 11.0
     if peak_pnl >= 8.0:
@@ -1877,8 +1900,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         and "close_drive" not in pos_focus
                         and "pyramid" not in pos_focus
                         and position.action != "attack_opening_drive"
-                        and peak_pnl >= 3.0
-                        and position.pnl_pct >= 2.0
+                        # 2026-06-01: peak 3→2%, pnl 2→1.5% — 추세 초기에 빠르게 피라미딩
+                        and peak_pnl >= 2.0
+                        and position.pnl_pct >= 1.5
                     )
                     if _pyramid_ok and position.current_price > 0:
                         # Korea desk 내 총 포지션(피라미드 포함) 4개 미만일 때만 허용
