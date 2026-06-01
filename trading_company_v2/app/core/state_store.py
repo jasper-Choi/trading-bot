@@ -884,42 +884,42 @@ def _check_swing_recovery_eligible(position: Any, minutes_open: float) -> bool:
 
 
 def _korea_newhi_trail_rules(peak_pnl: float) -> tuple[float, float]:
-    """신고점 돌파 전략 전용 트레일 — 추세 탑승 버전 (2026-06-01 개선).
+    """신고점 돌파 전략 전용 트레일 — 타이트 추세 탑승 버전 (2026-06-01 v2).
 
     protect_level = max(floor, peak - giveback)
 
-    2026-06-01: giveback 확대 — 수익 반납 허용폭을 늘려 추세를 끝까지 탑승.
-    "진입 → 상승 → 임계값 상향 및 청산 라인 상향 → 계속 보유" 전략.
+    원칙: 청산 라인을 현재 수익에 타이트하게 끌어올림 → 추세 반전 즉시 수익 잠금
+    "진입 → 상승 → 청산 라인 따라 올라감 → 반전 시 빠르게 청산"
 
-    peak >= 25% → giveback 6.0%, floor 19.0%
-    peak >= 20% → giveback 5.0%, floor 15.0%
-    peak >= 15% → giveback 4.0%, floor 11.0%
-    peak >= 10% → giveback 3.0%, floor  7.5%
-    peak >=  7% → giveback 2.5%, floor  5.0%
-    peak >=  5% → giveback 2.0%, floor  3.5%  (기존: 0.5%)
-    peak >=  3% → giveback 1.5%, floor  2.0%  (기존: 0.5%)
-    peak >=  2% → giveback 1.0%, floor  1.2%  (기존: 0.4%)
-    peak >=  1% → giveback 0.5%, floor  0.6%  (기존: 0.3%)
+    peak >= 25% → giveback 1.5%, floor 23.5%
+    peak >= 20% → giveback 1.2%, floor 18.8%
+    peak >= 15% → giveback 1.0%, floor 14.0%
+    peak >= 10% → giveback 0.7%, floor  9.3%
+    peak >=  7% → giveback 0.6%, floor  6.4%
+    peak >=  5% → giveback 0.5%, floor  4.5%
+    peak >=  3% → giveback 0.5%, floor  2.5%
+    peak >=  2% → giveback 0.4%, floor  1.6%
+    peak >=  1% → giveback 0.3%, floor  0.7%
     peak <   1% → 트레일 없음 (hard stop만 작동)
     """
     if peak_pnl >= 25.0:
-        return 6.0, 19.0
+        return 1.5, 23.5
     if peak_pnl >= 20.0:
-        return 5.0, 15.0
+        return 1.2, 18.8
     if peak_pnl >= 15.0:
-        return 4.0, 11.0
+        return 1.0, 14.0
     if peak_pnl >= 10.0:
-        return 3.0, 7.5
+        return 0.7, 9.3
     if peak_pnl >= 7.0:
-        return 2.5, 5.0
+        return 0.6, 6.4
     if peak_pnl >= 5.0:
-        return 2.0, 3.5
+        return 0.5, 4.5
     if peak_pnl >= 3.0:
-        return 1.5, 2.0
+        return 0.5, 2.5
     if peak_pnl >= 2.0:
-        return 1.0, 1.2
+        return 0.4, 1.6
     if peak_pnl >= 1.0:
-        return 0.5, 0.6
+        return 0.3, 0.7
     return 0.0, 0.0
 
 
@@ -968,38 +968,40 @@ def _korea_trail_rules(peak_pnl: float) -> tuple[float, float]:
     hard target 없이 트레일링만으로 청산 — 상승 추세 최대한 탑승.
     protect_level = max(floor, peak - giveback)
 
-    2026-06-01: 상위 tier 추가 — selective_probe target 25% 전환에 맞춰
-    추세가 20-30%까지 이어질 때도 trail로 커버.
+    원칙: 청산 라인을 현재 수익에 타이트하게 끌어올림 → 추세 반전 즉시 수익 잠금
+    노이즈 허용을 위해 _korea_newhi_trail_rules보다 0.2-0.3% 여유 있음.
 
-    peak >= 30% → giveback 7.0%, floor 23.0%  (신규)
-    peak >= 25% → giveback 6.0%, floor 19.0%  (신규)
-    peak >= 20% → giveback 5.0%, floor 15.0%  (신규)
-    peak >= 15% → giveback 3.5%, floor 11.0%  (기존)
-    peak >=  8% → giveback 2.5%, floor  6.0%  (기존)
-    peak >=  4% → giveback 1.5%, floor  3.5%  (기존)
-    peak >=  2% → giveback 0.9%, floor  1.8%  (기존)
-    peak >= 1.5% → giveback 0.5%, floor  1.1%  (기존)
-    peak >= 1.0% → giveback 0.4%, floor  0.6%  (기존)
+    2026-06-01: 상위 tier 추가 + 기존 tier 타이트화.
+
+    peak >= 30% → giveback 2.0%, floor 28.0%  (신규)
+    peak >= 25% → giveback 1.8%, floor 23.2%  (신규)
+    peak >= 20% → giveback 1.5%, floor 18.5%  (신규)
+    peak >= 15% → giveback 1.2%, floor 13.8%  (기존 3.5% → 1.2%)
+    peak >=  8% → giveback 1.0%, floor  7.0%  (기존 2.5% → 1.0%)
+    peak >=  4% → giveback 0.8%, floor  3.5%  (기존 1.5% → 0.8%)
+    peak >=  2% → giveback 0.5%, floor  1.8%  (기존 0.9% → 0.5%)
+    peak >= 1.5% → giveback 0.4%, floor  1.2%
+    peak >= 1.0% → giveback 0.3%, floor  0.7%
     peak <  1.0% → 트레일 없음
     """
     if peak_pnl >= 30.0:
-        return 7.0, 23.0
+        return 2.0, 28.0
     if peak_pnl >= 25.0:
-        return 6.0, 19.0
+        return 1.8, 23.2
     if peak_pnl >= 20.0:
-        return 5.0, 15.0
+        return 1.5, 18.5
     if peak_pnl >= 15.0:
-        return 3.5, 11.0
+        return 1.2, 13.8
     if peak_pnl >= 8.0:
-        return 2.5, 6.0
+        return 1.0, 7.0
     if peak_pnl >= 4.0:
-        return 1.5, 3.5
+        return 0.8, 3.5
     if peak_pnl >= 2.0:
-        return 0.9, 1.8
+        return 0.5, 1.8
     if peak_pnl >= 1.5:
-        return 0.5, 1.1  # giveback 0.6→0.5 타이트, floor 0.7→1.1 대폭 상향
+        return 0.4, 1.2
     if peak_pnl >= 1.0:
-        return 0.4, 0.6  # 신규: peak 1%만 넘어도 0.6% 확보
+        return 0.3, 0.7
     return 0.0, 0.0
 
 
