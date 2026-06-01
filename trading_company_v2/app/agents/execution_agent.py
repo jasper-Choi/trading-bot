@@ -194,6 +194,11 @@ class ExecutionAgent(BaseAgent):
         # suffocated by desk-level losses from unrelated experimental routes.
         if health == "candidate" and count >= 2 and (capital_pnl > 0 or raw_pnl > 0) and win_rate >= 45.0:
             return True
+        # 2026-06-01: stale_exit(pnl=0) 이 loss로 집계되어 WR이 실제보다 낮아지는 문제 보정
+        # raw_pnl > 0 (손실보다 수익이 큰 전략)이고 WR >= 30%면 회복 허용
+        # Korea 기준: avg_win > avg_loss 이면 33% WR도 기대값 양수 (avg_win 2.5% / avg_loss 1.0% → PF=2.5)
+        if health == "candidate" and count >= 4 and raw_pnl > 0 and win_rate >= 30.0:
+            return True
         # 버그성 청산(rapid guard false exit 등)으로 P&L이 일시 음수가 됐지만
         # WR·거래수 기준으로 검증된 전략: stop_pressure 데드락 방지
         # 조건: n≥4, WR≥45%, raw_pnl≥-2.5% (전략 파탄 수준 아님)
