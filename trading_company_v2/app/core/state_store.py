@@ -704,9 +704,9 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # 2026-06-01: 추세 보유 전략으로 전환 — "소액 수익 매도" 방지
         # target 25%: rapid_guard target 조기청산 비활성화 (target<25 조건) → trail이 청산 제어
         # stop -1.5%: 진입 초기 노이즈 허용, trail이 floor 잠금하며 손절 상향
-        # 2700 cycles ≈ 2.3 거래일 (20s/cycle)
-        # 진입 → 상승 → trail floor 상향 → 계속 보유하며 수익 극대화
-        return 25.0, -1.5, 2700
+        # max_cycles 50000: 실질적 비활성화 — stale_exit은 수익 없는 경우만 발동
+        # 연속 상한가 등 멀티데이 추세 끝까지 탑승 허용
+        return 25.0, -1.5, 50000
     if desk == "korea" and "dual_rsi" in focus:
         # S13 Dual RSI Korea (2026-05-20):
         # Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%
@@ -726,26 +726,23 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         return 10.0, -5.0, 2700
     if desk == "korea" and "inst_foreign_breakout" in focus:
         # S18: 신고점 돌파 + 기관 레이더 + 외국인 순매수 동시 확인
-        # S_B 백테스트 (WR 84.6%) 위에 스마트머니 필터 추가 → 고확신 신호
-        # 2026-06-01: target 7→25% — trail이 청산 제어, 추세 끝까지 탑승
-        return 25.0, -3.0, 2700
+        # 2026-06-01: target 7→25%, max_cycles 50000 — trail이 청산 제어, 멀티데이 추세 허용
+        return 25.0, -3.0, 50000
     if desk == "korea" and "inst_foreign_gap" in focus:
         # S19: 갭 모멘텀 + 기관 레이더 + 외국인 순매수 동시 확인
-        # S15 백테스트 (WR 48.9%) 위에 스마트머니 필터 추가 → 이중 확인
-        # 2026-06-01: target 6→25%, cycles 1300→2700 — trail이 청산 제어
-        return 25.0, -2.5, 2700
+        # 2026-06-01: target 6→25%, max_cycles 50000 — trail이 청산 제어
+        return 25.0, -2.5, 50000
     if desk == "korea" and "gap_momentum" in focus:
         # S15 Gap Momentum 백테스트 검증 (2026-05-22, 114종목 3년):
         # 갭업 1%+ + 당일 2%+ + 강한종가(0.65) + 거래량 1.5x + EMA 상승추세
         # WR 48.9%, PF 1.97, Sharpe 3.32, MDD_port -2.7%, n=47
-        # 2026-06-01: target 12→25%, cycles 1300→2700 — trail이 청산 제어, 추세 끝까지 탑승
-        return 25.0, -3.0, 2700
+        # 2026-06-01: target 12→25%, max_cycles 50000 — trail이 청산 제어, 멀티데이 추세 허용
+        return 25.0, -3.0, 50000
     if desk == "korea" and "new_high_breakout" in focus:
         # 2026-05-21 백테스트 v3 재검증 (115종목 3년):
-        # stop -2.5%: MDD_port -8.2% (기존 -4.0%는 MDD_port -66.2% → 손실 폭 극적 축소)
-        # WR 32.9%, PF 1.86, Sharpe 2.73
-        # 2026-06-01: target 10→25% — trail이 청산 제어, 추세 끝까지 탑승
-        return 25.0, -2.5, 2700
+        # WR 32.9%, PF 1.86, Sharpe 2.73, stop -2.5%
+        # 2026-06-01: target 10→25%, max_cycles 50000 — trail이 청산 제어, 멀티데이 추세 허용
+        return 25.0, -2.5, 50000
     if desk == "korea" and action == "probe_longs":
         # 2026-05-19: stop -1.5% → -1.0% (avgLoss 축소 → 손익비 개선)
         return 25.0, -1.0, 2700
@@ -1860,7 +1857,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "ema20_recovery")
                     elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
                         _close_position(position, "early_failure")
-                    elif position.cycles_open >= max_cycles:
+                    elif position.cycles_open >= max_cycles and position.pnl_pct < stale_floor_pct:
+                        # 수익 중 포지션은 stale_exit 방지 — trail이 청산 제어
                         _close_position(position, "stale_exit")
                 elif "gap_momentum" in pos_focus:
                     # ── S15 Gap Momentum 동적 청산 (2026-05-22) ──
@@ -1878,14 +1876,18 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         _close_position(position, "gm_dyn_exit")
                     elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
                         _close_position(position, "early_failure")
-                    elif position.cycles_open >= max_cycles:
+                    elif position.cycles_open >= max_cycles and position.pnl_pct < stale_floor_pct:
+                        # 수익 중 포지션은 stale_exit 방지 — trail이 청산 제어
                         _close_position(position, "stale_exit")
                 elif position.cycles_open >= fast_fail_cycle and position.pnl_pct <= early_failure_pct:
                     _close_position(position, "early_failure")
                 elif position.cycles_open >= max_cycles:
-                    # swing_recovery 타임아웃 — 회복 실패
-                    reason = "swing_recovery_timeout" if "swing_recovery" in pos_focus else "stale_exit"
-                    _close_position(position, reason)
+                    # swing_recovery: 시간 초과 시 무조건 청산 (회복 실패 판정)
+                    # 일반 포지션: 수익 중이면 trail이 청산 제어, 손실/flat이면 stale_exit
+                    if "swing_recovery" in pos_focus:
+                        _close_position(position, "swing_recovery_timeout")
+                    elif position.pnl_pct < stale_floor_pct:
+                        _close_position(position, "stale_exit")
                 else:
                     # ── 피라미딩 트리거 ──────────────────────────────────────
                     # 브레이크아웃/갭업 종목이 peak +3% 이상 도달 시 0.10x 추가 진입
