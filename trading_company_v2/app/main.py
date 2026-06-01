@@ -47,6 +47,7 @@ from app.core.state_store import (
     load_shadow_signal_stats,
     load_strategy_performance_stats,
     get_strategy_stats,
+    resolve_symbol_name,
 )
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
@@ -360,6 +361,7 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
         desk_open_positions = [
             {
                 "symbol": item.get("symbol"),
+                "name": resolve_symbol_name(str(item.get("symbol") or ""), desk),
                 "action": item.get("action"),
                 "opened_at": item.get("opened_at"),
                 "entry_price": item.get("entry_price"),
@@ -374,6 +376,7 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
         desk_recent_orders = [
             {
                 "symbol": item.get("symbol") or item.get("focus"),
+                "name": resolve_symbol_name(str(item.get("symbol") or item.get("focus") or ""), desk),
                 "action": item.get("action"),
                 "status": item.get("status"),
                 "effect_status": item.get("effect_status"),
@@ -387,6 +390,7 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
         desk_closed = [
             {
                 "symbol": item.get("symbol"),
+                "name": resolve_symbol_name(str(item.get("symbol") or ""), desk),
                 "closed_reason": item.get("closed_reason"),
                 "closed_at": item.get("closed_at"),
                 "pnl_pct": float(item.get("pnl_pct", item.get("realized_pnl_pct", 0.0)) or 0.0),
@@ -1586,6 +1590,27 @@ def api_stats() -> dict:
 @app.get("/api/strategy-stats")
 def api_strategy_stats() -> list[dict]:
     return get_strategy_stats()
+
+
+@app.get("/api/korea-names")
+def api_korea_names() -> dict:
+    """한국 주식 종목코드 → 종목명 매핑 (유니버스 전체). 대시보드 JS가 1회 fetch."""
+    try:
+        from app.services.korea_universe import get_korea_universe
+        universe = get_korea_universe()
+        names = {item["ticker"]: item["name"] for item in universe if item.get("ticker") and item.get("name")}
+        # 앵커 종목 보완 (universe 누락 방지)
+        _extras = {
+            "069500": "KODEX 200", "102110": "TIGER 200", "229200": "KODEX 코스닥150",
+            "329200": "TIGER 코스닥150", "091160": "KODEX 반도체", "091180": "KODEX 자동차",
+            "091170": "KODEX 은행", "143850": "TIGER 200 IT", "133690": "TIGER 나스닥100",
+            "379810": "KODEX 나스닥100", "347850": "디앤디파마텍", "307950": "미래에셋증권",
+            "017670": "SK텔레콤", "005935": "삼성전자우",
+        }
+        names.update(_extras)
+        return names
+    except Exception:
+        return {}
 
 
 @app.get("/api/logs")
@@ -3364,7 +3389,8 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   function toKST(iso){if(!iso||iso==='--')return '--:--';try{return new Date(iso).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false});}catch(e){return String(iso).slice(11,16)||'--:--';}}
   function toKSTFull(iso){if(!iso||iso==='--')return '--';try{var d=new Date(iso);var date=d.toLocaleDateString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit'});var time=d.toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false});return date+' '+time;}catch(e){return String(iso).slice(0,16)||'--';}}
   function fmtPct(v){var n=parseFloat(v)||0;return(n>=0?'+':'')+n.toFixed(2)+'%';}
-  var KOREA_NAMES={"247540":"에코프로비엠","196170":"알테오젠","028300":"HLB","141080":"리가켐바이오","000250":"삼천당제약","214150":"클래시스","277810":"레인보우로보틱스","086520":"에코프로","068270":"셀트리온","293490":"카카오게임즈","005930":"삼성전자","000660":"SK하이닉스","005380":"현대차","035720":"카카오","005490":"POSCO홀딩스","373220":"LG에너지솔루션","006400":"삼성SDI","259960":"크래프톤","035420":"네이버","034020":"두산에너빌리티"};
+  var KOREA_NAMES={"247540":"에코프로비엠","196170":"알테오젠","028300":"HLB","141080":"리가켐바이오","000250":"삼천당제약","214150":"클래시스","277810":"레인보우로보틱스","086520":"에코프로","068270":"셀트리온","293490":"카카오게임즈","005930":"삼성전자","000660":"SK하이닉스","005380":"현대차","035720":"카카오","005490":"POSCO홀딩스","373220":"LG에너지솔루션","006400":"삼성SDI","259960":"크래프톤","035420":"네이버","034020":"두산에너빌리티","005935":"삼성전자우","000270":"기아","207940":"삼성바이오로직스","051910":"LG화학","105560":"KB금융","055550":"신한지주","086790":"하나금융지주","032830":"삼성생명","003670":"포스코퓨처엠","096770":"SK이노베이션","028260":"삼성물산","012330":"현대모비스","091990":"셀트리온헬스케어","263750":"펄어비스","069500":"KODEX 200","102110":"TIGER 200","229200":"KODEX 코스닥150","329200":"TIGER 코스닥150","091160":"KODEX 반도체","091180":"KODEX 자동차","091170":"KODEX 은행","143850":"TIGER 200 IT","133690":"TIGER 나스닥100","379810":"KODEX 나스닥100","017670":"SK텔레콤","347850":"디앤디파마텍","307950":"미래에셋증권","006800":"미래에셋증권"};
+  fetch('/api/korea-names').then(function(r){return r.json();}).then(function(d){if(d&&typeof d==='object')Object.assign(KOREA_NAMES,d);}).catch(function(){});
   function koreaSymName(code){var n=KOREA_NAMES[code];return n?n+'('+code+')':code;}
   function fmtKrw(v){var n=Math.abs(parseInt(v)||0);return n>=1000000?(n/1000000).toFixed(2)+'M':n>=1000?(n/1000).toFixed(0)+'K':String(n);}
   function fmtKrwFull(v,sign){var n=parseInt(v)||0;var prefix=sign?(n>=0?'+':''):'';return prefix+'\\u20a9'+Math.abs(n).toLocaleString('ko-KR');}
@@ -3418,9 +3444,9 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
         }).join('');
       }
     }
-    document.getElementById('desk-detail-open').innerHTML=listHtml(item.open_positions||[],'보유 포지션 없음',function(row){return '<div class="desk-list-item"><div><div class="desk-list-main">'+(row.symbol||'--')+'</div><div class="desk-list-sub">'+toKST(row.opened_at||'')+' / '+(row.action||'watch')+'</div></div><div class="desk-list-side '+pctCls(row.unrealized_pnl_pct||0)+'">'+fmtPct(row.unrealized_pnl_pct||0)+'</div></div>';});
-    document.getElementById('desk-detail-orders').innerHTML=listHtml(item.recent_orders||[],'최근 주문 없음',function(row){return '<div class="desk-list-item"><div><div class="desk-list-main">'+(row.symbol||'--')+'</div><div class="desk-list-sub">'+(row.status||'n/a')+' / '+(row.effect_status||'n/a')+'</div></div><div class="desk-list-side">'+toKST(row.created_at||'')+'</div></div>';});
-    document.getElementById('desk-detail-closed').innerHTML=listHtml(item.recent_closed||[],'최근 청산 없음',function(row){return '<div class="desk-list-item"><div><div class="desk-list-main">'+(row.symbol||'--')+'</div><div class="desk-list-sub">'+(row.closed_reason||'--')+'</div></div><div class="desk-list-side '+pctCls(row.pnl_pct||0)+'">'+fmtPct(row.pnl_pct||0)+'</div></div>';});
+    document.getElementById('desk-detail-open').innerHTML=listHtml(item.open_positions||[],'보유 포지션 없음',function(row){var nm=row.name||(desk==='korea'?koreaSymName(row.symbol||''):(row.symbol||'--'));return '<div class="desk-list-item"><div><div class="desk-list-main">'+esc(nm)+'</div><div class="desk-list-sub">'+toKST(row.opened_at||'')+' / '+(row.action||'watch')+'</div></div><div class="desk-list-side '+pctCls(row.unrealized_pnl_pct||0)+'">'+fmtPct(row.unrealized_pnl_pct||0)+'</div></div>';});
+    document.getElementById('desk-detail-orders').innerHTML=listHtml(item.recent_orders||[],'최근 주문 없음',function(row){var nm=row.name||(desk==='korea'?koreaSymName(row.symbol||''):(row.symbol||'--'));return '<div class="desk-list-item"><div><div class="desk-list-main">'+esc(nm)+'</div><div class="desk-list-sub">'+(row.status||'n/a')+' / '+(row.effect_status||'n/a')+'</div></div><div class="desk-list-side">'+toKST(row.created_at||'')+'</div></div>';});
+    document.getElementById('desk-detail-closed').innerHTML=listHtml(item.recent_closed||[],'최근 청산 없음',function(row){var nm=row.name||(desk==='korea'?koreaSymName(row.symbol||''):(row.symbol||'--'));return '<div class="desk-list-item"><div><div class="desk-list-main">'+esc(nm)+'</div><div class="desk-list-sub">'+(row.closed_reason||'--')+'</div></div><div class="desk-list-side '+pctCls(row.pnl_pct||0)+'">'+fmtPct(row.pnl_pct||0)+'</div></div>';});
     panel.classList.add('open');
   }
   function toggleDeskDetail(desk){renderDeskDetail(desk);}
@@ -3440,7 +3466,7 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     document.getElementById('briefing-actions').innerHTML=(b.next_actions||[]).map(function(x){return '<li>'+esc(x)+'</li>';}).join('')||'<li>다음 운영 방침 없음</li>';
     var opens=b.open_summary||[];
     document.getElementById('briefing-open-text').textContent=opens.length?opens.length+'개 포지션 보유 / 총 노출 '+Number(b.gross_open_notional_pct||0).toFixed(2)+'x':'보유 포지션 없음';
-    document.getElementById('briefing-open').innerHTML=opens.map(function(p){var pnl=parseFloat(p.pnl_pct||0);return '<span class="briefing-open-chip '+(pnl>0?'pos':pnl<0?'neg':'')+'">'+esc(p.symbol||'--')+' '+fmtPct(pnl)+'</span>';}).join('');
+    document.getElementById('briefing-open').innerHTML=opens.map(function(p){var pnl=parseFloat(p.pnl_pct||0);var nm=p.name||(p.desk==='korea'?koreaSymName(p.symbol||''):(p.symbol||'--'));return '<span class="briefing-open-chip '+(pnl>0?'pos':pnl<0?'neg':'')+'">'+esc(nm)+' '+fmtPct(pnl)+'</span>';}).join('');
   }
   function renderPnl(perf,cap){var rp=parseFloat(perf.realized_pnl_pct||0),up=parseFloat(perf.unrealized_pnl_pct||0),cp=parseFloat(cap.cumulative_realized_pnl_pct||0);var rc=document.getElementById('pnl-realized-card'),uc=document.getElementById('pnl-unrealized-card');document.getElementById('pnl-realized').textContent=fmtPct(rp);document.getElementById('pnl-realized').className='pnl-value '+(rp>0?'pos':rp<0?'neg':'neu');document.getElementById('pnl-realized-krw').textContent=fmtKrwFull(perf.realized_pnl_krw,true);rc.className='pnl-card'+(rp>0?' hl-pos':rp<0?' hl-neg':'');document.getElementById('pnl-unrealized').textContent=fmtPct(up);document.getElementById('pnl-unrealized').className='pnl-value '+(up>0?'pos':up<0?'neg':'neu');document.getElementById('pnl-unrealized-krw').textContent=fmtKrwFull(perf.unrealized_pnl_krw,true);uc.className='pnl-card'+(up>0?' hl-pos':up<0?' hl-neg':'');var wr=parseFloat(perf.cumulative_win_rate||perf.win_rate||0);document.getElementById('pnl-winrate').textContent=wr.toFixed(1)+'%';document.getElementById('pnl-winrate').className='pnl-value '+(wr>=55?'pos':wr<40?'neg':'neu');document.getElementById('pnl-trades').textContent=(perf.cumulative_wins||perf.wins||0)+'승 / '+(perf.cumulative_losses||perf.losses||0)+'패 (누적 '+fmtPct(cp)+')';document.getElementById('pnl-capital').textContent='₩'+(parseInt(cap.total_krw||0)).toLocaleString('ko-KR');document.getElementById('pnl-capital-base').textContent='복리자본 ₩'+(parseInt(cap.effective_capital_krw||cap.base_krw||0)).toLocaleString('ko-KR')+(cp!==0?' ('+fmtPct(cp)+')':'');}
   function renderStatusBar(state,readiness,blockSummary){var stance=String(state.stance||'--');var regime=String(state.regime||'--');var allow=!!((readiness.exposure||{}).allow_new_entries!=null?(readiness.exposure||{}).allow_new_entries:state.allow_new_entries);var overall=String(readiness.overall||'caution');var stanceCls=stance==='BULLISH'?'ok':stance==='DEFENSE'?'bad':'warn';var regimeCls=regime==='TRENDING'?'ok':regime==='STRESSED'?'bad':'warn';var bar=document.getElementById('status-bar');bar.innerHTML='<div class="s-pill '+stanceCls+'"><span class="lbl">스탠스</span>'+stance+'</div>'+'<div class="s-pill '+regimeCls+'"><span class="lbl">국면</span>'+regime+'</div>'+'<div class="s-pill '+(allow?'ok':'bad')+'"><span class="lbl">진입</span>'+(allow?'허용':'차단')+'</div>'+'<div class="s-pill '+(overall==='ready'?'ok':overall==='caution'?'warn':'bad')+'"><span class="lbl">준비도</span>'+overall.toUpperCase()+'</div>';}
@@ -4030,14 +4056,28 @@ var _kSortKey = 'candidate_score';
 var _kSortAsc = false;
 var _filter = 'all';
 
-// ── 한국 주식 종목명 매핑 ──
+// ── 한국 주식 종목명 매핑 (기본값 — 서버에서 동적 업데이트) ──
 var KOREA_NAMES = {
   "247540":"에코프로비엠","196170":"알테오젠","028300":"HLB","141080":"리가켐바이오",
   "000250":"삼천당제약","214150":"클래시스","277810":"레인보우로보틱스","086520":"에코프로",
   "068270":"셀트리온","293490":"카카오게임즈","005930":"삼성전자","000660":"SK하이닉스",
   "005380":"현대차","035720":"카카오","005490":"POSCO홀딩스","373220":"LG에너지솔루션",
-  "006400":"삼성SDI","259960":"크래프톤","035420":"네이버","034020":"두산에너빌리티"
+  "006400":"삼성SDI","259960":"크래프톤","035420":"네이버","034020":"두산에너빌리티",
+  "005935":"삼성전자우","000270":"기아","207940":"삼성바이오로직스","051910":"LG화학",
+  "105560":"KB금융","055550":"신한지주","086790":"하나금융지주","032830":"삼성생명",
+  "003670":"포스코퓨처엠","096770":"SK이노베이션","028260":"삼성물산","012330":"현대모비스",
+  "091990":"셀트리온헬스케어","263750":"펄어비스","069500":"KODEX 200","102110":"TIGER 200",
+  "229200":"KODEX 코스닥150","329200":"TIGER 코스닥150","091160":"KODEX 반도체",
+  "091180":"KODEX 자동차","091170":"KODEX 은행","143850":"TIGER 200 IT",
+  "133690":"TIGER 나스닥100","379810":"KODEX 나스닥100","017670":"SK텔레콤",
+  "347850":"디앤디파마텍","307950":"미래에셋증권","006800":"미래에셋증권"
 };
+// 서버 /api/korea-names 에서 전체 유니버스 종목명 로드 (1회)
+(function(){
+  fetch('/api/korea-names').then(function(r){return r.json();}).then(function(d){
+    if(d&&typeof d==='object') Object.assign(KOREA_NAMES, d);
+  }).catch(function(){});
+})();
 function koreaSymName(code){
   var n=KOREA_NAMES[code];
   return n ? n+'('+code+')' : code;
