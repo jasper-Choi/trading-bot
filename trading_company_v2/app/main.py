@@ -56,8 +56,8 @@ from app.services.kis_broker import get_order as get_kis_order
 from app.services.kis_broker import normalize_order_state as normalize_kis_order_state
 from app.services.broker_router import normalize_execution_mode
 from app.services.hot_path_metrics import read_hot_path_metrics
-from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_upbit_ticker_prices, get_us_daily_prices, get_us_data_status
-from app.services.recommendation_engine import build_crypto_plan, build_korea_plan, build_us_plan
+from app.services.market_gateway import get_naver_daily_prices, get_upbit_15m_candles, get_upbit_ticker_prices, get_us_data_status
+from app.services.recommendation_engine import build_crypto_plan, build_korea_plan
 from app.services.upbit_broker import get_account_positions as get_upbit_account_positions
 from app.services.upbit_broker import get_order as get_upbit_order
 from app.services.upbit_broker import normalize_order_state as normalize_upbit_order_state
@@ -178,15 +178,12 @@ def _build_desk_status(state: CompanyState) -> dict:
     active_desks = set((state.strategy_book or {}).get("active_desks") or settings.active_desk_set)
     crypto_plan = state.strategy_book.get("crypto_plan", {}) if state.strategy_book else {}
     korea_plan = state.strategy_book.get("korea_plan", {}) if state.strategy_book else {}
-    us_plan = state.strategy_book.get("us_plan", {}) if state.strategy_book else {}
     crypto_view = state.desk_views.get("crypto_desk", {}) if state.desk_views else {}
     korea_view = state.desk_views.get("korea_stock_desk", {}) if state.desk_views else {}
-    us_view = state.desk_views.get("us_stock_desk", {}) if state.desk_views else {}
     execution_log = state.execution_log or []
 
     latest_crypto_order = next((item for item in execution_log if item.get("desk") == "crypto"), None)
     latest_korea_order = next((item for item in execution_log if item.get("desk") == "korea"), None)
-    latest_us_order = next((item for item in execution_log if item.get("desk") == "us"), None)
 
     return {
         "crypto": {
@@ -213,19 +210,6 @@ def _build_desk_status(state: CompanyState) -> dict:
             "breakout_partial_count": int(korea_view.get("breakout_partial_count", 0) or 0),
             "leaders": ((state.market_snapshot.get("gap_candidates") or state.market_snapshot.get("stock_leaders") or []) if state.market_snapshot else [])[:3],
             "latest_order": latest_korea_order,
-        },
-        "us": {
-            "title": "미국주식 데스크",
-            "disabled": "us" not in active_desks,
-            "bias": us_view.get("desk_bias", "n/a"),
-            "action": us_plan.get("action", "n/a"),
-            "focus": us_plan.get("focus", "미국 플랜 없음"),
-            "size": us_plan.get("size", "0.00x"),
-            "quality_score": float(us_plan.get("quality_score", 0.0) or 0.0),
-            "avg_signal": float(us_plan.get("avg_signal", 0.0) or 0.0),
-            "quality_threshold": float(us_plan.get("quality_threshold", 0.72) or 0.72),
-            "leaders": (state.market_snapshot.get("us_leaders", []) if state.market_snapshot else [])[:3],
-            "latest_order": latest_us_order,
         },
     }
 
@@ -257,7 +241,6 @@ def _build_desk_drilldown_payload(state: CompanyState, closed_positions: list[di
     config_map = {
         "crypto": ("crypto_plan", "crypto"),
         "korea": ("korea_plan", "korea"),
-        "us": ("us_plan", "us"),
     }
     payload: dict[str, dict] = {}
 
@@ -521,12 +504,10 @@ def _build_market_charts_payload(state: CompanyState) -> dict:
 
     crypto_symbol = str(state.strategy_book.get("crypto_plan", {}).get("symbol") or "KRW-BTC")
     korea_symbol = str(state.strategy_book.get("korea_plan", {}).get("symbol") or "")
-    us_symbol = str(state.strategy_book.get("us_plan", {}).get("symbol") or "")
 
-    with ThreadPoolExecutor(max_workers=3) as _ex:
+    with ThreadPoolExecutor(max_workers=2) as _ex:
         _fc = _ex.submit(get_upbit_15m_candles, crypto_symbol, 24)
         _fk = _ex.submit(get_naver_daily_prices, korea_symbol, 20) if korea_symbol else None
-        _fu = _ex.submit(get_us_daily_prices, us_symbol, 30) if us_symbol else None
 
     try:
         crypto_candles = _fc.result(timeout=10)
@@ -536,15 +517,10 @@ def _build_market_charts_payload(state: CompanyState) -> dict:
         stock_candles = _fk.result(timeout=10) if _fk else []
     except Exception:
         stock_candles = []
-    try:
-        us_candles = _fu.result(timeout=10) if _fu else []
-    except Exception:
-        us_candles = []
 
     return {
         "crypto": {"symbol": crypto_symbol, "candles": crypto_candles, "summary": summarize(crypto_candles)},
         "korea": {"symbol": korea_symbol, "candles": stock_candles, "summary": summarize(stock_candles)},
-        "us": {"symbol": us_symbol, "candles": us_candles, "summary": summarize(us_candles)},
     }
 
 
@@ -799,7 +775,6 @@ def _build_agent_performance_payload(state: CompanyState) -> list[dict]:
     desk_agent_map = {
         "crypto_desk_agent": "crypto",
         "korea_stock_desk_agent": "korea",
-        "us_stock_desk_agent": "us",
     }
     title_map = {
         "market_data_agent": "시장 데이터",
@@ -808,7 +783,6 @@ def _build_agent_performance_payload(state: CompanyState) -> list[dict]:
         "strategy_allocator_agent": "전략 배분",
         "crypto_desk_agent": "크립토 데스크 에이전트",
         "korea_stock_desk_agent": "한국주식 데스크 에이전트",
-        "us_stock_desk_agent": "미국주식 데스크 에이전트",
         "cio_agent": "최고투자책임자",
         "risk_committee_agent": "위험위원회",
         "execution_agent": "실행 에이전트",
@@ -1036,12 +1010,10 @@ def _runtime_profile(state: CompanyState) -> dict:
 def _simulate_decision_snapshot(state: CompanyState, simulated_session: dict) -> dict:
     crypto_payload = state.desk_views.get("crypto_desk", {}) if state.desk_views else {}
     korea_payload = state.desk_views.get("korea_stock_desk", {}) if state.desk_views else {}
-    us_payload = state.desk_views.get("us_stock_desk", {}) if state.desk_views else {}
 
     simulated_strategy_book = {
         "crypto_plan": build_crypto_plan(state.stance, state.regime, crypto_payload),
         "korea_plan": build_korea_plan(state.stance, state.regime, korea_payload, simulated_session),
-        "us_plan": build_us_plan(state.stance, state.regime, us_payload, simulated_session),
     }
     execution_agent = ExecutionAgent()
     execution_agent.configure(
@@ -1169,11 +1141,10 @@ def _build_operator_briefing(state: CompanyState, closed_positions: list[dict]) 
     plan_map = {
         "crypto": strategy_book.get("crypto_plan", {}) or {},
         "korea": strategy_book.get("korea_plan", {}) or {},
-        "us": strategy_book.get("us_plan", {}) or {},
     }
     decision_map = {str(item.get("desk") or ""): item for item in decisions}
     desk_messages: list[dict] = []
-    for desk in ("korea", "us"):  # crypto 비활성
+    for desk in ("korea",):  # crypto 비활성, us 제거
         if desk not in active_desks:
             continue
         plan = plan_map.get(desk, {}) or {}
@@ -1755,10 +1726,6 @@ def mobile_summary() -> dict:
             "korea": {
                 "plan": state.strategy_book.get("korea_plan", {}),
                 "stats": (daily.get("desk_stats", {}) or {}).get("korea", {}),
-            },
-            "us": {
-                "plan": state.strategy_book.get("us_plan", {}),
-                "stats": (daily.get("desk_stats", {}) or {}).get("us", {}),
             },
         },
         "recent_execution": (state.execution_log or [])[:3],
@@ -2596,8 +2563,6 @@ def _performance_html() -> str:  # noqa: PLR0915
         <div class="table-wrap" id="symbol-table-crypto"></div></div>
         <h2 style="margin-top:10px;font-size:.9rem;color:var(--yellow)">한국주식</h2>
         <div class="table-wrap" id="symbol-table-korea"></div>
-        <h2 style="margin-top:18px;font-size:.9rem;color:var(--muted)">미국주식</h2>
-        <div class="table-wrap" id="symbol-table-us"></div>
       </div>
     </section>
 
@@ -3273,7 +3238,6 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
   <div class="desk-grid" id="desk-grid">
     <button type="button" class="desk-card" data-desk="crypto" onclick="toggleDeskDetail('crypto')" style="display:none"><div class="desk-name">코인 <span class="desk-bk-badge" id="dk-crypto-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-crypto-act">--</div><div class="desk-focus" id="dk-crypto-focus">--</div><div class="desk-size" id="dk-crypto-size">0.00x</div></button>
     <button type="button" class="desk-card" data-desk="korea" onclick="toggleDeskDetail('korea')"><div class="desk-name">한국주식 <span class="desk-bk-badge" id="dk-korea-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-korea-act">--</div><div class="desk-focus" id="dk-korea-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-korea-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-korea-qval">품질 --</span><span id="dk-korea-qthr">기준 --</span></div></div><div class="desk-size" id="dk-korea-size">0.00x</div></button>
-    <button type="button" class="desk-card" data-desk="us" onclick="toggleDeskDetail('us')"><div class="desk-name">미국주식 <span class="desk-bk-badge" id="dk-us-bk" style="display:none"></span></div><div class="desk-action watch" id="dk-us-act">--</div><div class="desk-focus" id="dk-us-focus">--</div><div class="mini-gauge-wrap"><div class="mini-gauge-track"><div class="mini-gauge-fill" id="dk-us-qfill" style="width:0%"></div></div><div class="mini-gauge-lbls"><span id="dk-us-qval">품질 --</span><span id="dk-us-qthr">기준 --</span></div></div><div class="desk-size" id="dk-us-size">0.00x</div></button>
   </div>
 
   <div class="desk-detail-panel" id="desk-detail-panel">
@@ -3608,7 +3572,6 @@ def _embedded_dashboard_html() -> str:  # noqa: PLR0915
     if(hs[0])hs[0].innerHTML='종목별 성과 분석 <span style="font-weight:400;color:var(--muted);font-size:.8rem">(코인/주식 분리)</span>';
     if(hs[1])hs[1].textContent='코인';
     if(hs[2])hs[2].textContent='한국주식';
-    if(hs[3])hs[3].textContent='미국주식';
   })();
   setInterval(function(){loadData().catch(function(){});},20000);loadData().catch(function(){});
 </script>
