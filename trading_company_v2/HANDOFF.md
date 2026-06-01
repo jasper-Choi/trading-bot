@@ -1,5 +1,51 @@
 # Trading Company V2 Handoff
 
+## 0. Claude - 2026-06-01 (Korea 대형주 미포착 수정 — S20 신설 + 앵커 유니버스 + RSI 수정)
+
+### 커밋 `50c25cd` (이전 세션: `89f6e7f`, `ff2c688`, `3f2b2fe`)
+
+### 이번 세션에서 해결한 문제들
+
+#### 1. status=idle 버그 (pnl <= 0 쿨다운)
+- `execution_agent._recent_loss_cooldown`: `pnl <= 0` → `pnl < -0.3`
+- trailing stop이 breakeven에 닿아 0% 청산되면 손실로 간주 → 재진입 영구 차단
+
+#### 2. false-DEFENSE 버그 (macro_sentiment news 오버라이드)
+- `macro_sentiment_agent`가 뉴스 텍스트 기반 `vix_regime=fear` 보고
+- orchestrator에서 실제 VIX=15.32(neutral)를 `fear`로 오버라이드 → DEFENSE 발동
+- **수정**: `elif _macro_vix == "fear"` 블록 제거 (`panic`만 오버라이드 허용)
+
+#### 3. S15/S18/S19 전략이 recommendation_engine에 연결 안 됨
+- `gap_momentum_candidates`, `inst_foreign_candidates` payload에서 꺼내는 코드가 없었음
+- **수정**: `build_korea_plan`에서 두 리스트 추출 + 전략 블록 추가
+
+#### 4. NAVER/현대차/삼성전자우 미포착 (2026-06-01 대형주 상승)
+- **원인 1**: gap_momentum RSI가 당일 종가 기준 → 큰 갭 후 RSI 72 초과로 차단
+  - **수정**: pre_gap_rsi14(전일 기준) 30-75로 변경
+- **원인 2**: EMA 정배열(EMA20>EMA60>EMA200) 요건이 촉매성 갭 차단
+  - **수정**: S20 catalyst_gap 신설 — gap>=5% + EMA200만 확인
+- **원인 3**: 삼성전자우(005935) 등 동적 universe 누락 가능성
+  - **수정**: 앵커 종목 25개 (`_KOREA_ANCHOR_UNIVERSE`) 고정 추가
+
+#### 5. KIS VTS 자격증명 갱신
+- APP_KEY/SECRET 교체 후 403 에러 해결 (token 만료: 2026-06-02)
+- 3회 성공 거래 후 VTS 잔고 소진 — **재충전 필요**
+
+### S20 catalyst_gap 전략 요약
+| 항목 | 값 |
+|------|-----|
+| 조건 | gap>=5%, chg1d>=5%, vol>=2.5x, close_strength>=0.70, EMA200 위 |
+| 진입 사이즈 | OFFENSE 0.35x / BALANCED 0.25x / VIX fear 0.15x |
+| 우선순위 | S15(gap_momentum) 다음, stand_by 앞 |
+| 상태 | 포워드 테스트 (백테스트 없음 — 사이즈 작게) |
+
+### 내일 확인 사항
+1. **KIS VTS 잔고 충전** 필수 (앱에서 1억원으로 충전)
+2. 09:00~10:00 KST 첫 사이클에서 `S20: X개` 로그 확인
+3. stance = BALANCED (DEFENSE 아님) 확인
+
+---
+
 ## 0. Claude - 2026-05-26 (전체 버그 점검 — NameError + KRW-SUI 중복 제거)
 
 ### 작업 내용
