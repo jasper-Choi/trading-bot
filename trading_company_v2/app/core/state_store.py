@@ -1519,10 +1519,11 @@ def save_cycle_journal(entry: CycleJournalEntry) -> None:
 def _fetch_zombie_prices(pos_pairs: list[tuple[str, str]], price_lookup: dict[tuple[str, str], float]) -> None:
     """Fetch live prices for (desk, symbol) pairs missing from market_snapshot.
     Called OUTSIDE any DB session to avoid holding write locks during HTTP calls."""
-    from app.services.market_gateway import UPBIT_TICKER_URL, get_naver_daily_prices
+    from app.services.market_gateway import UPBIT_TICKER_URL, get_naver_daily_prices, get_us_current_prices
 
     zombie_korea = [sym for desk, sym in pos_pairs if desk == "korea" and ("korea", sym) not in price_lookup]
     zombie_crypto = [sym for desk, sym in pos_pairs if desk == "crypto" and ("crypto", sym) not in price_lookup]
+    zombie_us = [sym for desk, sym in pos_pairs if desk == "us" and ("us", sym) not in price_lookup]
 
     for sym in zombie_korea:
         try:
@@ -1543,6 +1544,15 @@ def _fetch_zombie_prices(pos_pairs: list[tuple[str, str]], price_lookup: dict[tu
                 price = float(item.get("trade_price") or 0)
                 if market and price > 0:
                     price_lookup[("crypto", market)] = price
+        except Exception:
+            pass
+
+    if zombie_us:
+        try:
+            us_prices = get_us_current_prices(zombie_us)
+            for sym, price in us_prices.items():
+                if price > 0:
+                    price_lookup[("us", sym)] = price
         except Exception:
             pass
 

@@ -798,6 +798,39 @@ def _get_us_daily_prices_yahoo(ticker: str, count: int = 60) -> list[dict[str, A
     return candles[-count:]
 
 
+def get_us_current_prices(tickers: list[str]) -> dict[str, float]:
+    """Yahoo Finance에서 미국 주식 현재가(실시간) 일괄 조회.
+
+    Yahoo `/v8/finance/chart` 엔드포인트의 meta.regularMarketPrice 사용.
+    장중/장전/장후 모두 최신 거래가를 반환.
+    """
+    from urllib.parse import quote as _url_quote
+    prices: dict[str, float] = {}
+    for ticker in tickers:
+        try:
+            encoded = _url_quote(ticker.upper(), safe="")
+            resp = requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{encoded}",
+                params={"interval": "1m", "range": "1d", "includePrePost": "true"},
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=REQUEST_TIMEOUT,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            result = ((payload.get("chart") or {}).get("result") or [None])[0] or {}
+            meta = result.get("meta") or {}
+            price = float(
+                meta.get("regularMarketPrice")
+                or meta.get("chartPreviousClose")
+                or 0.0
+            )
+            if price > 0:
+                prices[ticker.upper()] = price
+        except Exception:
+            pass
+    return prices
+
+
 def _get_us_daily_prices_alphavantage(ticker: str, count: int = 60) -> list[dict[str, Any]]:
     try:
         resp = requests.get(
