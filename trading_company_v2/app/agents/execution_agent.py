@@ -457,7 +457,12 @@ class ExecutionAgent(BaseAgent):
                 if self._is_stop_like_exit(item) and pnl <= -1.0:
                     return True
                 continue
-            if pnl <= 0:
+            # 2026-06-01: pnl <= 0 → pnl < -0.3 변경
+            # 근거: 진입 후 trailing stop이 breakeven으로 당겨져 0% 청산된 경우
+            # (peak +1% 후 79000 진입/79000 청산)도 손실로 간주해 쿨다운 발동.
+            # 이는 실제로 자본을 잃지 않은 정상적인 신호에 대해 재진입을 무기한 차단.
+            # 한국 주식은 -0.3% 이상 실손이 있을 때만 쿨다운 적용.
+            if pnl < -0.3:
                 return True
         return False
 
