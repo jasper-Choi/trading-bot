@@ -703,7 +703,8 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "korea" and action == "selective_probe":
         # 탐색 진입은 아직 확정 추세가 아니므로 손실을 작게 제한한다.
         # 기존 기본값(+25%/-1.5%)은 exploratory trade에 과도하게 넓었다.
-        return 3.0, -0.8, 360
+        # 2026-06-01: max_cycles 360→200 (7h→4h), stale_exit 41% 감소 목적
+        return 3.0, -0.8, 200
     if desk == "korea" and "dual_rsi" in focus:
         # S13 Dual RSI Korea (2026-05-20):
         # Sh 6.36, WR 58.6%, PnL 2.00, MDD -8.0%

@@ -152,11 +152,12 @@ class KoreaStockDeskAgent(BaseAgent):
 
     def run(self) -> AgentResult:
         # ── vol 기준 ──────────────────────────────────────────────────────────
-        # 전 시간대 2.0x 통일 (2026-05-26: 개장 직후 1.0x 예외 폐지)
-        # 근거: KST 09:xx WR=0%(3전 3패) — 저거래량 구간의 false breakout 필터 실패
-        #       개장 직후 저거래량은 예외가 아니라 오히려 더 엄격한 필터가 필요함
+        # 2026-06-01: 2.0x → 1.5x 완화
+        # 근거: 2.0x가 너무 엄격해 good signal(PM edge>0.3, RSI>60)도 차단
+        #       stale_exit 원인은 거래량 아닌 장 초반 방향성 부재 → max_cycles 단축으로 대응
+        #       1.5x는 유동성 최소 기준 유지하면서 진입 기회 복원
         # RSI: 50-85
-        _vol_mult = 2.0
+        _vol_mult = 1.5
         _rsi_min, _rsi_max = 50.0, 85.0
         _min_breakout_pct = 0.5  # 60일 신고점 대비 최소 0.5% 돌파 (노이즈 차단)
 

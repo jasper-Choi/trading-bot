@@ -587,7 +587,9 @@ class ExecutionAgent(BaseAgent):
             return wins == 0 and losses >= 4 and realized <= -6.0    # 3 × -2%
         if desk == "crypto":
             return wins <= 1 and losses >= 4 and realized <= -6.0    # 3 × -2%
-        return wins <= 1 and losses >= 4 and (realized <= -7.5 or stop_like >= 3)  # 3 × -2.5%
+        # Korea: stop_like >= 4 (기존 3에서 완화, 2026-06-01)
+        # stop_hit + stale_loss + early_failure 3개 조합으로 데드락 발생 → 진짜 연속 손절(4회) 기준으로 상향
+        return wins <= 1 and losses >= 4 and (realized <= -7.5 or stop_like >= 4)  # 4 × -2.5%
 
     def _desk_performance_lock(self, desk: str) -> bool:
         desk_stats = (self.daily_summary.get("desk_stats", {}) or {}).get(desk, {}) or {}
