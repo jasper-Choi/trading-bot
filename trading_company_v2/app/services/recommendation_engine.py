@@ -247,17 +247,18 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     """한국 주식 데스크 추천 — Strategy B / S15 / S18/S19 / S2 / S9 / S10 통합.
 
     우선순위: inst_foreign > confirmed_breakout > partial_breakout > gap_momentum
-             > mongtata > dual_rsi > rsi2 > nday_pullback > stand_by
+             > mongtata > dual_rsi > rsi2 > stand_by
     """
     breakout_candidates = payload.get("new_high_breakout_candidates", []) or []
     breakout_confirmed_count = int(payload.get("breakout_confirmed_count", 0) or 0)
     breakout_partial_count = int(payload.get("breakout_partial_count", 0) or 0)
     quality_score = float(payload.get("quality_score", 0.0) or 0.0)
 
-    # S15 gap momentum / S18/S19 inst_foreign / S20 catalyst_gap
+    # S15 gap momentum / S18/S19 inst_foreign / S20 catalyst_gap / S22 120d breakout
     gap_momentum_candidates = payload.get("gap_momentum_candidates", []) or []
     inst_foreign_candidates = payload.get("inst_foreign_candidates", []) or []
     catalyst_gap_candidates = payload.get("catalyst_gap_candidates", []) or []
+    breakout_120d_candidates = payload.get("breakout_120d_candidates", []) or []
 
     # Best candidate (confirmed ≥ 3 conditions)
     bk_leader = next(
@@ -273,7 +274,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # breakout + gap_momentum + inst_foreign + catalyst_gap 모두 포함
     _bk_candidate_prices: dict[str, float] = {
         str(c.get("ticker", "")): float(c.get("current_price", 0.0) or 0.0)
-        for c in (breakout_candidates + gap_momentum_candidates + inst_foreign_candidates + catalyst_gap_candidates)
+        for c in (breakout_candidates + gap_momentum_candidates + inst_foreign_candidates + catalyst_gap_candidates + breakout_120d_candidates)
         if c.get("ticker") and float(c.get("current_price", 0.0) or 0.0) > 0
     }
 
@@ -363,8 +364,40 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
+    # ── 3b. Strategy S22: 120일 신고가 돌파 ─────────────────────────────────
+    # B전략(20일)보다 기간 6배 길어 false positive 감소 → 더 강한 모멘텀 신호
+    # 조건: 120일 신고가 0.2%+ 돌파 + EMA 정배열 + 거래량 1.5x + RSI 50-82
+    if breakout_120d_candidates and stance != "DEFENSE" and not _is_paused("korea.breakout_120d"):
+        _b120 = breakout_120d_candidates[0]
+        _b120_ticker = str(_b120.get("ticker", ""))
+        _b120_name = str(_b120.get("name", _b120_ticker))
+        _b120_price = float(_b120.get("current_price", 0.0) or 0.0)
+        _b120_syms = [str(c.get("ticker", "")) for c in breakout_120d_candidates if c.get("ticker")]
+        _b120_base_size = "0.60x" if stance == "OFFENSE" else "0.45x"
+        _b120_size = "0.30x" if (_k_vix_fear or _k_us_risk_off) else _b120_base_size
+        return {
+            "action": "probe_longs",
+            "size": _b120_size,
+            "focus": f"breakout_120d: {_b120_name} 120일 신고가 돌파 {_b120.get('breakout_pct', 0):.1f}%",
+            "symbol": _b120_ticker,
+            "reference_price": _b120_price,
+            "candidate_prices": _bk_candidate_prices,
+            "candidate_symbols": _b120_syms[:3],
+            "focus_tag": "breakout_120d",
+            "strategy_id": "korea.breakout_120d",
+            "entry_profile": "breakout_120d",
+            "notes": [
+                f"120일 신고가 {_b120.get('high_120d', 0):,.0f}원 → 현재 {_b120_price:,.0f}원 (+{_b120.get('breakout_pct', 0):.2f}%)",
+                f"EMA20={_b120.get('ema20', 0):,.0f} / RSI={_b120.get('rsi14', 'n/a')} / vol={_b120.get('vol_ratio', 0):.1f}x",
+                f"총 {len(breakout_120d_candidates)}개 종목 신호 — 포워드 테스트 중",
+                "B(20일) 대비 기간 6배 → false positive 감소, 더 강한 추세 신호",
+            ],
+            "quality_score": quality_score,
+        }
+
     # ── 4. Strategy B: 20일 신고점 돌파 (full confirm — 3/3 조건) ───────────
-    # 백테스트 검증: Sharpe 6.16, WR 84.6%, MDD -4.0%
+    # 주의: WR 84.6%/Sharpe 6.16은 S18(기관+외국인 필터 적용) 기준
+    # 기본 20일 신고가 단독: WR 32.9%, PF 1.86, Sharpe 2.73 (115종목 3년 백테스트)
     if breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
@@ -404,7 +437,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "notes": [
                 f"confirmed {breakout_confirmed_count}종목 / score {bk_score:.2f}",
                 f"vol_ratio {bk_leader.get('vol_ratio', 0):.1f}x / RSI {bk_leader.get('rsi', 'n/a')}",
-                "백테스트: Sharpe 6.16 / WR 84.6% / MDD -4.0%",
+                "백테스트(기본 20일): Sharpe 2.73 / WR 32.9% / PF 1.86 — S18 필터 적용시 WR 84.6%",
                 _us_note,
             ] + list(bk_leader.get("breakout_reasons", []))[:2],
             "quality_score": quality_score,
@@ -516,29 +549,6 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"RSI(2)={r.get('rsi2', 0):.1f} / EMA20 이탈 {r.get('deviation_pct', 0):.2f}%",
                 f"총 {len(rsi2_candidates)}개 신호",
                 "백테스트: Sharpe 6.74 / WR 58.1% / MDD -7.3%",
-            ],
-            "quality_score": quality_score,
-        }
-
-    # ── 7. Strategy S10: N-Day Pullback ──────────────────────────────────
-    nday_candidates = payload.get("nday_candidates", []) or []
-    if nday_candidates and stance != "DEFENSE" and not _is_paused("korea.nday_pullback"):
-        n = nday_candidates[0]
-        n_syms = [c.get("ticker", "") for c in nday_candidates if c.get("ticker")]
-        return {
-            "action": "probe_longs",
-            "size": "0.50x",
-            "focus": f"nday_pullback: {n.get('name', n.get('ticker', ''))} EMA5 이탈 {n.get('deviation_pct', 0):.1f}%",
-            "symbol": n.get("ticker", ""),
-            "reference_price": float(n.get("current_price", 0.0) or 0.0),
-            "candidate_symbols": n_syms[:3],
-            "focus_tag": "nday_pullback",
-            "strategy_id": "korea.nday_pullback",
-            "entry_profile": "nday_pullback",
-            "notes": [
-                f"3일 연속 하락 / EMA5 이탈 {n.get('deviation_pct', 0):.2f}%",
-                f"총 {len(nday_candidates)}개 신호",
-                "백테스트: Sharpe 4.52 / WR 54.1% / MDD -12.1%",
             ],
             "quality_score": quality_score,
         }

@@ -77,6 +77,8 @@ class ExecutionAgent(BaseAgent):
                 return "korea.inst_foreign_gap"
             if "catalyst_gap" in text:
                 return "korea.catalyst_gap"
+            if "breakout_120d" in text:
+                return "korea.breakout_120d"
             if "new_high_breakout" in text:
                 return "korea.new_high_breakout"
             if "mongtata_airborne" in text:
@@ -343,6 +345,7 @@ class ExecutionAgent(BaseAgent):
                 + (self.market_snapshot.get("gap_momentum_candidates", []) or [])
                 + (self.market_snapshot.get("inst_foreign_candidates", []) or [])
                 + (self.market_snapshot.get("catalyst_gap_candidates", []) or [])
+                + (self.market_snapshot.get("breakout_120d_candidates", []) or [])
             )
             key = "ticker"
         for item in pools:

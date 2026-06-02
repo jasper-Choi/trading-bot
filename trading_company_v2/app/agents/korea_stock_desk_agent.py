@@ -312,10 +312,10 @@ class KoreaStockDeskAgent(BaseAgent):
         # 백테스트 검증: Sharpe 6.74, WR 58.1%, MDD -7.3% (주식 3년)
         # 조건: close > EMA200 + RSI(2) < 10 + close < EMA20×0.975
         rsi2_candidates: list[dict] = []
-        # ── Strategy S10: N-Day Consecutive Pullback ─────────────────────────
-        # 백테스트 검증: Sharpe 4.52, WR 54.1%, MDD -12.1% (주식 3년)
-        # 조건: close > EMA200 + 3일 연속 하락 + close < EMA5
-        nday_candidates: list[dict] = []
+        # ── Strategy S22: 120일 신고가 돌파 (강화된 B전략) ──────────────────────
+        # B전략(20일)보다 기간이 6배 길어 false positive 극적 감소 → 승률 향상 기대
+        # 조건: 120일 신고가 돌파 + EMA 정배열 + 거래량 1.5x + RSI 50-82
+        breakout_120d_candidates: list[dict] = []
 
         for ticker, name, candles in results:
             if len(candles) < 205:
@@ -362,19 +362,36 @@ class KoreaStockDeskAgent(BaseAgent):
                         "dual_rsi": dual,  # S13: RSI(14)<40 추가 확인
                     })
 
-                # ── S10: 3일 연속 하락 + close < EMA5 ───────────────────────
-                ema5 = _ema(closes[-10:], 5)
-                consec = (len(closes) >= 4 and
-                          closes[-1] < closes[-2] < closes[-3] < closes[-4])
-                if consec and closes[-1] < ema5 and ema5 > 0:
-                    nday_candidates.append({
-                        "ticker": ticker,
-                        "name": name,
-                        "current_price": closes[-1],
-                        "ema5": round(ema5, 0),
-                        "deviation_pct": round((closes[-1] - ema5) / ema5 * 100, 2),
-                        "focus_tag": "nday_pullback",
-                    })
+                # ── S22: 120일 신고가 돌파 (강화된 B전략) ────────────────────
+                if len(closes) >= 125:
+                    high_120d = max(closes[-121:-1])  # 어제까지의 120일 최고가
+                    if high_120d > 0:
+                        ema60_s22 = _ema(closes, 60)
+                        rsi14_s22 = _rsi(closes, 14)
+                        vols_s22 = [float(c.get("volume") or 0.0) for c in candles[-22:]]
+                        avg_vol_s22 = sum(vols_s22[:-1]) / max(len(vols_s22) - 1, 1)
+                        vol_ratio_s22 = (vols_s22[-1] / avg_vol_s22) if avg_vol_s22 > 0 else 0.0
+                        if (
+                            closes[-1] > high_120d * 1.002       # 0.2%+ 명확한 돌파
+                            and ema60_s22 > 0
+                            and ema20 > ema60_s22 > ema200        # EMA 정배열 (중기 추세 확인)
+                            and rsi14_s22 is not None
+                            and 50.0 <= rsi14_s22 <= 82.0         # RSI 적정 구간
+                            and vol_ratio_s22 >= 1.5              # 거래량 1.5x+
+                        ):
+                            breakout_120d_candidates.append({
+                                "ticker": ticker,
+                                "name": name,
+                                "current_price": closes[-1],
+                                "high_120d": round(high_120d, 0),
+                                "breakout_pct": round((closes[-1] / high_120d - 1) * 100, 2),
+                                "ema20": round(ema20, 0),
+                                "ema60": round(ema60_s22, 0),
+                                "ema200": round(ema200, 0),
+                                "rsi14": round(rsi14_s22, 1),
+                                "vol_ratio": round(vol_ratio_s22, 2),
+                                "focus_tag": "breakout_120d",
+                            })
             except Exception:
                 continue
 
@@ -711,9 +728,10 @@ class KoreaStockDeskAgent(BaseAgent):
             score=max(score, 0.2),
             reason=(
                 f"B:{breakout_confirmed_count}c/{breakout_partial_count}p "
-                f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} S10:{len(nday_candidates)} "
+                f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} "
                 f"S15:{len(gap_momentum_candidates)} S16:{len(close_panic_candidates)} "
                 f"S18/19:{len(inst_foreign_candidates)} S20:{len(catalyst_gap_candidates)} "
+                f"S22:{len(breakout_120d_candidates)} "
                 f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
                 f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
@@ -729,9 +747,10 @@ class KoreaStockDeskAgent(BaseAgent):
                 # Strategy S9 RSI(2)
                 "rsi2_candidates": rsi2_candidates[:3],
                 "rsi2_count": len(rsi2_candidates),
-                # Strategy S10 N-Day Pullback
-                "nday_candidates": nday_candidates[:3],
-                "nday_count": len(nday_candidates),
+                # Strategy S22: 120일 신고가 돌파 (2026-06-02 신설)
+                # B전략(20일) 대비 기간 6배 → false positive 감소, 승률 향상 기대
+                "breakout_120d_candidates": breakout_120d_candidates[:5],
+                "breakout_120d_count": len(breakout_120d_candidates),
                 # Strategy S15 Gap Momentum (2026-05-22)
                 # 백테스트: WR 48.9%, PF 1.97, Sharpe 3.32, MDD -2.7%, n=47
                 "gap_momentum_candidates": gap_momentum_candidates[:5],
