@@ -781,13 +781,45 @@ class ExecutionAgent(BaseAgent):
                 stop_like += 1
 
         score = round((wins * 0.55) - (losses * 0.7) + (weighted_pnl * 0.18) - (stop_like * 0.35), 2)
+        total_pnl_5 = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent_slice)
         if score >= 0.7:
             return {"score": score, "tone": "hot", "size_multiplier": 1.08, "entry_allowed": True}
-        if score <= -0.9 or stop_like >= 2:
+        # cold 기준 강화: stop 2회+ OR 합산 PnL <= -4% (stop 2회 분량) OR score 극저
+        if stop_like >= 2 or total_pnl_5 <= -4.0 or score <= -0.9:
             return {"score": score, "tone": "cold", "size_multiplier": 0.7, "entry_allowed": False}
         if score <= -0.35:
             return {"score": score, "tone": "cool", "size_multiplier": 0.82, "entry_allowed": True}
         return {"score": score, "tone": "neutral", "size_multiplier": 1.0, "entry_allowed": True}
+
+    def _strategy_cold_streak(self, strategy_id: str, min_trades: int = 4) -> bool:
+        """전략 단위 연속 손실 감지 — 특정 전략이 cold streak이면 True 반환.
+
+        기준:
+          - 최근 10거래 중 승률 < 30% AND 거래 수 >= min_trades
+          - OR 최근 5거래 합산 PnL <= -10% (연속 스탑 3회 이상 수준)
+
+        사용처: _plan_to_order에서 cold strategy → 포지션 사이즈 축소 또는 stand_by
+        """
+        if not strategy_id:
+            return False
+        relevant = [
+            t for t in (self.closed_positions or [])[:20]
+            if (str(t.get("strategy_id", "") or "") == strategy_id
+                or str(t.get("entry_profile", "") or "") == strategy_id.split(".", 1)[-1])
+            and not self._is_retired_strategy_trade(t)
+        ][:10]
+        if len(relevant) < min_trades:
+            return False
+        wins = sum(1 for t in relevant if float(t.get("pnl_pct", 0.0) or 0.0) > 0)
+        win_rate = wins / len(relevant)
+        total_pnl = sum(float(t.get("pnl_pct", 0.0) or 0.0) for t in relevant[:5])
+        # WR < 30% with sufficient data → cold
+        if win_rate < 0.30:
+            return True
+        # 최근 5거래 합산 -10% 이하 → cold (stop 4회 분량)
+        if total_pnl <= -10.0:
+            return True
+        return False
 
     def _pick_symbol(self, desk: str, plan: dict) -> tuple[str, list[str]]:
         notes: list[str] = []
@@ -812,20 +844,41 @@ class ExecutionAgent(BaseAgent):
             cooldown_loss = self._recent_loss_cooldown(desk, symbol) and not reentry_override
             repeated_loss_block = self._repeated_loss_block(desk, symbol)
             extended_block = self._extended_symbol_block(desk, symbol)
-            if existing_open or cooldown_loss or repeated_loss_block or extended_block:
+            # 심볼 edge 상태 — cold(연속손실)이면 차단 (기존엔 size 축소만 했음)
+            edge = self._symbol_edge_state(desk, symbol)
+            symbol_cold = not edge.get("entry_allowed", True)
+            if existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold:
+                if symbol_cold and not (existing_open or cooldown_loss or repeated_loss_block or extended_block):
+                    notes.append(f"symbol cold streak: {symbol} edge={edge.get('tone')} score={edge.get('score')} — skipped")
                 continue
             if idx > 0:
                 notes.append(f"rotated from primary symbol to alternate candidate {symbol}")
             if rank_reason:
                 notes.append(f"candidate rank: {symbol} / score {rank_score} / {rank_reason}")
             return symbol, notes
-        return primary, notes
+        # 모든 후보가 blocked → 빈 문자열 반환 (plan_to_order에서 stand_by 처리)
+        notes.append(f"all {len(candidates)} candidates blocked (cold/cooldown/open) — stand_by")
+        return "", notes
 
     def _plan_to_order(self, desk: str, plan: dict) -> PaperOrder:
         original_action = str(plan.get("action", "stand_by"))
         action = original_action
         base_size = str(plan.get("size", "0.00x"))
         symbol, rotation_notes = self._pick_symbol(desk, plan)
+
+        # ── 모든 후보 blocked 시 즉시 stand_by ──────────────────────────────
+        if not symbol and action in {"probe_longs", "selective_probe", "attack_opening_drive"}:
+            _log.info(
+                "_plan_to_order: all candidates blocked → stand_by (desk=%s action=%s notes=%s)",
+                desk, action, rotation_notes,
+            )
+            return PaperOrder(
+                desk=desk, action="stand_by", size="0.00x",
+                focus=f"[blocked] all candidates cold/cooldown — {plan.get('focus', '')}",
+                rationale=[f"stand_by: {n}" for n in rotation_notes],
+                status="idle",
+            )
+
         desk_offense = self._desk_offense_state(desk)
         symbol_edge = self._symbol_edge_state(desk, symbol)
         base_notional = self._size_to_notional(base_size)
@@ -859,6 +912,18 @@ class ExecutionAgent(BaseAgent):
             elif desk_offense.get("tone") == "balanced":
                 effective_risk_budget = max(effective_risk_budget, 0.50)
         risk_scaled_notional = round(volatility_scaled_base * effective_risk_budget, 2)
+
+        # ── 전략 cold streak 체크 ─────────────────────────────────────────────
+        # 특정 전략이 WR < 30% or 합산 PnL <= -10% → 사이즈 50% 축소
+        _strategy_id_for_cold = str(plan.get("strategy_id", "") or "")
+        _strategy_cold = desk in {"korea", "crypto"} and self._strategy_cold_streak(_strategy_id_for_cold)
+        if _strategy_cold:
+            _cold_scale = 0.50
+            risk_scaled_notional = round(risk_scaled_notional * _cold_scale, 2)
+            rotation_notes.append(
+                f"strategy cold streak: {_strategy_id_for_cold} WR<30% or PnL<=-10% → size ×{_cold_scale}"
+            )
+
         desk_stop_pressure = self._desk_stop_pressure(desk)
         symbol_stop_pressure = self._symbol_stop_pressure(desk, symbol)
         downgrade_notes: list[str] = []
