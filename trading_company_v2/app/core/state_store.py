@@ -724,6 +724,11 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # stop -5.0% + EMA20 동적 청산: WR 41-50%, PF 1.50-1.80, MDD_port -7-9%
         # (기존 -2.0% 타이트 스탑은 WR 21%로 붕괴 — EMA20 회복 홀딩이 핵심)
         return 10.0, -5.0, 2700
+    if desk == "korea" and "catalyst_gap" in focus:
+        # S20: 촉매 갭업 (gap≥5%, chg1d≥5%) — 강한 재료 + EMA200만 확인
+        # gap≥5% 진입 특성상 당일 변동성 크므로 stop -3.0% (probe_longs -1.0%보다 여유)
+        # trail이 청산 제어, 멀티데이 추세 허용
+        return 25.0, -3.0, 50000
     if desk == "korea" and "inst_foreign_breakout" in focus:
         # S18: 신고점 돌파 + 기관 레이더 + 외국인 순매수 동시 확인
         # 2026-06-01: target 7→25%, max_cycles 50000 — trail이 청산 제어, 멀티데이 추세 허용
