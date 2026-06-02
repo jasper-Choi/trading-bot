@@ -444,8 +444,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # ── 4. Strategy B: 20일 신고점 돌파 ──────────────────────────────────────
     # 2026-06-02 백테스트: WR 52.2%, P&L 0.72, MDD -31% → DISABLED
     # S18(기관+외국인 필터)가 WR을 84%+ 로 끌어올림 → 기본 B는 비활성화, S18만 허용
-    if False:  # _BT_DISABLED로 비활성화
-    if breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
+    if False and breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
