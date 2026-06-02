@@ -339,9 +339,11 @@ class KoreaStockDeskAgent(BaseAgent):
                         "focus_tag": "mongtata_airborne",
                     })
 
-                # ── S9/S13: RSI(2) < 10 + EMA20*0.975 ─────────────────────
+                # ── S9/S13: RSI(2) < 15 + EMA20*0.975 ─────────────────────
+                # 2026-06-02: 10→15로 완화 — RANGING 장에서 극단 과매도(RSI<10) 희귀
+                # RSI<15: 상단 과매도 제외하면서도 신호 빈도 확보 (백테스트 PASS 유지)
                 rsi2_val = _rsi(closes, 2)
-                if (rsi2_val is not None and rsi2_val < 10.0
+                if (rsi2_val is not None and rsi2_val < 15.0
                         and closes[-1] < ema20 * 0.975):
                     rsi14_val = _rsi(closes, 14)
                     dual = (rsi14_val is not None and rsi14_val < 40.0)

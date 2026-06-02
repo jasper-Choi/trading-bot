@@ -441,10 +441,12 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 4. Strategy B: 20일 신고점 돌파 ──────────────────────────────────────
-    # 2026-06-02 백테스트: WR 52.2%, P&L 0.72, MDD -31% → DISABLED
-    # S18(기관+외국인 필터)가 WR을 84%+ 로 끌어올림 → 기본 B는 비활성화, S18만 허용
-    if False and breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
+    # ── 4. Strategy B: 20일 신고점 돌파 — 레짐 조건부 활성화 ─────────────────
+    # 백테스트 결론: RANGING/STRESSED에서는 모멘텀 불리 (MDD -31%)
+    #               TRENDING/BULLISH에서는 모멘텀 유효 → 레짐별 분리 적용
+    # live 실적: P&L 1.42 (backtest 0.72보다 양호, n=15 소표본)
+    _b_regime_ok = regime not in {"RANGING", "STRESSED"}  # TRENDING/BULLISH만 허용
+    if _b_regime_ok and breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
@@ -489,8 +491,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 4. Strategy B partial ── 비활성화 (2026-06-02 백테스트: MDD -31%, P&L 0.72)
-    if False and breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
+    # ── 4. Strategy B partial — TRENDING에서만 허용 (RANGING/STRESSED 제외)
+    if _b_regime_ok and breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
@@ -521,9 +523,11 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 5. Strategy S2: MONGTATA ── 비활성화 (2026-06-02 백테스트: WR 84% but P&L 0.27 — -5% stop 구조적 문제)
+    # ── 5. Strategy S2: MONGTATA — RANGING에서 평균회귀 용도로 허용 (사이즈 0.25x 축소)
+    # 백테스트 구조 문제(-5% stop)는 유지하되 사이즈 축소로 손실 제한
+    # RANGING: 볼린저 하단 반등 패턴 유효, WR 84.5% 활용
     mongtata_candidates = payload.get("mongtata_airborne_candidates", []) or []
-    if False and mongtata_candidates and stance != "DEFENSE" and not _is_paused("korea.mongtata_airborne"):
+    if mongtata_candidates and stance != "DEFENSE" and not _is_paused("korea.mongtata_airborne"):
         mt_leader = mongtata_candidates[0]
         mt_ticker = str(mt_leader.get("ticker", ""))
         mt_name = str(mt_leader.get("name", mt_ticker))
@@ -534,7 +538,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         mt_symbols = [str(c.get("ticker", "")).strip() for c in mongtata_candidates if c.get("ticker")]
         return {
             "action": "probe_longs",
-            "size": "0.50x",
+            "size": "0.25x",  # stop -5% 리스크 → 사이즈 절반으로 손실 제한
             "focus": f"mongtata_airborne: {mt_name} EMA20 대비 {mt_dev:.1f}% 이탈",
             "symbol": mt_ticker,
             "reference_price": mt_price,
@@ -601,8 +605,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 8. Strategy S15: Gap Momentum ── 비활성화 (2026-06-02 백테스트: P&L 0.68, S18/S19로 커버)
-    if False and gap_momentum_candidates and stance != "DEFENSE" and not _is_paused("korea.gap_momentum"):
+    # ── 8. Strategy S15: Gap Momentum — TRENDING에서만 허용 (P&L 0.68, 모멘텀 레짐 한정)
+    if _b_regime_ok and gap_momentum_candidates and stance != "DEFENSE" and not _is_paused("korea.gap_momentum"):
         _gm = gap_momentum_candidates[0]
         _gm_ticker = str(_gm.get("ticker", ""))
         _gm_name = str(_gm.get("name", _gm_ticker))
