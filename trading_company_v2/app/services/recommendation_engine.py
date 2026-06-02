@@ -254,11 +254,12 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     breakout_partial_count = int(payload.get("breakout_partial_count", 0) or 0)
     quality_score = float(payload.get("quality_score", 0.0) or 0.0)
 
-    # S15 gap momentum / S18/S19 inst_foreign / S20 catalyst_gap / S22 120d breakout
+    # S15 gap momentum / S18/S19 inst_foreign / S20 catalyst_gap / S22 120d breakout / S23 pre_gap
     gap_momentum_candidates = payload.get("gap_momentum_candidates", []) or []
     inst_foreign_candidates = payload.get("inst_foreign_candidates", []) or []
     catalyst_gap_candidates = payload.get("catalyst_gap_candidates", []) or []
     breakout_120d_candidates = payload.get("breakout_120d_candidates", []) or []
+    pre_gap_watch_candidates = payload.get("pre_gap_watch_candidates", []) or []
 
     # Best candidate (confirmed ≥ 3 conditions)
     bk_leader = next(
@@ -328,6 +329,41 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "symbol": candidate_symbols[0] if candidate_symbols else "",
             "candidate_symbols": candidate_symbols,
             "notes": [f"Risk committee blocked fresh Korea entries in {_k_block} mode."],
+            "quality_score": quality_score,
+        }
+
+    # ── 2b. Strategy S23: Pre-Market Macro/News Catalyst ──────────────────────
+    # 트럼프/머스크 발언, US 밤사이 급등, 종목 뉴스 급증을 조합한 선행 포착
+    # 갭이 발생하기 전 장 초반에 진입 — S20(post-gap)보다 1단계 앞선 예측형 전략
+    # NAVER +26.7% 같은 케이스를 사전 포착하기 위한 매크로-뉴스 드리븐 전략
+    if pre_gap_watch_candidates and stance != "DEFENSE" and not _is_paused("korea.pre_gap_watch"):
+        _pg = pre_gap_watch_candidates[0]
+        _pg_ticker = str(_pg.get("ticker", ""))
+        _pg_name = str(_pg.get("name", _pg_ticker))
+        _pg_price = float(_pg.get("current_price", 0.0) or 0.0)
+        _pg_syms = [str(c.get("ticker", "")) for c in pre_gap_watch_candidates if c.get("ticker")]
+        _pg_macro = float(_pg.get("macro_boost", 0.0) or 0.0)
+        _pg_cat = int(_pg.get("catalyst_rating", 0) or 0)
+        # 장전 watchlist이므로 진입 전 시가 확인 필요 → selective_probe (작은 사이즈)
+        _pg_base_size = "0.35x" if stance == "OFFENSE" else "0.25x"
+        _pg_size = "0.15x" if (_k_vix_fear or _k_us_risk_off) else _pg_base_size
+        _pg_headlines = (list(_pg.get("headlines", []) or []))[:2]
+        return {
+            "action": "selective_probe",
+            "size": _pg_size,
+            "focus": f"pre_gap_watch: {_pg_name} 매크로부스트={_pg_macro:.2f} 뉴스={_pg_cat}점",
+            "symbol": _pg_ticker,
+            "reference_price": _pg_price if _pg_price > 0 else None,
+            "candidate_symbols": _pg_syms[:3],
+            "focus_tag": "pre_gap_watch",
+            "strategy_id": "korea.pre_gap_watch",
+            "entry_profile": "pre_gap_watch",
+            "notes": [
+                f"매크로 부스트 {_pg_macro:.2f} / 뉴스 catalyst {_pg_cat}점 / 종토방 hot={_pg.get('jongto_hot', False)}",
+                f"주요 헤드라인: {' | '.join(_pg_headlines) if _pg_headlines else '뉴스 감지됨'}",
+                f"총 {len(pre_gap_watch_candidates)}개 종목 사전 포착",
+                "S23: 갭 전 선행 포착 — 장 초반 시가 확인 후 추가 진입 검토",
+            ],
             "quality_score": quality_score,
         }
 

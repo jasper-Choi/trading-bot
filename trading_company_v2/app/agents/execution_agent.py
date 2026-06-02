@@ -346,6 +346,7 @@ class ExecutionAgent(BaseAgent):
                 + (self.market_snapshot.get("inst_foreign_candidates", []) or [])
                 + (self.market_snapshot.get("catalyst_gap_candidates", []) or [])
                 + (self.market_snapshot.get("breakout_120d_candidates", []) or [])
+                + (self.market_snapshot.get("pre_gap_watch_candidates", []) or [])
             )
             key = "ticker"
         for item in pools:

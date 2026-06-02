@@ -627,6 +627,66 @@ class KoreaStockDeskAgent(BaseAgent):
         catalyst_gap_candidates = _apply_catalyst_filter(catalyst_gap_candidates)
         catalyst_gap_candidates.sort(key=lambda x: x.get("chg1d", 0.0), reverse=True)
 
+        # ── Strategy S23: Pre-Market News/Macro Catalyst ──────────────────────────
+        # 트럼프/머스크 발언 + US 밤사이 급등 + 종목별 뉴스 급증을 조합해
+        # 갭 발생 전 사전 포착 — NAVER +26.7% 같은 케이스 대응
+        # 파이프라인: 매크로신호 → 섹터매핑 → 개별 catalyst 체크 → watchlist
+        pre_gap_watch_candidates: list[dict] = []
+        try:
+            from app.services.macro_sector_map import get_boosted_tickers
+            news_intel_for_s23 = {}
+            try:
+                from app.services.global_news_intel import get_market_news_intel
+                news_intel_for_s23 = get_market_news_intel()
+            except Exception:
+                pass
+
+            boosted_map = get_boosted_tickers(news_intel_for_s23, us_ctx)
+            if boosted_map:
+                # universe에서 종목명 lookup
+                _name_lookup = {item["ticker"]: item["name"] for item in universe if item.get("ticker") and item.get("name")}
+                # 부스트 점수 0.45 이상 + universe 포함 종목만 체크
+                _candidates_to_check = [
+                    (tkr, score)
+                    for tkr, score in sorted(boosted_map.items(), key=lambda x: x[1], reverse=True)
+                    if score >= 0.45 and tkr in _name_lookup
+                ][:10]  # 최대 10개 (API 부하 제한)
+
+                _already_in_other = set(
+                    str(c.get("ticker", ""))
+                    for c in (breakout_candidates + gap_momentum_candidates + catalyst_gap_candidates)
+                )
+
+                for tkr, macro_boost in _candidates_to_check:
+                    if tkr in _already_in_other:
+                        continue  # 이미 다른 전략에 포착된 종목 제외
+                    nm = _name_lookup.get(tkr, tkr)
+                    try:
+                        cat = get_stock_catalyst(tkr, nm)
+                        cat_rating = int(cat.get("catalyst_rating", 0) or 0)
+                        jt = cat.get("jongto", {}) or {}
+                        jt_hot = bool(jt.get("hot", False))
+                        jt_sent = float(jt.get("sentiment_score", 0.5) or 0.5)
+                        # 조건: 뉴스 호재 6점 이상 OR 종토방 hot + 긍정 + 매크로 강한 부스트
+                        if cat_rating >= 6 or (jt_hot and jt_sent >= 0.6 and macro_boost >= 0.55):
+                            if not cat.get("negative"):
+                                pre_gap_watch_candidates.append({
+                                    "ticker": tkr,
+                                    "name": nm,
+                                    "current_price": 0.0,  # 장 전 → 가격 미정
+                                    "macro_boost": round(macro_boost, 2),
+                                    "catalyst_rating": cat_rating,
+                                    "catalyst_score": float(cat.get("catalyst_score", 0.5) or 0.5),
+                                    "jongto_hot": jt_hot,
+                                    "jongto_sentiment": jt_sent,
+                                    "headlines": (cat.get("headlines", []) or [])[:2],
+                                    "focus_tag": "pre_gap_watch",
+                                })
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
         # ── Strategy S18/S19: 기관+외국인 스마트머니 확인 전략 ────────────────────
         # S18 (inst_foreign_breakout): 신고점 돌파 후보 중 기관 레이더 포함 + 외국인 순매수
         # S19 (inst_foreign_gap):      갭 모멘텀 후보 중 기관 레이더 포함 + 외국인 순매수
@@ -731,7 +791,7 @@ class KoreaStockDeskAgent(BaseAgent):
                 f"S2:{len(mongtata_candidates)} S9:{len(rsi2_candidates)} "
                 f"S15:{len(gap_momentum_candidates)} S16:{len(close_panic_candidates)} "
                 f"S18/19:{len(inst_foreign_candidates)} S20:{len(catalyst_gap_candidates)} "
-                f"S22:{len(breakout_120d_candidates)} "
+                f"S22:{len(breakout_120d_candidates)} S23:{len(pre_gap_watch_candidates)} "
                 f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
                 f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
@@ -748,9 +808,12 @@ class KoreaStockDeskAgent(BaseAgent):
                 "rsi2_candidates": rsi2_candidates[:3],
                 "rsi2_count": len(rsi2_candidates),
                 # Strategy S22: 120일 신고가 돌파 (2026-06-02 신설)
-                # B전략(20일) 대비 기간 6배 → false positive 감소, 승률 향상 기대
                 "breakout_120d_candidates": breakout_120d_candidates[:5],
                 "breakout_120d_count": len(breakout_120d_candidates),
+                # Strategy S23: Pre-Market Macro/News Catalyst (2026-06-02 신설)
+                # 트럼프/머스크/US 밤사이 급등 + 종목 뉴스 급증 → 갭 발생 전 선행 포착
+                "pre_gap_watch_candidates": pre_gap_watch_candidates[:5],
+                "pre_gap_watch_count": len(pre_gap_watch_candidates),
                 # Strategy S15 Gap Momentum (2026-05-22)
                 # 백테스트: WR 48.9%, PF 1.97, Sharpe 3.32, MDD -2.7%, n=47
                 "gap_momentum_candidates": gap_momentum_candidates[:5],

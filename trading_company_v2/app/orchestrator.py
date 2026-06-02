@@ -705,6 +705,7 @@ class CompanyOrchestrator:
             "catalyst_gap_candidates": _korea_payload.get("catalyst_gap_candidates", []),
             "new_high_breakout_candidates": _korea_payload.get("new_high_breakout_candidates", []),
             "breakout_120d_candidates": _korea_payload.get("breakout_120d_candidates", []),
+            "pre_gap_watch_candidates": _korea_payload.get("pre_gap_watch_candidates", []),
         }
         state.session_state = strategy_allocator_result.payload.get("session", {})
         state.desk_views = {
