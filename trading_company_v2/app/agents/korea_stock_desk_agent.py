@@ -616,7 +616,6 @@ class KoreaStockDeskAgent(BaseAgent):
 
         mongtata_candidates    = _apply_catalyst_filter(mongtata_candidates)
         rsi2_candidates        = _apply_catalyst_filter(rsi2_candidates)
-        nday_candidates        = _apply_catalyst_filter(nday_candidates)
         gap_momentum_candidates = _apply_catalyst_filter(gap_momentum_candidates)
         # S20 catalyst_gap: 악재 뉴스 필터 후 등락률 내림차순 정렬
         catalyst_gap_candidates = _apply_catalyst_filter(catalyst_gap_candidates)
@@ -831,7 +830,7 @@ class KoreaStockDeskAgent(BaseAgent):
             score += 0.40
         elif breakout_partial_count >= 1:
             score += 0.20
-        elif mongtata_candidates or rsi2_candidates or nday_candidates:
+        elif mongtata_candidates or rsi2_candidates:
             score += 0.25
         if gap_momentum_candidates:
             score += 0.15  # S15 갭 모멘텀 신호 존재 시 추가 점수
