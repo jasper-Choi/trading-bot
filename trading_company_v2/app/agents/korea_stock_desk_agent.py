@@ -627,63 +627,148 @@ class KoreaStockDeskAgent(BaseAgent):
         catalyst_gap_candidates = _apply_catalyst_filter(catalyst_gap_candidates)
         catalyst_gap_candidates.sort(key=lambda x: x.get("chg1d", 0.0), reverse=True)
 
-        # ── Strategy S23: Pre-Market News/Macro Catalyst ──────────────────────────
-        # 트럼프/머스크 발언 + US 밤사이 급등 + 종목별 뉴스 급증을 조합해
-        # 갭 발생 전 사전 포착 — NAVER +26.7% 같은 케이스 대응
-        # 파이프라인: 매크로신호 → 섹터매핑 → 개별 catalyst 체크 → watchlist
+        # ── Strategy S23: Universal Pre-Gap Catalyst Scanner ────────────────────
+        # 유니버스 전체(120종목)를 2단계로 스캔 — 모든 종목에 대해 선 파악 후 진입
+        #
+        # [1단계] 기술적 1차 필터 (빠름, 캔들 데이터만 사용)
+        #   - EMA200 위 (기본 상승추세 확인)
+        #   - 오늘 갭 < 3% (이미 갭 발생은 S20이 처리)
+        #   - 거래량 축적: 최근 3일 평균 > 10일 평균 × 1.15 (세력 개입 조짐)
+        #   - RSI 30~78 (극단값 제외)
+        #
+        # [2단계] 뉴스/종토방/매크로 딥 스캔 (상위 20개, 병렬 실행)
+        #   - get_stock_catalyst() : 네이버뉴스 + Google뉴스 + 종토방 통합 분석
+        #   - 매크로 부스트(US 밤사이 급등, 트럼프/머스크 발언)는 가중치로 적용
+        #   - catalyst_rating >= 5 (매크로 부스트 있으면 4로 완화)
+        #   - 악재 뉴스 있는 종목 자동 제외
         pre_gap_watch_candidates: list[dict] = []
         try:
-            from app.services.macro_sector_map import get_boosted_tickers
-            news_intel_for_s23 = {}
+            from concurrent.futures import ThreadPoolExecutor as _S23Executor, as_completed as _s23_as_completed
+
+            # ── 매크로 부스트 맵 (섹터 매핑 기반, boost multiplier로만 사용) ──
+            _s23_boosted: dict[str, float] = {}
+            _s23_news_intel: dict = {}
             try:
-                from app.services.global_news_intel import get_market_news_intel
-                news_intel_for_s23 = get_market_news_intel()
+                from app.services.macro_sector_map import get_boosted_tickers
+                try:
+                    from app.services.global_news_intel import get_market_news_intel
+                    _s23_news_intel = get_market_news_intel()
+                except Exception:
+                    pass
+                _s23_boosted = get_boosted_tickers(_s23_news_intel, us_ctx)
             except Exception:
                 pass
 
-            boosted_map = get_boosted_tickers(news_intel_for_s23, us_ctx)
-            if boosted_map:
-                # universe에서 종목명 lookup
-                _name_lookup = {item["ticker"]: item["name"] for item in universe if item.get("ticker") and item.get("name")}
-                # 부스트 점수 0.45 이상 + universe 포함 종목만 체크
-                _candidates_to_check = [
-                    (tkr, score)
-                    for tkr, score in sorted(boosted_map.items(), key=lambda x: x[1], reverse=True)
-                    if score >= 0.45 and tkr in _name_lookup
-                ][:10]  # 최대 10개 (API 부하 제한)
-
-                _already_in_other = set(
-                    str(c.get("ticker", ""))
-                    for c in (breakout_candidates + gap_momentum_candidates + catalyst_gap_candidates)
-                )
-
-                for tkr, macro_boost in _candidates_to_check:
-                    if tkr in _already_in_other:
-                        continue  # 이미 다른 전략에 포착된 종목 제외
-                    nm = _name_lookup.get(tkr, tkr)
-                    try:
-                        cat = get_stock_catalyst(tkr, nm)
-                        cat_rating = int(cat.get("catalyst_rating", 0) or 0)
-                        jt = cat.get("jongto", {}) or {}
-                        jt_hot = bool(jt.get("hot", False))
-                        jt_sent = float(jt.get("sentiment_score", 0.5) or 0.5)
-                        # 조건: 뉴스 호재 6점 이상 OR 종토방 hot + 긍정 + 매크로 강한 부스트
-                        if cat_rating >= 6 or (jt_hot and jt_sent >= 0.6 and macro_boost >= 0.55):
-                            if not cat.get("negative"):
-                                pre_gap_watch_candidates.append({
-                                    "ticker": tkr,
-                                    "name": nm,
-                                    "current_price": 0.0,  # 장 전 → 가격 미정
-                                    "macro_boost": round(macro_boost, 2),
-                                    "catalyst_rating": cat_rating,
-                                    "catalyst_score": float(cat.get("catalyst_score", 0.5) or 0.5),
-                                    "jongto_hot": jt_hot,
-                                    "jongto_sentiment": jt_sent,
-                                    "headlines": (cat.get("headlines", []) or [])[:2],
-                                    "focus_tag": "pre_gap_watch",
-                                })
-                    except Exception:
+            # ── 1단계: 전 유니버스 기술적 1차 필터 ─────────────────────────
+            _s23_quick: list[tuple[str, str, float]] = []  # (ticker, name, vol_score)
+            _already_in_other_s23 = set(
+                str(c.get("ticker", ""))
+                for c in (breakout_candidates + gap_momentum_candidates
+                          + catalyst_gap_candidates + breakout_120d_candidates)
+            )
+            for _tkr, _nm, _cands in results:
+                if _tkr in _already_in_other_s23:
+                    continue
+                if len(_cands) < 22:
+                    continue
+                try:
+                    _cls = [float(c.get("close") or 0.0) for c in _cands]
+                    _vls = [float(c.get("volume") or 0.0) for c in _cands]
+                    if _cls[-1] <= 0 or _cls[-2] <= 0:
                         continue
+
+                    # EMA200 위 확인 (200봉 미만이면 스킵)
+                    if len(_cls) >= 200:
+                        _ema200_s23 = _ema(_cls, 200)
+                        if _cls[-1] <= _ema200_s23 or _ema200_s23 <= 0:
+                            continue
+
+                    # 오늘 이미 갭 발생 종목 제외 (S20이 처리)
+                    _gap_today = (_cls[-1] - _cls[-2]) / _cls[-2] * 100
+                    if _gap_today > 3.0:
+                        continue
+
+                    # 거래량 축적 신호
+                    _valid_vols = [v for v in _vls[-22:] if v > 0]
+                    if len(_valid_vols) < 10:
+                        continue
+                    _vol3d = sum(_valid_vols[-4:-1]) / 3 if len(_valid_vols) >= 4 else 0
+                    _vol10d = sum(_valid_vols[-11:-1]) / 10 if len(_valid_vols) >= 11 else 0
+                    if _vol3d <= 0 or _vol10d <= 0:
+                        continue
+                    _vrat = _vol3d / _vol10d
+                    if _vrat < 1.15:  # 거래량 축적 없으면 제외
+                        continue
+
+                    # RSI 필터
+                    _rsi14_s23 = _rsi(_cls, 14)
+                    if _rsi14_s23 is not None and (_rsi14_s23 < 30 or _rsi14_s23 > 78):
+                        continue
+
+                    # 매크로 부스트 추가 (있으면 가산)
+                    _macro_b = float(_s23_boosted.get(_tkr, 0.0))
+                    _vol_score = _vrat + _macro_b * 0.5  # 매크로 있으면 우선순위 올림
+                    _s23_quick.append((_tkr, _nm, _vol_score))
+                except Exception:
+                    continue
+
+            # 거래량+매크로 복합 점수 순 정렬, 상위 20개만 딥스캔
+            _s23_quick.sort(key=lambda x: x[2], reverse=True)
+            _s23_to_scan = _s23_quick[:20]
+
+            # ── 2단계: 상위 20개 병렬 catalyst 딥스캔 ─────────────────────
+            def _s23_check(item: tuple[str, str, float]) -> dict | None:
+                _t, _n, _vr = item
+                try:
+                    _cat = get_stock_catalyst(_t, _n)
+                    _cr = int(_cat.get("catalyst_rating", 0) or 0)
+                    _jt = _cat.get("jongto", {}) or {}
+                    _jt_hot = bool(_jt.get("hot", False))
+                    _jt_sent = float(_jt.get("sentiment_score", 0.5) or 0.5)
+                    _mb = float(_s23_boosted.get(_t, 0.0))
+                    # 매크로 부스트 있으면 threshold 1점 완화
+                    _thr = 4 if _mb >= 0.4 else 5
+                    _ok = (
+                        (_cr >= _thr and not _cat.get("negative"))
+                        or (_jt_hot and _jt_sent >= 0.65 and not _cat.get("negative"))
+                    )
+                    if _ok:
+                        return {
+                            "ticker": _t,
+                            "name": _n,
+                            "current_price": 0.0,
+                            "vol_ratio": round(_vr, 2),
+                            "macro_boost": round(_mb, 2),
+                            "catalyst_rating": _cr,
+                            "catalyst_score": float(_cat.get("catalyst_score", 0.5) or 0.5),
+                            "jongto_hot": _jt_hot,
+                            "jongto_sentiment": _jt_sent,
+                            "headlines": (_cat.get("headlines", []) or [])[:2],
+                            "focus_tag": "pre_gap_watch",
+                        }
+                except Exception:
+                    pass
+                return None
+
+            if _s23_to_scan:
+                with _S23Executor(max_workers=6) as _ex23:
+                    _futs = {_ex23.submit(_s23_check, item): item for item in _s23_to_scan}
+                    for _fut in _s23_as_completed(_futs, timeout=30):
+                        try:
+                            _res = _fut.result()
+                            if _res:
+                                pre_gap_watch_candidates.append(_res)
+                        except Exception:
+                            pass
+
+            # catalyst_rating × vol_ratio + macro_boost 복합 정렬
+            pre_gap_watch_candidates.sort(
+                key=lambda x: (
+                    x.get("catalyst_rating", 0) * max(x.get("vol_ratio", 1.0), 1.0)
+                    + x.get("macro_boost", 0.0) * 3.0
+                ),
+                reverse=True,
+            )
         except Exception:
             pass
 
