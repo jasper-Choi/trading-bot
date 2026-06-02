@@ -243,24 +243,104 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
     }
 
 
-def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
-    """한국 주식 데스크 추천 — 백테스트 최적화 (2026-06-02).
+def _entry_quality_score(candidate: dict, payload: dict) -> tuple[float, str]:
+    """진입 품질 채점 (0.0~1.0).
 
-    백테스트 통과 전략: S13 Dual RSI (ACTIVATE), S9 RSI(2) (WATCH)
-    비활성화: B(20일 기본), S2 MONGTATA, S15 gap_momentum, S22 120일
-    유지: S18/S19 (기관+외국인 필터 → WR 대폭 향상), S20/S23 (뉴스/촉매 기반)
+    나쁜 진입 최소화 원칙:
+      - 약한 신호에는 작게 / 너무 약하면 스킵
+      - 이미 많이 오른 종목 추격 금지
+      - 거래량 미수반 신호 페널티
+      - 시장 환경(VIX·US overnight) 반영
 
-    우선순위: S23(pre_gap) > S18/S19(inst_foreign) > S22b(120d) > S13(dual_rsi)
-             > S9(rsi2) > stand_by
+    Returns: (score 0~1, reason 문자열)
     """
-    # ── 백테스트 실패 전략 비활성화 ────────────────────────────────────────
-    # 근거: 2026-06-02 파라미터 그리드서치, P&L비율 구조적 < 1.5
-    _BT_DISABLED = frozenset({
-        "korea.new_high_breakout",   # B 20일: P&L 0.72, MDD -31%
-        "korea.mongtata_airborne",   # S2: P&L 0.27 (-5% stop 구조 문제)
-        "korea.gap_momentum",        # S15: P&L 0.68 (S18/S19로 커버)
-        "korea.breakout_120d",       # S22: P&L 0.93 (포워드 테스트로 전환)
-    })
+    score = 0.50  # 기준선
+
+    # 1. 신호 강도 (desk agent 계산 점수)
+    sig = float(candidate.get("signal_score", 0.5) or 0.5)
+    cand = float(candidate.get("candidate_score", sig) or sig)
+    score += (sig - 0.5) * 0.30    # ±0.15 기여
+    score += (cand - 0.5) * 0.20   # ±0.10 기여
+
+    # 2. 거래량 확인 — 볼륨 없으면 신호 신뢰도 낮음
+    vr = float(candidate.get("vol_ratio", candidate.get("vol_surge_ratio", 1.0)) or 1.0)
+    if vr >= 2.5:
+        score += 0.12
+    elif vr >= 1.5:
+        score += 0.05
+    elif vr < 1.2:
+        score -= 0.12   # 거래량 미수반 = 페널티
+
+    # 3. 추격 매수 방지 — 이미 많이 오른 종목
+    burst = float(candidate.get("burst_change_pct", 0.0) or 0.0)
+    if burst > 8.0:
+        score -= 0.25   # 오늘 8%+ 상승 종목 추격 금지
+    elif burst > 5.0:
+        score -= 0.15
+    elif burst > 3.0:
+        score -= 0.08
+
+    # 4. VIX / 글로벌 리스크
+    vix_r = str(payload.get("vix_regime", "") or "")
+    if vix_r == "panic":
+        score -= 0.25
+    elif vix_r == "fear":
+        score -= 0.12
+
+    # 5. US 전날 밤 방향 (SPY 기준)
+    spy = float(payload.get("spy_chg", 0.0) or 0.0)
+    if spy < -1.5:
+        score -= 0.10
+    elif spy > 1.0:
+        score += 0.05
+
+    # 6. 뉴스 catalyst (있으면 부스트, 악재면 패널티)
+    cat = int(candidate.get("catalyst_rating", 5) or 5)
+    if cat >= 8:
+        score += 0.08
+    elif cat <= 2:
+        score -= 0.15
+
+    score = round(max(0.0, min(1.0, score)), 3)
+    reasons = []
+    if vr < 1.2: reasons.append(f"weak_vol({vr:.1f}x)")
+    if burst > 3.0: reasons.append(f"chase+{burst:.0f}%")
+    if vix_r in ("fear","panic"): reasons.append(f"vix_{vix_r}")
+    if spy < -1.5: reasons.append(f"US_dn{spy:.1f}%")
+    if cat <= 2: reasons.append("bad_news")
+    return score, "|".join(reasons) if reasons else "ok"
+
+
+def _quality_size(base_size: str, score: float) -> str:
+    """진입 품질 점수에 따라 포지션 사이즈 조절."""
+    try:
+        notional = float(base_size.replace("x", ""))
+    except ValueError:
+        return base_size
+    if score >= 0.70:
+        multiplier = 1.0      # 고품질: 정상 사이즈
+    elif score >= 0.55:
+        multiplier = 0.70     # 중품질: 70%
+    else:
+        multiplier = 0.45     # 저품질: 45% (진입하되 최소화)
+    return f"{round(notional * multiplier, 2):.2f}x"
+
+
+def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
+    """한국 주식 데스크 추천 — 품질 게이트 + 레짐 조건부 전략 (2026-06-02).
+
+    핵심 원칙: 나쁜 진입 최소화
+      - 진입 품질 점수(0~1) 계산 → 0.38 미만이면 스킵
+      - 0.38~0.55: 45% 사이즈로 소량 진입
+      - 0.55 이상: 정상 사이즈
+
+    레짐별 전략:
+      RANGING : S13/S9(평균회귀) + S2(볼린저반등) + S18/S19/S20/S23
+      TRENDING: 위 + B(신고점) + S15(갭모멘텀) 추가 활성
+    """
+    # ── 최소 진입 품질 기준 ────────────────────────────────────────────────
+    _MIN_QUALITY = 0.38   # 이 미만이면 스킵
+
     breakout_candidates = payload.get("new_high_breakout_candidates", []) or []
     breakout_confirmed_count = int(payload.get("breakout_confirmed_count", 0) or 0)
     breakout_partial_count = int(payload.get("breakout_partial_count", 0) or 0)
@@ -466,9 +546,16 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 ],
                 "quality_score": quality_score,
             }
+        # 진입 품질 게이트
+        _bk_quality, _bk_qreason = _entry_quality_score(bk_leader, payload)
+        if _bk_quality < _MIN_QUALITY:
+            return {"action": "stand_by", "size": "0.00x",
+                    "focus": f"B confirmed: quality {_bk_quality:.2f} < {_MIN_QUALITY} ({_bk_qreason}) — skip",
+                    "candidate_symbols": candidate_symbols, "quality_score": quality_score}
         # VIX fear/US risk-off이면 사이즈 한 단계 축소
         _bk_base_size = "0.70x" if stance == "OFFENSE" else "0.50x"
-        _bk_size = "0.35x" if (_k_vix_fear or _k_us_risk_off) else _bk_base_size
+        _bk_raw_size = "0.35x" if (_k_vix_fear or _k_us_risk_off) else _bk_base_size
+        _bk_size = _quality_size(_bk_raw_size, _bk_quality)
         _us_note = f"US {_k_us_regime} / VIX={_k_vix_val:.1f}({_k_vix_regime}) SPY{_k_spy_chg:+.1f}%"
         _bk_price = float(bk_leader.get("current_price", 0.0) or 0.0)
         return {
@@ -555,41 +642,57 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 6. Strategy S13: Dual RSI ── ACTIVATE (2026-06-02 백테스트 유일 통과)
-    # IS(2022-23): WR 47.1%, P&L 1.58, Sharpe 1.55, MDD -2.1% → PASS
-    # OOS(2024) : WR 47.0%, P&L 1.57, Sharpe 1.78 → PASS (overfitting 없음)
-    # trail: tight 최적화 적용 (_mean_reversion_trail_rules)
+    # ── 6. Strategy S13/S9: RSI 평균회귀 ─────────────────────────────────────
+    # S13(Dual RSI, 백테스트 PASS) → S9(RSI2, WATCH) 순으로 시도
+    # 평균회귀는 RSI 극단 자체가 품질 신호 → _MIN_QUALITY 기준 약간 완화 (0.32)
+    _MR_MIN_QUALITY = 0.32
     rsi2_candidates = payload.get("rsi2_candidates", []) or []
     dual_rsi_candidates = [c for c in rsi2_candidates if c.get("dual_rsi")]
-    if dual_rsi_candidates and stance != "DEFENSE" and not _is_paused("korea.dual_rsi"):
-        r = dual_rsi_candidates[0]
-        r_syms = [c.get("ticker", "") for c in dual_rsi_candidates if c.get("ticker")]
+
+    for _mr_cands, _mr_size, _mr_strat, _mr_prof, _mr_note in [
+        (dual_rsi_candidates, "0.50x", "korea.dual_rsi", "dual_rsi",
+         "백테스트 PASS: WR 47.1% / P&L 1.58 / Sharpe 1.55 / MDD -2.1%"),
+        (rsi2_candidates, "0.30x", "korea.rsi2_mean_reversion", "rsi2_mean_reversion",
+         "백테스트 WATCH: OOS Sharpe 3.13 / IS P&L 1.44"),
+    ]:
+        if not _mr_cands:
+            continue
+        if _is_paused(_mr_strat) or stance == "DEFENSE":
+            continue
+        r = _mr_cands[0]
+        r_syms = [c.get("ticker", "") for c in _mr_cands if c.get("ticker")]
+        _mr_quality, _mr_qr = _entry_quality_score(r, payload)
+        if _mr_quality < _MR_MIN_QUALITY:
+            continue  # 이 후보 스킵, 다음 전략으로
+        _final_size = _quality_size(_mr_size, _mr_quality)
+        _mr_rsi2 = r.get("rsi2", 0)
+        _mr_rsi14 = r.get("rsi14", 0)
+        _mr_dev = r.get("deviation_pct", 0)
         return {
             "action": "probe_longs",
-            "size": "0.50x",
-            "focus": f"dual_rsi: {r.get('name', r.get('ticker', ''))} RSI(2)={r.get('rsi2', 0):.1f} RSI(14)={r.get('rsi14', 0):.1f}",
+            "size": _final_size,
+            "focus": f"{_mr_prof}: {r.get('name', r.get('ticker',''))} RSI(2)={_mr_rsi2:.1f} RSI(14)={_mr_rsi14:.1f}",
             "symbol": r.get("ticker", ""),
             "reference_price": float(r.get("current_price", 0.0) or 0.0),
             "candidate_symbols": r_syms[:3],
-            "focus_tag": "dual_rsi",
-            "strategy_id": "korea.dual_rsi",
-            "entry_profile": "dual_rsi",
+            "focus_tag": _mr_prof,
+            "strategy_id": _mr_strat,
+            "entry_profile": _mr_prof,
             "notes": [
-                f"RSI(2)={r.get('rsi2', 0):.1f} (조건 <10) + RSI(14)={r.get('rsi14', 0):.1f} (조건 <40)",
-                f"EMA20 이탈 {r.get('deviation_pct', 0):.2f}% / 총 {len(dual_rsi_candidates)}개 신호",
-                "백테스트 PASS: WR 47.1% / P&L 1.58 / Sharpe 1.55 / MDD -2.1% (IS+OOS 모두)",
+                f"RSI(2)={_mr_rsi2:.1f} / RSI(14)={_mr_rsi14:.1f} / EMA20 이탈 {_mr_dev:.2f}%",
+                f"진입품질 {_mr_quality:.2f} ({_mr_qr or 'ok'}) / 총 {len(_mr_cands)}개 신호",
+                _mr_note,
             ],
             "quality_score": quality_score,
         }
 
-    # ── 6b. Strategy S9: RSI(2) Connors ── WATCH (IS P&L 1.44, OOS 1.57 — 통과 근접)
-    # 사이즈 0.30x로 축소 운용, 데이터 누적 후 재평가
-    if rsi2_candidates and stance != "DEFENSE" and not _is_paused("korea.rsi2_mean_reversion"):
-        r = rsi2_candidates[0]
-        r_syms = [c.get("ticker", "") for c in rsi2_candidates if c.get("ticker")]
+    # ── 6b (placeholder — S9 already handled in loop above) ──────────────
+    if False:
+        r = rsi2_candidates[0] if rsi2_candidates else {}
+        r_syms = []
         return {
             "action": "probe_longs",
-            "size": "0.30x",  # WATCH 모드: IS P&L 1.44 (기준 1.5 미달) → 소사이즈 운용
+            "size": "0.30x",
             "focus": f"rsi2_mean_reversion: {r.get('name', r.get('ticker', ''))} RSI(2)={r.get('rsi2', 0):.1f}",
             "symbol": r.get("ticker", ""),
             "reference_price": float(r.get("current_price", 0.0) or 0.0),
@@ -605,35 +708,37 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 8. Strategy S15: Gap Momentum — TRENDING에서만 허용 (P&L 0.68, 모멘텀 레짐 한정)
+    # ── 8. Strategy S15: Gap Momentum — TRENDING에서만, 품질 게이트
     if _b_regime_ok and gap_momentum_candidates and stance != "DEFENSE" and not _is_paused("korea.gap_momentum"):
         _gm = gap_momentum_candidates[0]
         _gm_ticker = str(_gm.get("ticker", ""))
         _gm_name = str(_gm.get("name", _gm_ticker))
         _gm_price = float(_gm.get("current_price", 0.0) or 0.0)
         _gm_syms = [str(c.get("ticker", "")) for c in gap_momentum_candidates if c.get("ticker")]
-        # gap_momentum은 추세 추종이므로 selective_probe (작은 포지션으로 추세 확인)
-        _gm_base_size = "0.40x" if stance == "OFFENSE" else "0.30x"
-        _gm_size = "0.20x" if (_k_vix_fear or _k_us_risk_off) else _gm_base_size
-        return {
+        _gm_quality, _gm_qr = _entry_quality_score(_gm, payload)
+        if _gm_quality < _MIN_QUALITY:
+            pass  # 품질 미달 → S20으로 넘어감
+        else:
+            _gm_base_size = "0.40x" if stance == "OFFENSE" else "0.30x"
+            _gm_size = _quality_size("0.20x" if (_k_vix_fear or _k_us_risk_off) else _gm_base_size, _gm_quality)
+            return {
             "action": "probe_longs",
             "size": _gm_size,
-            "focus": f"gap_momentum: {_gm_name} 갭업+추세 지속 vol={_gm.get('vol_ratio',0):.1f}x",
-            "symbol": _gm_ticker,
-            "reference_price": _gm_price,
-            "candidate_prices": _bk_candidate_prices,
-            "candidate_symbols": _gm_syms[:3],
-            "focus_tag": "gap_momentum",
-            "strategy_id": "korea.gap_momentum",
-            "entry_profile": "gap_momentum",
-            "notes": [
-                f"gap={_gm.get('gap_pct',0):.1f}% / chg1d={_gm.get('chg1d',0):.1f}% / vol={_gm.get('vol_ratio',0):.1f}x",
-                f"RSI(14)={_gm.get('rsi14','n/a')} / close_strength={_gm.get('close_strength',0):.2f}",
-                f"EMA20={_gm.get('ema20',0):,.0f} EMA200={_gm.get('ema200',0):,.0f} (정배열)",
-                f"총 {len(gap_momentum_candidates)}종목 / 백테스트: Sharpe 3.32 / WR 48.9% / MDD -2.7%",
-            ],
-            "quality_score": quality_score,
-        }
+                "focus": f"gap_momentum: {_gm_name} 갭업+추세 지속 vol={_gm.get('vol_ratio',0):.1f}x",
+                "symbol": _gm_ticker,
+                "reference_price": _gm_price,
+                "candidate_prices": _bk_candidate_prices,
+                "candidate_symbols": _gm_syms[:3],
+                "focus_tag": "gap_momentum",
+                "strategy_id": "korea.gap_momentum",
+                "entry_profile": "gap_momentum",
+                "notes": [
+                    f"gap={_gm.get('gap_pct',0):.1f}% / chg1d={_gm.get('chg1d',0):.1f}% / vol={_gm.get('vol_ratio',0):.1f}x",
+                    f"품질 {_gm_quality:.2f} / RSI(14)={_gm.get('rsi14','n/a')} / str={_gm.get('close_strength',0):.2f}",
+                    f"총 {len(gap_momentum_candidates)}종목",
+                ],
+                "quality_score": quality_score,
+            }
 
     # ── 9. Strategy S20: Catalyst Gap (강한 갭업 촉매 모멘텀) ────────────────
     # 2026-06-01 신설 — NAVER(+26.7%), 현대차(+6.6%), 삼성전자우(+14.1%) 미포착 교훈
