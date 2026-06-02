@@ -3848,9 +3848,16 @@ def load_performance_analytics(limit: int = 500) -> dict:
             code = symbol.replace("KRW-", "")
             return f"{name}({code})" if name else code
         if row.desk in {"korea", "us"}:
+            # 1순위: snapshot_name_lookup (당일 시장데이터)
             snapshot_name = snapshot_name_lookup.get((row.desk, symbol), "")
             if snapshot_name:
                 return f"{snapshot_name}({symbol})"
+            # 2순위: korea_universe 캐시 (1h TTL — 청산 후에도 이름 유지)
+            if row.desk == "korea" and symbol.isdigit() and len(symbol) == 6:
+                cached_name = _get_korea_name_cache().get(symbol, "")
+                if cached_name:
+                    return f"{cached_name}({symbol})"
+            # 3순위: focus 문자열에서 이름 파싱
             marker = f"({symbol})"
             if marker in focus:
                 name = focus.split(marker, 1)[0].strip()
