@@ -244,11 +244,23 @@ def build_crypto_plan(stance: str, regime: str, payload: dict[str, Any]) -> dict
 
 
 def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
-    """한국 주식 데스크 추천 — Strategy B / S15 / S18/S19 / S2 / S9 / S10 통합.
+    """한국 주식 데스크 추천 — 백테스트 최적화 (2026-06-02).
 
-    우선순위: inst_foreign > confirmed_breakout > partial_breakout > gap_momentum
-             > mongtata > dual_rsi > rsi2 > stand_by
+    백테스트 통과 전략: S13 Dual RSI (ACTIVATE), S9 RSI(2) (WATCH)
+    비활성화: B(20일 기본), S2 MONGTATA, S15 gap_momentum, S22 120일
+    유지: S18/S19 (기관+외국인 필터 → WR 대폭 향상), S20/S23 (뉴스/촉매 기반)
+
+    우선순위: S23(pre_gap) > S18/S19(inst_foreign) > S22b(120d) > S13(dual_rsi)
+             > S9(rsi2) > stand_by
     """
+    # ── 백테스트 실패 전략 비활성화 ────────────────────────────────────────
+    # 근거: 2026-06-02 파라미터 그리드서치, P&L비율 구조적 < 1.5
+    _BT_DISABLED = frozenset({
+        "korea.new_high_breakout",   # B 20일: P&L 0.72, MDD -31%
+        "korea.mongtata_airborne",   # S2: P&L 0.27 (-5% stop 구조 문제)
+        "korea.gap_momentum",        # S15: P&L 0.68 (S18/S19로 커버)
+        "korea.breakout_120d",       # S22: P&L 0.93 (포워드 테스트로 전환)
+    })
     breakout_candidates = payload.get("new_high_breakout_candidates", []) or []
     breakout_confirmed_count = int(payload.get("breakout_confirmed_count", 0) or 0)
     breakout_partial_count = int(payload.get("breakout_partial_count", 0) or 0)
@@ -400,10 +412,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 3b. Strategy S22: 120일 신고가 돌파 ─────────────────────────────────
-    # B전략(20일)보다 기간 6배 길어 false positive 감소 → 더 강한 모멘텀 신호
-    # 조건: 120일 신고가 0.2%+ 돌파 + EMA 정배열 + 거래량 1.5x + RSI 50-82
-    if breakout_120d_candidates and stance != "DEFENSE" and not _is_paused("korea.breakout_120d"):
+    # ── 3b. Strategy S22: 120일 신고가 ── 비활성화 (2026-06-02 백테스트: P&L 0.93, 포워드 테스트로 전환)
+    if False and breakout_120d_candidates and stance != "DEFENSE" and not _is_paused("korea.breakout_120d"):
         _b120 = breakout_120d_candidates[0]
         _b120_ticker = str(_b120.get("ticker", ""))
         _b120_name = str(_b120.get("name", _b120_ticker))
@@ -431,9 +441,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 4. Strategy B: 20일 신고점 돌파 (full confirm — 3/3 조건) ───────────
-    # 주의: WR 84.6%/Sharpe 6.16은 S18(기관+외국인 필터 적용) 기준
-    # 기본 20일 신고가 단독: WR 32.9%, PF 1.86, Sharpe 2.73 (115종목 3년 백테스트)
+    # ── 4. Strategy B: 20일 신고점 돌파 ──────────────────────────────────────
+    # 2026-06-02 백테스트: WR 52.2%, P&L 0.72, MDD -31% → DISABLED
+    # S18(기관+외국인 필터)가 WR을 84%+ 로 끌어올림 → 기본 B는 비활성화, S18만 허용
+    if False:  # _BT_DISABLED로 비활성화
     if breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
@@ -479,8 +490,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 4. Strategy B partial (3/3 조건 중 3개 충족) ─────────────────────
-    if breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
+    # ── 4. Strategy B partial ── 비활성화 (2026-06-02 백테스트: MDD -31%, P&L 0.72)
+    if False and breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
@@ -511,10 +522,9 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 5. Strategy S2: MONGTATA 에어본 (평균회귀) ───────────────────────
-    # 백테스트 검증: Sharpe 8.60, WR 56.5%, MDD -5.9% (주식 3년)
+    # ── 5. Strategy S2: MONGTATA ── 비활성화 (2026-06-02 백테스트: WR 84% but P&L 0.27 — -5% stop 구조적 문제)
     mongtata_candidates = payload.get("mongtata_airborne_candidates", []) or []
-    if mongtata_candidates and stance != "DEFENSE" and not _is_paused("korea.mongtata_airborne"):
+    if False and mongtata_candidates and stance != "DEFENSE" and not _is_paused("korea.mongtata_airborne"):
         mt_leader = mongtata_candidates[0]
         mt_ticker = str(mt_leader.get("ticker", ""))
         mt_name = str(mt_leader.get("name", mt_ticker))
@@ -542,8 +552,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 6. Strategy S13: Dual RSI 이중 확인 (S9보다 우선) ───────────────
-    # 백테스트: Sharpe 6.36, WR 58.6%, MDD -8.0%
+    # ── 6. Strategy S13: Dual RSI ── ACTIVATE (2026-06-02 백테스트 유일 통과)
+    # IS(2022-23): WR 47.1%, P&L 1.58, Sharpe 1.55, MDD -2.1% → PASS
+    # OOS(2024) : WR 47.0%, P&L 1.57, Sharpe 1.78 → PASS (overfitting 없음)
+    # trail: tight 최적화 적용 (_mean_reversion_trail_rules)
     rsi2_candidates = payload.get("rsi2_candidates", []) or []
     dual_rsi_candidates = [c for c in rsi2_candidates if c.get("dual_rsi")]
     if dual_rsi_candidates and stance != "DEFENSE" and not _is_paused("korea.dual_rsi"):
@@ -562,18 +574,19 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "notes": [
                 f"RSI(2)={r.get('rsi2', 0):.1f} (조건 <10) + RSI(14)={r.get('rsi14', 0):.1f} (조건 <40)",
                 f"EMA20 이탈 {r.get('deviation_pct', 0):.2f}% / 총 {len(dual_rsi_candidates)}개 신호",
-                "백테스트: Sharpe 6.36 / WR 58.6% / MDD -8.0% (2026-05-20)",
+                "백테스트 PASS: WR 47.1% / P&L 1.58 / Sharpe 1.55 / MDD -2.1% (IS+OOS 모두)",
             ],
             "quality_score": quality_score,
         }
 
-    # ── 6b. Strategy S9: RSI(2) Connors 평균회귀 ────────────────────────
+    # ── 6b. Strategy S9: RSI(2) Connors ── WATCH (IS P&L 1.44, OOS 1.57 — 통과 근접)
+    # 사이즈 0.30x로 축소 운용, 데이터 누적 후 재평가
     if rsi2_candidates and stance != "DEFENSE" and not _is_paused("korea.rsi2_mean_reversion"):
         r = rsi2_candidates[0]
         r_syms = [c.get("ticker", "") for c in rsi2_candidates if c.get("ticker")]
         return {
             "action": "probe_longs",
-            "size": "0.50x",
+            "size": "0.30x",  # WATCH 모드: IS P&L 1.44 (기준 1.5 미달) → 소사이즈 운용
             "focus": f"rsi2_mean_reversion: {r.get('name', r.get('ticker', ''))} RSI(2)={r.get('rsi2', 0):.1f}",
             "symbol": r.get("ticker", ""),
             "reference_price": float(r.get("current_price", 0.0) or 0.0),
@@ -584,16 +597,13 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "notes": [
                 f"RSI(2)={r.get('rsi2', 0):.1f} / EMA20 이탈 {r.get('deviation_pct', 0):.2f}%",
                 f"총 {len(rsi2_candidates)}개 신호",
-                "백테스트: Sharpe 6.74 / WR 58.1% / MDD -7.3%",
+                "백테스트 WATCH: OOS Sharpe 3.13 / IS P&L 1.44 (기준 1.5 근접) — 0.30x 관찰 모드",
             ],
             "quality_score": quality_score,
         }
 
-    # ── 8. Strategy S15: Gap Momentum (갭업 + 추세 지속) ────────────────────
-    # 백테스트: Sharpe 3.32, WR 48.9%, P/F 1.97, MDD -2.7% (n=47)
-    # 조건: gap>=1%+chg1d>=2% + EMA200>0,EMA20>EMA60>EMA200 + close_strength>=0.65
-    #       vol>=1.5x + RSI(14) 40-72 + 5일 변화 <15%
-    if gap_momentum_candidates and stance != "DEFENSE" and not _is_paused("korea.gap_momentum"):
+    # ── 8. Strategy S15: Gap Momentum ── 비활성화 (2026-06-02 백테스트: P&L 0.68, S18/S19로 커버)
+    if False and gap_momentum_candidates and stance != "DEFENSE" and not _is_paused("korea.gap_momentum"):
         _gm = gap_momentum_candidates[0]
         _gm_ticker = str(_gm.get("ticker", ""))
         _gm_name = str(_gm.get("name", _gm_ticker))

@@ -932,21 +932,31 @@ def _korea_newhi_trail_rules(peak_pnl: float) -> tuple[float, float]:
 
 
 def _mean_reversion_trail_rules(peak_pnl: float) -> tuple[float, float]:
-    """S9/S10 평균회귀 공용 트레일 — 백테스트 검증 (2026-05-20).
+    """S9/S13 평균회귀 트레일 — 백테스트 최적화 (2026-06-02).
 
-    S9 RSI(2): stop -1.5%, TP 10%, 최대 10 거래일
-    S10 NDayPullback: stop -1.5%, TP 10%, 최대 10 거래일
+    파라미터 그리드서치 결과 "tight" 변형이 최적:
+    S13 Dual RSI IS(2022-23): WR 47.1%, P&L 1.58, Sharpe 1.55, MDD -2.1% → PASS
+    S13 Dual RSI OOS(2024) : WR 47.0%, P&L 1.57, Sharpe 1.78 → PASS
 
-    peak >= 6% → giveback 3%, floor 4%
-    peak >= 3% → giveback 2%, floor 2%
-    peak >= 1.5% → giveback 1%, floor 0%
+    tight trail 원칙: 피크에 도달하면 빠르게 수익 잠금
+    (한국 주식 특성상 피크 후 빠른 반전 多 — wide trail은 수익 반납)
+
+    peak >= 10% → giveback 1.5%, floor 8.0%
+    peak >=  5% → giveback 1.0%, floor 4.0%
+    peak >=  3% → giveback 0.5%, floor 2.0%
+    peak >=  2% → giveback 0.5%, floor 1.0%
+    peak >=  1% → giveback 0.3%, floor 0.5%
     """
-    if peak_pnl >= 6.0:
-        return 3.0, 4.0
+    if peak_pnl >= 10.0:
+        return 1.5, 8.0
+    if peak_pnl >= 5.0:
+        return 1.0, 4.0
     if peak_pnl >= 3.0:
-        return 2.0, 2.0
-    if peak_pnl >= 1.5:
-        return 1.0, 0.0
+        return 0.5, 2.0
+    if peak_pnl >= 2.0:
+        return 0.5, 1.0
+    if peak_pnl >= 1.0:
+        return 0.3, 0.5
     return 0.0, 0.0
 
 

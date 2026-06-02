@@ -304,18 +304,13 @@ class KoreaStockDeskAgent(BaseAgent):
 
         breakout_candidates.sort(key=lambda c: c["candidate_score"], reverse=True)
 
-        # ── Strategy S2: MONGTATA 에어본 (평균회귀) ─────────────────────────────
-        # 백테스트 검증: Sharpe 8.60, WR 56.5%, MDD -5.9% (주식 3년)
-        # 조건: close > EMA200 + close < lower_BB (EMA20−2σ) + close < EMA20×0.975
-        mongtata_candidates: list[dict] = []
-        # ── Strategy S9: RSI(2) Connors 평균회귀 ────────────────────────────
-        # 백테스트 검증: Sharpe 6.74, WR 58.1%, MDD -7.3% (주식 3년)
-        # 조건: close > EMA200 + RSI(2) < 10 + close < EMA20×0.975
-        rsi2_candidates: list[dict] = []
-        # ── Strategy S22: 120일 신고가 돌파 (강화된 B전략) ──────────────────────
-        # B전략(20일)보다 기간이 6배 길어 false positive 극적 감소 → 승률 향상 기대
-        # 조건: 120일 신고가 돌파 + EMA 정배열 + 거래량 1.5x + RSI 50-82
-        breakout_120d_candidates: list[dict] = []
+        # ── 2026-06-02 백테스트 결과 — 비활성 전략 목록 ────────────────────
+        # S2 MONGTATA: P&L비율 0.27 (-5% stop 구조적 문제) → 비활성화
+        # S22 120일: P&L비율 0.93 → 포워드 테스트 전환 (스캔은 유지, 진입만 차단)
+        # 스캔은 계속 (signal 모니터링용), 진입은 recommendation_engine에서 차단
+        mongtata_candidates: list[dict] = []   # S2: 스캔 유지 (포워드 모니터링)
+        rsi2_candidates: list[dict] = []       # S9/S13: ACTIVATE/WATCH
+        breakout_120d_candidates: list[dict] = []  # S22: 포워드 모니터링
 
         for ticker, name, candles in results:
             if len(candles) < 205:
