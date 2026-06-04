@@ -8,7 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.config import DATA_DIR, settings
-from app.core.state_store import rapid_guard_crypto_positions, rapid_guard_korea_positions
+from app.core.state_store import rapid_guard_crypto_positions, rapid_guard_korea_positions, run_ppp_minute_scanner
 from app.notifier import notifier
 from app.orchestrator import CompanyOrchestrator
 from app.services.hot_path_guard import (
@@ -308,7 +308,12 @@ def _check_market_close_reports() -> None:
         print(f"[runtime] market close report check failed: {exc}")
 
 
+_ppp_last_scan_ts: float = 0.0          # 마지막 분봉 스캔 시각
+_PPP_SCAN_INTERVAL: float = 60.0       # 60초마다 분봉 스캔
+
+
 def run_company_loop() -> None:
+    global _ppp_last_scan_ts
     if not _acquire_runtime_singleton_lock():
         print("[runtime] another trading runtime is already active; exiting duplicate process")
         return
@@ -361,6 +366,23 @@ def run_company_loop() -> None:
                 f"phase={session.get('market_phase', 'n/a')} next={interval_seconds}s"
             )
             _check_market_close_reports()
+
+            # ── 분봉 PPP 스캐너 (60초마다 실행) ────────────────────────────
+            import time as _time_mod
+            _now_ts = _time_mod.time()
+            if "korea" in settings.active_desk_set and (_now_ts - _ppp_last_scan_ts) >= _PPP_SCAN_INTERVAL:
+                _ppp_last_scan_ts = _now_ts
+                try:
+                    _ms = result.get("state", {}).get("market_snapshot") or {}
+                    _ppp_result = run_ppp_minute_scanner(_ms)
+                    if _ppp_result.get("orders_created", 0):
+                        print(
+                            f"[runtime] ppp_scanner: signals={_ppp_result['signals']} "
+                            f"orders={_ppp_result['orders_created']}"
+                        )
+                except Exception as _ppp_exc:
+                    print(f"[runtime] ppp_scanner failed: {_ppp_exc}")
+
         except Exception as exc:
             print(f"[runtime] {started_at} cycle failed: {exc}")
             notifier.send_error(f"{started_at} cycle failed: {exc}")

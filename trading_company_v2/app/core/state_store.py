@@ -726,6 +726,11 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # stop -5.0% + EMA20 동적 청산: WR 41-50%, PF 1.50-1.80, MDD_port -7-9%
         # (기존 -2.0% 타이트 스탑은 WR 21%로 붕괴 — EMA20 회복 홀딩이 핵심)
         return 10.0, -5.0, 2700
+    if desk == "korea" and "ppp_scalp" in focus:
+        # PPP 스캘핑: Peak→Pullback→Profit 분봉 패턴
+        # 목표 +2%, 손절 눌림 저점 하단 (-0.5% ~ -0.8%)
+        # 빠른 회전 → 타이트 사이클, 실제 청산은 trail이 담당
+        return 25.0, -1.0, 200  # 200 cycles ≈ 1시간 내 청산
     if desk == "korea" and "pre_gap_watch" in focus:
         # S23: 매크로/뉴스 사전 포착 — 갭 발생 전 장 초반 탐색
         # 불확실성 있으므로 stop -2.0% (S20보다 타이트), 트레일이 청산 제어
@@ -4141,4 +4146,130 @@ def db_archive_old_records(journal_days: int = 90, shadow_days: int = 30) -> dic
         "deleted_shadow_signals": deleted_shadow,
         "journal_cutoff": journal_cutoff[:10],
         "shadow_cutoff": shadow_cutoff[:10],
+    }
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 분봉 PPP 스캐너 — 실시간 주문 생성
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+_ppp_last_fired: dict[str, float] = {}   # ticker → 마지막 신호 시각 (중복 방지)
+_PPP_COOLDOWN_SEC = 600                  # 같은 종목 10분 내 재진입 방지
+
+
+def run_ppp_minute_scanner(market_snapshot: dict) -> dict:
+    """분봉 PPP 패턴 스캔 → 신호 발생 시 즉시 주문 생성.
+
+    runtime.py에서 60초마다 호출.
+    한국 장 시간(09:00-15:25 KST)에만 실행.
+
+    Returns:
+        {"scanned": int, "signals": int, "orders_created": int}
+    """
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    import time as _time
+
+    now_kst = _dt.now(_ZI("Asia/Seoul"))
+    kst_hm = (now_kst.hour, now_kst.minute)
+    # 장 외 시간 제외
+    if not ((9, 0) <= kst_hm <= (15, 25)):
+        return {"scanned": 0, "signals": 0, "orders_created": 0}
+
+    try:
+        from app.services.kr_minute_scanner import scan_for_ppp
+        from app.services.korea_universe import get_korea_universe
+    except Exception as e:
+        _log.warning("ppp_scanner import failed: %s", e)
+        return {"scanned": 0, "signals": 0, "orders_created": 0}
+
+    # 현재 열린 포지션 심볼 집합
+    init_db()
+    open_symbols: set[str] = set()
+    try:
+        with SessionLocal() as db:
+            for row in db.execute(
+                select(PaperPositionRecord.symbol).where(
+                    PaperPositionRecord.status == "open",
+                    PaperPositionRecord.desk == "korea",
+                )
+            ).all():
+                open_symbols.add(str(row[0] or ""))
+    except Exception:
+        pass
+
+    # 종목명 lookup
+    name_lookup: dict[str, str] = {}
+    try:
+        for item in get_korea_universe():
+            tkr = str(item.get("ticker", "") or "")
+            nm  = str(item.get("name", "") or "")
+            if tkr and nm:
+                name_lookup[tkr] = nm
+    except Exception:
+        pass
+
+    now_ts = _time.time()
+
+    # PPP 스캔
+    signals = scan_for_ppp(market_snapshot, open_symbols, name_lookup, max_signals=3)
+
+    orders_created = 0
+    for sig in signals:
+        ticker = str(sig.get("ticker", ""))
+        if not ticker:
+            continue
+
+        # 쿨다운 체크 (같은 종목 10분 내 재진입 방지)
+        if now_ts - _ppp_last_fired.get(ticker, 0) < _PPP_COOLDOWN_SEC:
+            continue
+
+        name     = str(sig.get("name", ticker))
+        entry_px = float(sig.get("current_price", 0.0) or 0.0)
+        stop_px  = float(sig.get("stop_price", 0.0) or 0.0)
+        rr       = float(sig.get("rr_ratio", 0.0) or 0.0)
+        strength = float(sig.get("strength", 0.0) or 0.0)
+
+        if entry_px <= 0:
+            continue
+
+        focus = (
+            f"ppp_scalp: {name} ({ticker}) "
+            f"Peak→Pullback→Profit strength={strength:.2f} "
+            f"stop={stop_px:,.0f}원 R/R={rr:.1f}"
+        )
+
+        try:
+            with SessionLocal() as db:
+                order = PaperOrderRecord(
+                    desk="korea",
+                    action="selective_probe",
+                    focus=focus,
+                    size="0.20x",           # 스캘핑 소사이즈
+                    symbol=ticker,
+                    reference_price=entry_px,
+                    strategy_id="korea.ppp_scalp",
+                    entry_profile="ppp_scalp",
+                    rationale=[
+                        {"status": "planned", "symbol": ticker,
+                         "reference_price": entry_px, "notional_pct": 0.20},
+                        f"PPP: Peak={sig.get('peak_high'):,.0f} PB_low={sig.get('pullback_low'):,.0f}",
+                        f"strength={strength:.2f} R/R={rr:.1f} drawdown={sig.get('drawdown_pct'):.2f}%",
+                    ],
+                )
+                db.add(order)
+                db.commit()
+                _ppp_last_fired[ticker] = now_ts
+                orders_created += 1
+                _log.info(
+                    "ppp_scanner: 신호 발생 %s(%s) strength=%.2f R/R=%.1f entry=%s stop=%s",
+                    name, ticker, strength, rr, f"{entry_px:,.0f}", f"{stop_px:,.0f}",
+                )
+        except Exception as e:
+            _log.warning("ppp_scanner order create failed for %s: %s", ticker, e)
+
+    return {
+        "scanned": len(signals) + len(open_symbols),
+        "signals": len(signals),
+        "orders_created": orders_created,
     }
