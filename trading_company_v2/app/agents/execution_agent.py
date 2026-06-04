@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from app.agents.base import BaseAgent
+
+_log = logging.getLogger(__name__)
 from app.config import settings
 from app.core.models import AgentResult, PaperOrder
 from app.core.state_store import save_shadow_signal
