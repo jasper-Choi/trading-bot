@@ -2008,11 +2008,26 @@ def _live_readiness_checklist(state: CompanyState, broker_health: dict | None = 
         )
     )
 
-    mode = normalize_execution_mode(settings.execution_mode)
-    if mode == "paper":
-        checklist.append(_check_item("warn", "Execution Mode", "currently paper mode"))
+    # 실제 활성 상태 기반으로 모드 결정
+    # EXECUTION_MODE=upbit_live라도 코인 데스크가 꺼져있으면 KIS 모드로 표시
+    _raw_mode = normalize_execution_mode(settings.execution_mode)
+    _crypto_active = "crypto" in settings.active_desk_set
+    _korea_active  = "korea"  in settings.active_desk_set
+    if _korea_active and not _crypto_active:
+        # 한국 주식 전용 모드
+        if getattr(settings, "kis_mock", True):
+            mode = "kis_mock"      # KIS 모의투자
+        elif getattr(settings, "kis_allow_live", False):
+            mode = "kis_live"      # KIS 실거래
+        else:
+            mode = "paper"
     else:
+        mode = _raw_mode
+
+    if "live" in mode:
         checklist.append(_check_item("pass", "Execution Mode", f"current mode {mode}"))
+    else:
+        checklist.append(_check_item("warn", "Execution Mode", f"현재 {mode} 모드"))
 
     for broker_name in ("upbit", "kis"):
         health = broker_health.get(broker_name, {}) or {}
