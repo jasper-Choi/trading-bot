@@ -726,9 +726,13 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # stop -5.0% + EMA20 동적 청산: WR 41-50%, PF 1.50-1.80, MDD_port -7-9%
         # (기존 -2.0% 타이트 스탑은 WR 21%로 붕괴 — EMA20 회복 홀딩이 핵심)
         return 10.0, -5.0, 2700
+    if desk == "korea" and "ppp_scalp_sh" in focus:
+        # 핑퓽팽(Stop Hunt 확인): 목표 +2.5%, 손절 타이트 (-0.8%)
+        # stop hunt 고확신 → 300 cycles ≈ 1.5시간 허용 (팽 폭발력 기다림)
+        return 25.0, -0.8, 300
     if desk == "korea" and "ppp_scalp" in focus:
         # PPP 스캘핑: Peak→Pullback→Profit 분봉 패턴
-        # 목표 +2%, 손절 눌림 저점 하단 (-0.5% ~ -0.8%)
+        # 목표 +2%, 손절 눌림 저점 하단 (-1.0%)
         # 빠른 회전 → 타이트 사이클, 실제 청산은 trail이 담당
         return 25.0, -1.0, 200  # 200 cycles ≈ 1시간 내 청산
     if desk == "korea" and "pre_gap_watch" in focus:
@@ -4224,20 +4228,39 @@ def run_ppp_minute_scanner(market_snapshot: dict) -> dict:
         if now_ts - _ppp_last_fired.get(ticker, 0) < _PPP_COOLDOWN_SEC:
             continue
 
-        name     = str(sig.get("name", ticker))
-        entry_px = float(sig.get("current_price", 0.0) or 0.0)
-        stop_px  = float(sig.get("stop_price", 0.0) or 0.0)
-        rr       = float(sig.get("rr_ratio", 0.0) or 0.0)
-        strength = float(sig.get("strength", 0.0) or 0.0)
+        name          = str(sig.get("name", ticker))
+        entry_px      = float(sig.get("current_price", 0.0) or 0.0)
+        stop_px       = float(sig.get("stop_price", 0.0) or 0.0)
+        rr            = float(sig.get("rr_ratio", 0.0) or 0.0)
+        strength      = float(sig.get("strength", 0.0) or 0.0)
+        stop_hunt     = bool(sig.get("stop_hunt_confirmed", False))
+        sh_strength   = float(sig.get("stop_hunt_strength", 0.0) or 0.0)
+        target_pct    = float(sig.get("target_pct", 0.020) or 0.020)
 
         if entry_px <= 0:
             continue
 
+        # 핑퓽팽(stop hunt 확인) 시 사이즈 0.25x, 일반 PPP 0.20x
+        size_val  = 0.25 if stop_hunt else 0.20
+        size_str  = f"{size_val:.2f}x"
+        pattern   = "핑퓽팽(StopHunt)" if stop_hunt else "Peak→Pullback→Profit"
+        strategy_id = "korea.ppp_scalp_sh" if stop_hunt else "korea.ppp_scalp"
+        entry_profile = "ppp_scalp_sh" if stop_hunt else "ppp_scalp"
+
         focus = (
-            f"ppp_scalp: {name} ({ticker}) "
-            f"Peak→Pullback→Profit strength={strength:.2f} "
-            f"stop={stop_px:,.0f}원 R/R={rr:.1f}"
+            f"{'[핑퓽팽] ' if stop_hunt else ''}{name} ({ticker}) "
+            f"{pattern} strength={strength:.2f} "
+            f"target=+{target_pct*100:.1f}% stop={stop_px:,.0f}원 R/R={rr:.1f}"
         )
+
+        rationale: list = [
+            {"status": "planned", "symbol": ticker,
+             "reference_price": entry_px, "notional_pct": size_val},
+            f"{'핑퓽팽' if stop_hunt else 'PPP'}: Peak={sig.get('peak_high'):,.0f} PB_low={sig.get('pullback_low'):,.0f}",
+            f"strength={strength:.2f} R/R={rr:.1f} drawdown={sig.get('drawdown_pct'):.2f}%",
+        ]
+        if stop_hunt:
+            rationale.append(f"퓽(StopHunt) 확인: strength={sh_strength:.2f} → target+{target_pct*100:.1f}% size={size_str}")
 
         try:
             with SessionLocal() as db:
@@ -4245,25 +4268,22 @@ def run_ppp_minute_scanner(market_snapshot: dict) -> dict:
                     desk="korea",
                     action="selective_probe",
                     focus=focus,
-                    size="0.20x",           # 스캘핑 소사이즈
+                    size=size_str,
                     symbol=ticker,
                     reference_price=entry_px,
-                    strategy_id="korea.ppp_scalp",
-                    entry_profile="ppp_scalp",
-                    rationale=[
-                        {"status": "planned", "symbol": ticker,
-                         "reference_price": entry_px, "notional_pct": 0.20},
-                        f"PPP: Peak={sig.get('peak_high'):,.0f} PB_low={sig.get('pullback_low'):,.0f}",
-                        f"strength={strength:.2f} R/R={rr:.1f} drawdown={sig.get('drawdown_pct'):.2f}%",
-                    ],
+                    strategy_id=strategy_id,
+                    entry_profile=entry_profile,
+                    rationale=rationale,
                 )
                 db.add(order)
                 db.commit()
                 _ppp_last_fired[ticker] = now_ts
                 orders_created += 1
                 _log.info(
-                    "ppp_scanner: 신호 발생 %s(%s) strength=%.2f R/R=%.1f entry=%s stop=%s",
-                    name, ticker, strength, rr, f"{entry_px:,.0f}", f"{stop_px:,.0f}",
+                    "ppp_scanner: %s %s(%s) strength=%.2f sh=%s R/R=%.1f target=+%.1f%% entry=%s stop=%s",
+                    "핑퓽팽" if stop_hunt else "PPP",
+                    name, ticker, strength, stop_hunt, rr,
+                    target_pct * 100, f"{entry_px:,.0f}", f"{stop_px:,.0f}",
                 )
         except Exception as e:
             _log.warning("ppp_scanner order create failed for %s: %s", ticker, e)

@@ -1,14 +1,15 @@
-"""한국주식 분봉 실시간 스캐너 — PPP (Peak→Pullback→Profit) 패턴 감지.
+"""한국주식 분봉 실시간 스캐너 — 핑퓽팽 프로 스캘퍼 (PPP + Stop Hunt).
 
-PPP 스캘핑 원리:
-  1. Peak   : 강한 1분봉 상승 (세력/모멘텀 확인)
-  2. Pullback: 단기 눌림 (차익실현/공매도 소화)
-  3. Profit  : 눌림 후 재상승 시 진입 → 빠른 익절
+핑퓽팽 원리:
+  핑 (Peak)     : 강한 1분봉 급등 + 거래량 폭증 (세력 존재 확인)
+  퓽 (Stop Hunt): 세력 역가 — 지지선 아래 순간 찍고 즉시 회복 (개미 털기)
+  팽 (Profit)   : 퓽 확인 후 재상승 진입 → 목표 +2~2.5%
 
-특징:
-  - 일봉 기반 전략이 잡지 못하는 장 중 급등 초기 포착
-  - 60초 주기로 watchlist 종목 전체 스캔
-  - 손절: 눌림 저점 하단, 목표: +1.5~2%
+Stop Hunt 식별:
+  - 역가 봉: 하단 꼬리 ≥ 전체 범위 45%, 종가 범위 상위 55%+ 위치
+  - 역가 거래량: 눌림 평균 1.5배+ (패닉 물량 소화 확인)
+  - 1~2봉 내 지지선 회복 (빠른 반등)
+  Stop Hunt 확인 시: 목표 +2.5%, 사이즈 0.25x (vs 일반 +2%, 0.20x)
 """
 from __future__ import annotations
 
@@ -46,9 +47,93 @@ _PEAK_BODY_PCT  = 0.40   # Peak 봉 최소 body 크기 (%)
 _PEAK_VOL_RATIO = 1.8    # Peak 봉 최소 거래량 배수
 _PULLBACK_MIN   = 0.25   # 눌림 최소 깊이 (peak 고점 대비 %)
 _PULLBACK_CANDLES_MAX = 6  # 눌림 구간 최대 봉 수 (6분)
-_RECOVERY_MIN   = 0.40   # 눌림 구간 내 회복 최소 비율 (0~1)
+_RECOVERY_MIN   = 0.40   # 일반 회복 최소 비율 (stop hunt 확인 시 0.30으로 완화)
 _DAY_MOM_MIN    = 1.5    # 오늘 시가 대비 최소 상승률 (%)
 _SIGNAL_WINDOW  = 25     # 패턴 탐색 창 (최근 25분봉)
+
+# ── Stop Hunt(퓽) 감지 파라미터 ──────────────────────────────────────────────
+_SH_WICK_RATIO  = 0.45   # 역가 봉 하단 꼬리 / 전체 범위 ≥ 45%
+_SH_CLOSE_RATIO = 0.55   # 역가 봉 종가 / 전체 범위 위치 ≥ 55% (위쪽에 닫힘)
+_SH_VOL_SPIKE   = 1.5    # 역가 봉 거래량 ≥ 눌림 평균 × 1.5 (패닉 흡수)
+_SH_MAX_CANDLES = 2      # Stop Hunt는 최대 2봉 내에서 완료돼야 함
+
+
+def _detect_stop_hunt(
+    post: list[dict],
+    vol_baseline: float,
+    pullback_low: float,
+) -> dict:
+    """퓽(Stop Hunt/역가) 패턴 감지.
+
+    세력 역가 특징:
+    - 하단 꼬리가 몸통보다 긴 해머형 봉 (_SH_WICK_RATIO)
+    - 해당 봉 거래량이 눌림 평균보다 크게 높음 (패닉 물량 흡수)
+    - 종가가 전체 범위 상위 55%+ 위치 (즉시 회복)
+    - 직후 봉에서 거래량 급감 + 가격 유지 (세력 흡수 완료)
+    """
+    empty = {"stop_hunt_confirmed": False, "stop_hunt_strength": 0.0, "stop_hunt_idx": -1}
+    if len(post) < 1 or vol_baseline <= 0:
+        return empty
+
+    # 눌림 구간 내 봉별 분석 (최대 _SH_MAX_CANDLES 확인)
+    check = post[:_SH_MAX_CANDLES]
+    avg_pb_vol = sum(c["volume"] for c in post) / len(post) if post else 0.0
+
+    best_strength = 0.0
+    best_idx = -1
+
+    for i, c in enumerate(check):
+        o = float(c.get("open") or 0.0)
+        h = float(c.get("high") or 0.0)
+        lo = float(c.get("low") or 0.0)
+        cl = float(c.get("close") or 0.0)
+        vol = float(c.get("volume") or 0.0)
+
+        if h <= lo or lo <= 0:
+            continue
+
+        total_range = h - lo
+        body = abs(cl - o)
+        lower_wick = min(o, cl) - lo
+        close_pos = (cl - lo) / total_range  # 0=바닥, 1=상단
+
+        # 하단 꼬리 비율
+        wick_ratio = lower_wick / total_range if total_range > 0 else 0.0
+
+        # Stop Hunt 판단 기준
+        is_hammer = wick_ratio >= _SH_WICK_RATIO and close_pos >= _SH_CLOSE_RATIO
+        vol_spike = avg_pb_vol > 0 and vol >= avg_pb_vol * _SH_VOL_SPIKE
+
+        if not is_hammer:
+            continue
+
+        # 강도: 꼬리 비율 + 거래량 스파이크 + 회복 위치 조합
+        strength = 0.0
+        strength += min(wick_ratio / 0.7, 1.0) * 0.40         # 꼬리 길이 (최대 0.40)
+        strength += min(close_pos / 0.8, 1.0) * 0.30          # 회복 위치 (최대 0.30)
+        if vol_spike:
+            spike_mult = vol / avg_pb_vol if avg_pb_vol > 0 else 1.0
+            strength += min(spike_mult / 3.0, 1.0) * 0.30     # 거래량 스파이크 (최대 0.30)
+
+        # 다음 봉에서 거래량 감소 + 가격 유지 확인 (보너스)
+        if i + 1 < len(post):
+            nxt = post[i + 1]
+            nxt_vol = float(nxt.get("volume") or 0.0)
+            nxt_cl = float(nxt.get("close") or 0.0)
+            if nxt_vol < vol * 0.70 and nxt_cl >= lo:  # 거래량 급감 + 가격 유지
+                strength = min(strength + 0.10, 1.0)
+
+        strength = round(strength, 3)
+        if strength > best_strength:
+            best_strength = strength
+            best_idx = i
+
+    confirmed = best_strength >= 0.40  # 기준 강도 이상만 인정
+    return {
+        "stop_hunt_confirmed": confirmed,
+        "stop_hunt_strength": best_strength,
+        "stop_hunt_idx": best_idx,
+    }
 
 
 def detect_ppp(candles: list[dict], today_open: float = 0.0) -> dict | None:
@@ -121,6 +206,14 @@ def detect_ppp(candles: list[dict], today_open: float = 0.0) -> dict | None:
     if avg_pb_vol > peak_vol * 0.85:    # 눌림 중 거래량이 너무 많으면 분배
         return None
 
+    # ── 퓽(Stop Hunt) 감지 ──────────────────────────────────────────────────
+    sh = _detect_stop_hunt(post, vol_baseline, pullback_low)
+    stop_hunt_confirmed = bool(sh["stop_hunt_confirmed"])
+    stop_hunt_strength  = float(sh["stop_hunt_strength"])
+
+    # Stop Hunt 확인 시 회복 최소값 완화 (0.40 → 0.30) — 더 이른 진입 허용
+    recovery_min = 0.30 if stop_hunt_confirmed else _RECOVERY_MIN
+
     # ── ③ Profit Signal: 재상승 확인 ────────────────────────────────────────
     recovery_range = peak_high - pullback_low
     if recovery_range <= 0:
@@ -128,7 +221,7 @@ def detect_ppp(candles: list[dict], today_open: float = 0.0) -> dict | None:
 
     # 현재가가 눌림 구간의 몇 % 회복했는지
     recovery_ratio = (cur_close - pullback_low) / recovery_range
-    if recovery_ratio < _RECOVERY_MIN:
+    if recovery_ratio < recovery_min:
         return None                      # 아직 충분히 회복 안 됨
 
     # 최신 2봉 거래량이 눌림 평균보다 높아야 함 (재가속 확인)
@@ -137,27 +230,42 @@ def detect_ppp(candles: list[dict], today_open: float = 0.0) -> dict | None:
         return None
 
     # ── 진입 파라미터 계산 ────────────────────────────────────────────────────
-    entry_price  = cur_close
-    stop_price   = pullback_low * 0.9975          # 눌림 저점 -0.25% 아래
-    target_price = entry_price * 1.020            # +2% 목표 (빠른 스캘핑)
+    entry_price = cur_close
+    # Stop Hunt 확인 시: 역가 저점 기준 타이트한 손절 (-0.15%)
+    # 일반 눌림: 저점 -0.25% 아래
+    stop_buffer = 0.0015 if stop_hunt_confirmed else 0.0025
+    stop_price   = pullback_low * (1.0 - stop_buffer)
+    # Stop Hunt 확인 시 목표 +2.5% (팽 폭발력 반영), 일반 +2.0%
+    target_pct   = 0.025 if stop_hunt_confirmed else 0.020
+    target_price = entry_price * (1.0 + target_pct)
     rr_ratio     = (target_price - entry_price) / max(entry_price - stop_price, 0.001)
-    strength     = round(recovery_ratio, 2)
 
-    if rr_ratio < 1.5:                            # R/R < 1.5 → 비효율 진입 스킵
+    # 종합 강도: 회복 비율 + stop hunt 보정
+    base_strength = recovery_ratio
+    if stop_hunt_confirmed:
+        base_strength = min(base_strength + stop_hunt_strength * 0.3, 1.0)
+    strength = round(base_strength, 2)
+
+    # Stop Hunt 확인 시 R/R 기준 상향 (1.5 → 1.8) — 더 엄격한 효율성 검사
+    rr_min = 1.8 if stop_hunt_confirmed else 1.5
+    if rr_ratio < rr_min:
         return None
 
     return {
-        "entry_price"   : round(entry_price, 0),
-        "stop_price"    : round(stop_price, 0),
-        "target_price"  : round(target_price, 0),
-        "peak_high"     : round(peak_high, 0),
-        "pullback_low"  : round(pullback_low, 0),
-        "drawdown_pct"  : round(drawdown_pct, 2),
-        "recovery_ratio": round(recovery_ratio, 2),
-        "rr_ratio"      : round(rr_ratio, 2),
-        "strength"      : strength,
-        "vol_baseline"  : round(vol_baseline, 0),
-        "recent_vol"    : round(recent_vol_avg, 0),
+        "entry_price"         : round(entry_price, 0),
+        "stop_price"          : round(stop_price, 0),
+        "target_price"        : round(target_price, 0),
+        "peak_high"           : round(peak_high, 0),
+        "pullback_low"        : round(pullback_low, 0),
+        "drawdown_pct"        : round(drawdown_pct, 2),
+        "recovery_ratio"      : round(recovery_ratio, 2),
+        "rr_ratio"            : round(rr_ratio, 2),
+        "strength"            : strength,
+        "vol_baseline"        : round(vol_baseline, 0),
+        "recent_vol"          : round(recent_vol_avg, 0),
+        "stop_hunt_confirmed" : stop_hunt_confirmed,
+        "stop_hunt_strength"  : stop_hunt_strength,
+        "target_pct"          : target_pct,
     }
 
 
@@ -235,18 +343,23 @@ def scan_for_ppp(
             result: dict | None = None
             if ppp:
                 name = (name_lookup or {}).get(ticker, ticker)
+                stop_hunt = bool(ppp.get("stop_hunt_confirmed", False))
                 result = {
-                    "ticker"      : ticker,
-                    "name"        : name,
-                    "current_price": ppp["entry_price"],
-                    "stop_price"  : ppp["stop_price"],
-                    "target_price": ppp["target_price"],
-                    "peak_high"   : ppp["peak_high"],
-                    "pullback_low": ppp["pullback_low"],
-                    "drawdown_pct": ppp["drawdown_pct"],
-                    "rr_ratio"    : ppp["rr_ratio"],
-                    "strength"    : ppp["strength"],
-                    "focus_tag"   : "ppp_scalp",
+                    "ticker"             : ticker,
+                    "name"               : name,
+                    "current_price"      : ppp["entry_price"],
+                    "stop_price"         : ppp["stop_price"],
+                    "target_price"       : ppp["target_price"],
+                    "peak_high"          : ppp["peak_high"],
+                    "pullback_low"       : ppp["pullback_low"],
+                    "drawdown_pct"       : ppp["drawdown_pct"],
+                    "rr_ratio"           : ppp["rr_ratio"],
+                    "strength"           : ppp["strength"],
+                    "stop_hunt_confirmed": stop_hunt,
+                    "stop_hunt_strength" : ppp.get("stop_hunt_strength", 0.0),
+                    "target_pct"         : ppp.get("target_pct", 0.020),
+                    # 핑퓽팽 확인 시 우선순위 상향 (strength 보정)
+                    "focus_tag"          : "ppp_scalp_sh" if stop_hunt else "ppp_scalp",
                 }
                 signals.append(result)
 
@@ -256,6 +369,9 @@ def scan_for_ppp(
         except Exception:
             continue
 
-    # 강도(strength) 내림차순 정렬
-    signals.sort(key=lambda x: x.get("strength", 0), reverse=True)
+    # 핑퓽팽(stop hunt 확인) 신호 우선, 그 다음 strength 내림차순
+    signals.sort(
+        key=lambda x: (int(x.get("stop_hunt_confirmed", False)), x.get("strength", 0)),
+        reverse=True,
+    )
     return signals[:max_signals]
