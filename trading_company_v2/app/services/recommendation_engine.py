@@ -492,19 +492,27 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 3b. Strategy S22: 120일 신고가 ── 비활성화 (2026-06-02 백테스트: P&L 0.93, 포워드 테스트로 전환)
-    if False and breakout_120d_candidates and stance != "DEFENSE" and not _is_paused("korea.breakout_120d"):
-        _b120 = breakout_120d_candidates[0]
+    # ── 3b. Strategy S22: 120일 신고가 — RANGING 포함 허용, 품질 게이트 강화
+    # 재활성화 (2026-06-04): 기존 0.45-0.60x probe_longs → 0.20x selective_probe로 전환
+    # 품질 게이트: breakout_pct ≥ 2.0% + vol_ratio ≥ 1.5 + rsi14 ≥ 55
+    # STRESSED만 차단 (RANGING 허용 — 섹터 촉매로 지수와 무관한 개별 돌파 포착)
+    _s22_candidates = [
+        c for c in breakout_120d_candidates
+        if float(c.get("breakout_pct", 0) or 0) >= 2.0
+        and float(c.get("vol_ratio", 0) or 0) >= 1.5
+        and float(c.get("rsi14", 0) or 0) >= 55
+    ]
+    if _s22_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _is_paused("korea.breakout_120d"):
+        _b120 = _s22_candidates[0]
         _b120_ticker = str(_b120.get("ticker", ""))
         _b120_name = str(_b120.get("name", _b120_ticker))
         _b120_price = float(_b120.get("current_price", 0.0) or 0.0)
-        _b120_syms = [str(c.get("ticker", "")) for c in breakout_120d_candidates if c.get("ticker")]
-        _b120_base_size = "0.60x" if stance == "OFFENSE" else "0.45x"
-        _b120_size = "0.30x" if (_k_vix_fear or _k_us_risk_off) else _b120_base_size
+        _b120_syms = [str(c.get("ticker", "")) for c in _s22_candidates if c.get("ticker")]
+        _b120_size = "0.15x" if (_k_vix_fear or _k_us_risk_off) else "0.20x"
         return {
-            "action": "probe_longs",
+            "action": "selective_probe",
             "size": _b120_size,
-            "focus": f"breakout_120d: {_b120_name} 120일 신고가 돌파 {_b120.get('breakout_pct', 0):.1f}%",
+            "focus": f"breakout_120d: {_b120_name} 120일 신고가 +{_b120.get('breakout_pct', 0):.1f}% vol={_b120.get('vol_ratio', 0):.1f}x",
             "symbol": _b120_ticker,
             "reference_price": _b120_price,
             "candidate_prices": _bk_candidate_prices,
@@ -515,8 +523,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "notes": [
                 f"120일 신고가 {_b120.get('high_120d', 0):,.0f}원 → 현재 {_b120_price:,.0f}원 (+{_b120.get('breakout_pct', 0):.2f}%)",
                 f"EMA20={_b120.get('ema20', 0):,.0f} / RSI={_b120.get('rsi14', 'n/a')} / vol={_b120.get('vol_ratio', 0):.1f}x",
-                f"총 {len(breakout_120d_candidates)}개 종목 신호 — 포워드 테스트 중",
-                "B(20일) 대비 기간 6배 → false positive 감소, 더 강한 추세 신호",
+                f"적격 종목 {len(_s22_candidates)}개 (breakout≥2% + vol≥1.5x + RSI≥55)",
+                "RANGING 허용: 섹터 촉매 개별 돌파 — 0.20x selective_probe",
             ],
             "quality_score": quality_score,
         }
