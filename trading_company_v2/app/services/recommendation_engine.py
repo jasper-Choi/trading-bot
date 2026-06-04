@@ -352,6 +352,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     catalyst_gap_candidates = payload.get("catalyst_gap_candidates", []) or []
     breakout_120d_candidates = payload.get("breakout_120d_candidates", []) or []
     pre_gap_watch_candidates = payload.get("pre_gap_watch_candidates", []) or []
+    near_120d_candidates = payload.get("near_120d_candidates", []) or []
+    stock_leaders = payload.get("stock_leaders", []) or []
 
     # Best candidate (confirmed ≥ 3 conditions)
     bk_leader = next(
@@ -492,6 +494,47 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
+    # ── 3b-pre. Strategy S25: 섹터 Wave — 동일 섹터 2종목 이상 10%+ 급등 시 미동참 종목 포착
+    # 조건: stock_leaders에서 같은 섹터 2개 이상 gap≥10% → 섹터 laggard 진입
+    # 장 중에만 유효, STRESSED 차단, 0.20x selective_probe
+    if stock_leaders and session.get("korea_mid_session") and regime != "STRESSED" and stance != "DEFENSE":
+        try:
+            from app.services.macro_sector_map import detect_sector_wave, get_sector_laggards
+            _wave = detect_sector_wave(stock_leaders, min_gap_pct=10.0, min_count=2)
+            if _wave and not _is_paused("korea.sector_wave"):
+                _wave_sector = _wave["sector"]
+                _leader_tickers = {str(m.get("ticker", "")) for m in _wave["leaders"]}
+                _laggards = get_sector_laggards(_wave_sector, _leader_tickers)
+                # laggard 중 유니버스에 있는 종목만 (가격은 _fetch_live_price로 채움)
+                _laggard_in_universe = [t for t in _laggards if t][:3]
+                if _laggard_in_universe:
+                    _wave_leader = _wave["leaders"][0]
+                    _wave_leader_name = str(_wave_leader.get("name", _wave_sector))
+                    _wave_leader_gap = float(_wave_leader.get("gap_pct", 0) or 0)
+                    return {
+                        "action": "selective_probe",
+                        "size": "0.20x",
+                        "focus": (
+                            f"sector_wave: {_wave_sector} 파동 "
+                            f"({len(_leader_tickers)}종목 +{_wave_leader_gap:.0f}%↑) "
+                            f"— {_wave_leader_name} 등 미동참 포착"
+                        ),
+                        "symbol": _laggard_in_universe[0],
+                        "reference_price": 0.0,  # _fetch_live_price로 실시간 조회
+                        "candidate_symbols": _laggard_in_universe,
+                        "focus_tag": "sector_wave",
+                        "strategy_id": "korea.sector_wave",
+                        "entry_profile": "sector_wave",
+                        "notes": [
+                            f"섹터 파동 감지: {_wave_sector} — {len(_leader_tickers)}개 종목 {_wave_leader_gap:.0f}%+ 급등",
+                            f"미동참 laggard 종목: {', '.join(_laggard_in_universe)}",
+                            "같은 섹터 촉매 — 연대 상승 기대 / 0.20x 소형 진입",
+                        ],
+                        "quality_score": quality_score,
+                    }
+        except Exception:
+            pass
+
     # ── 3b. Strategy S22: 120일 신고가 — RANGING 포함 허용, 품질 게이트 강화
     # 재활성화 (2026-06-04): 기존 0.45-0.60x probe_longs → 0.20x selective_probe로 전환
     # 품질 게이트: breakout_pct ≥ 2.0% + vol_ratio ≥ 1.5 + rsi14 ≥ 55
@@ -525,6 +568,41 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"EMA20={_b120.get('ema20', 0):,.0f} / RSI={_b120.get('rsi14', 'n/a')} / vol={_b120.get('vol_ratio', 0):.1f}x",
                 f"적격 종목 {len(_s22_candidates)}개 (breakout≥2% + vol≥1.5x + RSI≥55)",
                 "RANGING 허용: 섹터 촉매 개별 돌파 — 0.20x selective_probe",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 3c. Strategy S24: 120일 고점 접근 (pre-breakout accumulation)
+    # S22가 돌파 확인 후 진입이라면, S24는 돌파 직전 7% 이내 접근 시 선행 포지션
+    # 거래량 축적 + EMA20>EMA60 + RSI 적정 → 돌파 전 매집
+    # STRESSED만 차단, 0.15x 소형 (돌파 확인 전 리스크 최소화)
+    if near_120d_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _is_paused("korea.near_120d"):
+        _n120 = near_120d_candidates[0]  # dist_pct 내림차순 정렬 (0에 가장 가까운 것)
+        _n120_ticker = str(_n120.get("ticker", ""))
+        _n120_name = str(_n120.get("name", _n120_ticker))
+        _n120_price = float(_n120.get("current_price", 0.0) or 0.0)
+        _n120_dist = float(_n120.get("dist_pct", 0) or 0)
+        _n120_syms = [str(c.get("ticker", "")) for c in near_120d_candidates if c.get("ticker")]
+        _n120_size = "0.12x" if (_k_vix_fear or _k_us_risk_off) else "0.15x"
+        return {
+            "action": "selective_probe",
+            "size": _n120_size,
+            "focus": (
+                f"near_120d: {_n120_name} 120일 고점 {abs(_n120_dist):.1f}% 이내 "
+                f"vol={_n120.get('vol_ratio', 0):.1f}x — 돌파 대기"
+            ),
+            "symbol": _n120_ticker,
+            "reference_price": _n120_price,
+            "candidate_prices": _bk_candidate_prices,
+            "candidate_symbols": _n120_syms[:3],
+            "focus_tag": "near_120d",
+            "strategy_id": "korea.near_120d",
+            "entry_profile": "near_120d",
+            "notes": [
+                f"120일 고점 {_n120.get('high_120d', 0):,.0f}원 / 현재 {_n120_price:,.0f}원 ({_n120_dist:.2f}%)",
+                f"EMA20={_n120.get('ema20', 0):,.0f} / EMA60={_n120.get('ema60', 0):,.0f} / RSI={_n120.get('rsi14', 'n/a')}",
+                f"3일 거래량={_n120.get('vol_ratio', 0):.1f}x — 매집 신호",
+                "S24: 돌파 전 선행 포지션 — 0.15x 소형, 돌파 확인 시 S22로 추가 진입",
             ],
             "quality_score": quality_score,
         }

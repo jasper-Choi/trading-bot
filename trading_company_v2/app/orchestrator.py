@@ -706,6 +706,7 @@ class CompanyOrchestrator:
             "new_high_breakout_candidates": _korea_payload.get("new_high_breakout_candidates", []),
             "breakout_120d_candidates": _korea_payload.get("breakout_120d_candidates", []),
             "pre_gap_watch_candidates": _korea_payload.get("pre_gap_watch_candidates", []),
+            "near_120d_candidates": _korea_payload.get("near_120d_candidates", []),
         }
         state.session_state = strategy_allocator_result.payload.get("session", {})
         state.desk_views = {
@@ -726,11 +727,15 @@ class CompanyOrchestrator:
             state.notes.append(f"early position guard: {_pos_guard_exc}")
         # ─────────────────────────────────────────────────────────────────────
 
+        # stock_leaders를 Korea plan 페이로드에 병합 — S25 섹터 wave 감지용
+        _korea_plan_payload = dict(stock_desk_result.payload) if "korea" in active_desks else {}
+        _korea_plan_payload["stock_leaders"] = market_data_result.payload.get("stock_leaders", [])
+
         korea_plan = (
             build_korea_plan(
                 state.stance,
                 state.regime,
-                stock_desk_result.payload,
+                _korea_plan_payload,
                 strategy_allocator_result.payload.get("session", {}),
             )
             if "korea" in active_desks

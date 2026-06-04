@@ -715,6 +715,14 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # S9 Korea (fee-adjusted 2026-05-20): Sh 5.52, WR 58.1%, PnL 1.62, MDD -8.0%
         # stop -1.4% (tightened from -1.5% to maintain P&L≥1.5 after 0.25% round-trip fee)
         return 10.0, -1.4, 2700
+    if desk == "korea" and "near_120d" in focus:
+        # S24: 120일 고점 접근 pre-breakout (2026-06-04 신설)
+        # 돌파 전 포지션이므로 stop 타이트 (-3.0%) — 돌파 실패 시 빠른 손절
+        return 25.0, -3.0, 50000
+    if desk == "korea" and "sector_wave" in focus:
+        # S25: 섹터 wave 미동참 종목 포착 (2026-06-04 신설)
+        # 섹터 촉매 당일 진입 → 빠른 추세 확인, stop -3.5%
+        return 25.0, -3.5, 50000
     if desk == "korea" and "breakout_120d" in focus:
         # S22: 120일 신고가 돌파 (2026-06-02 신설)
         # B(20일) 대비 false positive 감소 → 승률 향상 기대 (포워드 테스트 중)
@@ -1843,8 +1851,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     trail_giveback, profit_floor = _mongtata_trail_rules(peak_pnl)
                 elif "rsi2_mean_reversion" in pos_focus or "dual_rsi" in pos_focus:
                     trail_giveback, profit_floor = _mean_reversion_trail_rules(peak_pnl)
-                elif "breakout_120d" in pos_focus:
-                    # S22: 120일 신고가 돌파 — new_high_breakout과 동일한 타이트 trail 적용
+                elif "breakout_120d" in pos_focus or "near_120d" in pos_focus or "sector_wave" in pos_focus:
+                    # S22/S24/S25: 신고가 계열 — new_high_breakout과 동일한 타이트 trail 적용
                     trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
                 else:
                     trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
@@ -2191,6 +2199,8 @@ def rapid_guard_crypto_positions(prices: dict[str, float]) -> dict:
                 or "rsi2_mean_reversion" in pos_focus_rapid
                 or "dual_rsi" in pos_focus_rapid
                 or "breakout_120d" in pos_focus_rapid
+                or "near_120d" in pos_focus_rapid
+                or "sector_wave" in pos_focus_rapid
                 or "eth_4h_breakout" in pos_focus_rapid
             )
             if is_daily_strategy:
@@ -2368,7 +2378,7 @@ def rapid_guard_korea_positions(prices: dict[str, float]) -> dict:
                 trail_giveback, profit_floor = _mongtata_trail_rules(peak_pnl)
             elif "rsi2_mean_reversion" in pos_focus or "dual_rsi" in pos_focus:
                 trail_giveback, profit_floor = _mean_reversion_trail_rules(peak_pnl)
-            elif "breakout_120d" in pos_focus:
+            elif "breakout_120d" in pos_focus or "near_120d" in pos_focus or "sector_wave" in pos_focus:
                 trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
             else:
                 trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)

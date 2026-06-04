@@ -20,9 +20,32 @@ SECTOR_TICKERS: dict[str, list[str]] = {
     "ai_tech": ["035420", "035720", "259960", "293490"],
     # 035420=네이버, 035720=카카오, 259960=크래프톤, 293490=카카오게임즈
 
-    # 반도체
+    # 반도체 대형주
     "semiconductor": ["005930", "000660", "091160"],
     # 005930=삼성전자, 000660=SK하이닉스, 091160=KODEX반도체
+
+    # 반도체 장비 / 소재 (2026-06-04 추가 — 섹터 촉매 wave 포착)
+    "semiconductor_equip": [
+        "084370",  # 유진테크
+        "240810",  # 원익IPS
+        "095610",  # 테스
+        "036930",  # 주성엔지니어링
+        "319660",  # 피에스케이
+        "031980",  # 피에스케이홀딩스
+        "089970",  # 브이엠
+        "064760",  # 티씨케이
+        "403870",  # HPSP
+        "058470",  # 리노공업
+        "131290",  # 티에스이
+        "420770",  # 기가비스
+        "005290",  # 동진쎄미켐
+        "039030",  # 이오테크닉스
+        "140860",  # 파크시스템스
+        "089030",  # 테크윙
+        "067310",  # 하나마이크론
+        "166090",  # 하나머티리얼즈
+        "440110",  # 파두
+    ],
 
     # 2차전지 / EV / 배터리
     "battery_ev": ["373220", "006400", "086520", "003670", "096770"],
@@ -47,6 +70,14 @@ SECTOR_TICKERS: dict[str, list[str]] = {
     # 방산 / 우주
     "defense": ["012450", "047810", "272210"],
     # 012450=한화에어로, 047810=한국항공우주, 272210=한화시스템
+
+    # 로봇 / 자동화
+    "robot": ["108490", "090460", "000150", "064350"],
+    # 108490=로보티즈, 090460=나인봇, 000150=두산, 064350=현대로템
+
+    # 화장품 / K-뷰티
+    "cosmetics": ["090430", "051900", "123890", "214150"],
+    # 090430=아모레퍼시픽, 051900=LG생활건강, 123890=한국콜마, 214150=클래시스
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -63,6 +94,15 @@ KEYWORD_SECTOR: list[tuple[list[str], str]] = [
     (["semiconductor", "chip", "chips act", "tsmc", "nvidia", "hbm", "nand", "dram",
       "반도체", "칩", "메모리", "파운드리"],
      "semiconductor"),
+
+    # 반도체 장비
+    (["semiconductor equipment", "fab", "etch", "deposition", "cvd", "pvd",
+      "반도체 장비", "식각", "증착", "노광", "세정", "삼성 투자", "sk 투자", "팹 투자"],
+     "semiconductor_equip"),
+
+    # 로봇
+    (["robot", "automation", "humanoid", "로봇", "자동화", "휴머노이드"],
+     "robot"),
 
     # 배터리 / EV
     (["battery", "electric vehicle", "ev ", "tesla", "lithium", "cathode",
@@ -176,3 +216,54 @@ def get_boosted_tickers(
             boosted[ticker] = max(boosted.get(ticker, 0.0), 0.35)
 
     return boosted
+
+
+# ── 역방향 매핑: ticker → sector ───────────────────────────────────────────────
+_TICKER_SECTOR: dict[str, str] = {
+    ticker: sector
+    for sector, tickers in SECTOR_TICKERS.items()
+    for ticker in tickers
+}
+
+
+def get_sector_for_ticker(ticker: str) -> str | None:
+    """종목코드 → 섹터명 반환. 매핑 없으면 None."""
+    return _TICKER_SECTOR.get(str(ticker).strip())
+
+
+def detect_sector_wave(
+    stock_leaders: list[dict],
+    min_gap_pct: float = 10.0,
+    min_count: int = 2,
+) -> dict | None:
+    """stock_leaders에서 섹터 wave 감지.
+
+    같은 섹터에 min_count개 이상 종목이 min_gap_pct% 이상 상승하면
+    해당 섹터와 리더 종목 목록을 반환.
+    """
+    sector_buckets: dict[str, list[dict]] = {}
+    for stock in stock_leaders:
+        gap = float(stock.get("gap_pct", 0) or 0)
+        if gap < min_gap_pct:
+            continue
+        ticker = str(stock.get("ticker", "")).strip()
+        sector = get_sector_for_ticker(ticker)
+        if sector:
+            sector_buckets.setdefault(sector, []).append(stock)
+
+    best: dict | None = None
+    best_score = 0.0
+    for sector, members in sector_buckets.items():
+        if len(members) < min_count:
+            continue
+        score = len(members) * sum(float(m.get("gap_pct", 0) or 0) for m in members)
+        if score > best_score:
+            best_score = score
+            best = {"sector": sector, "leaders": members, "score": score}
+    return best
+
+
+def get_sector_laggards(sector: str, leader_tickers: set[str]) -> list[str]:
+    """섹터 내에서 아직 상승하지 않은 종목(laggard) 반환."""
+    peers = SECTOR_TICKERS.get(sector, [])
+    return [t for t in peers if t not in leader_tickers]

@@ -311,6 +311,7 @@ class KoreaStockDeskAgent(BaseAgent):
         mongtata_candidates: list[dict] = []   # S2: 스캔 유지 (포워드 모니터링)
         rsi2_candidates: list[dict] = []       # S9/S13: ACTIVATE/WATCH
         breakout_120d_candidates: list[dict] = []  # S22: 포워드 모니터링
+        near_120d_candidates: list[dict] = []  # S24: 120일 고점 접근 (pre-breakout)
 
         for ticker, name, candles in results:
             if len(candles) < 205:
@@ -389,6 +390,38 @@ class KoreaStockDeskAgent(BaseAgent):
                                 "vol_ratio": round(vol_ratio_s22, 2),
                                 "focus_tag": "breakout_120d",
                             })
+
+                        # ── S24: 120일 고점 접근 (pre-breakout accumulation) ─────
+                        # 돌파 전 7% 이내 접근 + 거래량 축적 → 다음 돌파 선행 포착
+                        # EMA 완전 정배열 불요 — 섹터 촉매로 하락장 종목도 급등 가능
+                        elif ticker not in {c["ticker"] for c in breakout_120d_candidates}:
+                            dist_pct = (closes[-1] / high_120d - 1) * 100
+                            if -7.0 <= dist_pct < 0.2:
+                                vols_s24 = [float(c.get("volume") or 0.0) for c in candles[-22:]]
+                                valid_v = [v for v in vols_s24 if v > 0]
+                                avg10_s24 = sum(valid_v[-11:-1]) / 10 if len(valid_v) >= 11 else 0
+                                avg3_s24 = sum(valid_v[-4:-1]) / 3 if len(valid_v) >= 4 else 0
+                                vr_s24 = avg3_s24 / avg10_s24 if avg10_s24 > 0 else 0
+                                ema60_s24 = _ema(closes, 60)
+                                if (
+                                    vr_s24 >= 1.3                 # 거래량 축적
+                                    and rsi14_s22 is not None
+                                    and 40.0 <= rsi14_s22 <= 78.0
+                                    and ema20 > ema60_s24 > 0     # 중기 상승추세만 요구
+                                    and closes[-1] > ema20        # 가격 > EMA20
+                                ):
+                                    near_120d_candidates.append({
+                                        "ticker": ticker,
+                                        "name": name,
+                                        "current_price": closes[-1],
+                                        "high_120d": round(high_120d, 0),
+                                        "dist_pct": round(dist_pct, 2),
+                                        "vol_ratio": round(vr_s24, 2),
+                                        "rsi14": round(rsi14_s22, 1),
+                                        "ema20": round(ema20, 0),
+                                        "ema60": round(ema60_s24, 0),
+                                        "focus_tag": "near_120d",
+                                    })
             except Exception:
                 continue
 
@@ -873,6 +906,7 @@ class KoreaStockDeskAgent(BaseAgent):
                 f"S15:{len(gap_momentum_candidates)} S16:{len(close_panic_candidates)} "
                 f"S18/19:{len(inst_foreign_candidates)} S20:{len(catalyst_gap_candidates)} "
                 f"S22:{len(breakout_120d_candidates)} S23:{len(pre_gap_watch_candidates)} "
+                f"S24:{len(near_120d_candidates)} "
                 f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
                 f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
@@ -891,6 +925,11 @@ class KoreaStockDeskAgent(BaseAgent):
                 # Strategy S22: 120일 신고가 돌파 (2026-06-02 신설)
                 "breakout_120d_candidates": breakout_120d_candidates[:5],
                 "breakout_120d_count": len(breakout_120d_candidates),
+                # Strategy S24: 120일 고점 접근 pre-breakout (2026-06-04 신설)
+                "near_120d_candidates": sorted(
+                    near_120d_candidates, key=lambda c: c.get("dist_pct", -99), reverse=True
+                )[:5],
+                "near_120d_count": len(near_120d_candidates),
                 # Strategy S23: Pre-Market Macro/News Catalyst (2026-06-02 신설)
                 # 트럼프/머스크/US 밤사이 급등 + 종목 뉴스 급증 → 갭 발생 전 선행 포착
                 "pre_gap_watch_candidates": pre_gap_watch_candidates[:5],
