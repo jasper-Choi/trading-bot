@@ -22,6 +22,7 @@ KIS_ORDER_CASH_PATH = "/uapi/domestic-stock/v1/trading/order-cash"
 KIS_BALANCE_PATH = "/uapi/domestic-stock/v1/trading/inquire-balance"
 KIS_DAILY_CCLD_PATH = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
 KIS_MINUTE_CHART_PATH = "/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
+KIS_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
 # 해외주식 (미국)
 KIS_US_ORDER_PATH = "/uapi/overseas-stock/v1/trading/order"
 KIS_US_BALANCE_PATH = "/uapi/overseas-stock/v1/trading/inquire-balance"
@@ -535,6 +536,22 @@ def _get_available_us_stock_quantity(symbol: str) -> int:
 
 # ── 국내주식 ──────────────────────────────────────────────────────────────────
 
+def _fetch_live_price(symbol: str) -> float:
+    """KIS 현재가 조회 (reference_price 없는 주문에 fallback)."""
+    try:
+        resp = _request(
+            "GET",
+            KIS_PRICE_PATH,
+            params={"FID_COND_MRKT_DIV_CODE": "J", "FID_INPUT_ISCD": symbol},
+            tr_id="FHKST01010100",
+        )
+        output = resp.get("output") or {}
+        price = _safe_float(output.get("stck_prpr") or output.get("stck_clpr"))
+        return price
+    except Exception:
+        return 0.0
+
+
 def _build_order_payload(order: PaperOrder) -> dict[str, str] | None:
     symbol = str(order.symbol or "").strip()
     if not symbol:
@@ -542,6 +559,8 @@ def _build_order_payload(order: PaperOrder) -> dict[str, str] | None:
     cano, product_code = _account_parts()
     if _is_buy_action(order.action):
         reference_price = _order_reference_price(order)
+        if reference_price <= 0:
+            reference_price = _fetch_live_price(symbol)
         notional_pct = _order_notional_pct(order)
         if reference_price <= 0 or notional_pct <= 0:
             return None
