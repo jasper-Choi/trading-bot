@@ -930,6 +930,7 @@ class CompanyOrchestrator:
                 live_korea_enabled = any(p.desk == "korea" for p in _lop())
             except Exception:
                 pass
+        _korea_sync_ok = False
         if live_korea_enabled:
             try:
                 account_positions = get_kis_account_positions()
@@ -937,10 +938,11 @@ class CompanyOrchestrator:
                 state.notes.append(
                     f"korea broker sync opened={live_sync.get('opened', 0)} updated={live_sync.get('updated', 0)} closed={live_sync.get('closed', 0)}"
                 )
+                _korea_sync_ok = True
             except Exception as exc:
                 state.notes.append(f"korea broker sync failed: {exc}")
                 # 잔고 조회 실패(서버 과부하 등) 시 개별 현재가 조회로 fallback
-                # → auto_exit_positions가 손절 조건 평가할 수 있도록 broker_prices 보완
+                # sync 실패 = KIS가 직접 관리 못하니 auto_exit_positions에서 처리
                 try:
                     from app.core.state_store import load_open_positions as _lop2
                     from app.services.kis_broker import _fetch_live_price
@@ -949,6 +951,7 @@ class CompanyOrchestrator:
                             _p = _fetch_live_price(_pos.symbol)
                             if _p and _p > 0:
                                 broker_prices[_pos.symbol] = _p
+                                state.notes.append(f"korea price fallback {_pos.symbol}={_p}")
                 except Exception:
                     pass
             try:
@@ -962,7 +965,8 @@ class CompanyOrchestrator:
         skip_desks: set[str] = set()
         if live_crypto_enabled:
             skip_desks.add("crypto")
-        if live_korea_enabled:
+        # Korea는 잔고 sync 성공했을 때만 skip (실패 시 auto_exit_positions로 fallback 처리)
+        if live_korea_enabled and _korea_sync_ok:
             skip_desks.add("korea")
 
         # Signal-based exit: close long positions when downtrend reversal detected.
