@@ -922,6 +922,14 @@ class CompanyOrchestrator:
             except Exception as exc:
                 state.notes.append(f"live effect reconcile failed: {exc}")
         live_korea_enabled = "korea" in route_live_desks
+        # 기존 KIS 실전 포지션이 있으면 DEFENSE/no-order 사이클에서도 반드시 sync
+        # (주문이 없으면 route_live_desks가 비어 현재가 업데이트·손절이 끊기는 문제 수정)
+        if not live_korea_enabled:
+            try:
+                from app.core.state_store import load_live_positions as _llp
+                live_korea_enabled = bool(_llp("korea"))
+            except Exception:
+                pass
         if live_korea_enabled:
             try:
                 account_positions = get_kis_account_positions()
