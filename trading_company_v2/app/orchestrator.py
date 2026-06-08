@@ -939,6 +939,18 @@ class CompanyOrchestrator:
                 )
             except Exception as exc:
                 state.notes.append(f"korea broker sync failed: {exc}")
+                # 잔고 조회 실패(서버 과부하 등) 시 개별 현재가 조회로 fallback
+                # → auto_exit_positions가 손절 조건 평가할 수 있도록 broker_prices 보완
+                try:
+                    from app.core.state_store import load_open_positions as _lop2
+                    from app.services.kis_broker import _fetch_live_price
+                    for _pos in _lop2():
+                        if _pos.desk == "korea" and _pos.symbol not in broker_prices:
+                            _p = _fetch_live_price(_pos.symbol)
+                            if _p and _p > 0:
+                                broker_prices[_pos.symbol] = _p
+                except Exception:
+                    pass
             try:
                 effect_summary = reconcile_live_order_effects(broker_prices)
                 if effect_summary.get("checked"):
