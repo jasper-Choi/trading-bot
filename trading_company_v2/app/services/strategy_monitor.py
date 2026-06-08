@@ -26,7 +26,10 @@ _STRATEGY_WR_THRESHOLDS: dict[str, float] = {
     "crypto.rsi2_mean_reversion": 0.481,  # S9 (fee-adjusted)
     "crypto.nday_pullback":       0.558,  # S10 (fee-adjusted)
     "crypto.dual_rsi":            0.512,  # S13 Dual RSI (fee-adjusted 2026-05-20)
-    "korea.new_high_breakout":    0.846,  # B breakout
+    "korea.new_high_breakout":    0.420,  # B breakout — 재조정 2026-06-08
+                                          # 이전값 0.846은 소규모(n=6~14) 샘플 과적합
+                                          # 백테스트(2022-2025, 117종목): B_MID WR=39.8%
+                                          # 실전(n=20): WR=45.0% → 임계값 42%로 현실화
     "korea.mongtata_airborne":    0.509,  # S2 Korea (soft, under review)
     "korea.rsi2_mean_reversion":  0.581,  # S9 Korea (fee-adjusted)
     "korea.nday_pullback":        0.510,  # S10 Korea (fee-adjusted)

@@ -152,20 +152,22 @@ class KoreaStockDeskAgent(BaseAgent):
 
     def run(self) -> AgentResult:
         # ── vol 기준 ──────────────────────────────────────────────────────────
-        # 2026-06-01: 2.0x → 1.5x 완화
-        # 근거: 2.0x가 너무 엄격해 good signal(PM edge>0.3, RSI>60)도 차단
-        #       stale_exit 원인은 거래량 아닌 장 초반 방향성 부재 → max_cycles 단축으로 대응
-        #       1.5x는 유동성 최소 기준 유지하면서 진입 기회 복원
-        # RSI: 50-85
-        _vol_mult = 1.5
-        _rsi_min, _rsi_max = 50.0, 85.0
-        _min_breakout_pct = 0.3  # 20일 신고점 대비 최소 0.3% 돌파 (노이즈 차단)
+        # 2026-06-01: 2.0x → 1.5x 완화 (진입 빈도 복원 목적)
+        # 2026-06-08: 1.5x → 2.0x 재강화
+        # 근거: 백테스트(2022-2025, 117종목) 결과 1.5x 설정에서
+        #       WR=38.6%, PF=1.15, Sharpe=1.02 (기준 미달)
+        #       2.0x 설정(B_MID)에서 Sharpe=1.43으로 유의미하게 개선됨
+        #       신호 빈도 917→520건으로 감소하지만 품질 상승이 우선
+        # RSI: 50-80 (과매수 진입 방지, 85→80 조정)
+        _vol_mult = 2.0
+        _rsi_min, _rsi_max = 50.0, 80.0
+        _min_breakout_pct = 0.5  # 20일 신고점 대비 최소 0.5% 돌파 (노이즈 차단)
 
         # ── Strategy B: 20일 신고점 돌파 스캔 ────────────────────────────────
-        # 2026-06-01: 60일 → 20일 완화
+        # 2026-06-01: 60일 → 20일 완화 (업계 표준, 유지)
         # 근거: 60일(3개월) 신고가는 진입 조건이 너무 타이트해 신호 빈도 극히 낮음
         #       20일(1개월)이 업계 표준 — 추세 확인 + 진입 빈도 균형
-        #       _min_breakout_pct도 0.5 → 0.3으로 완화 (20일 기준에서는 더 작은 돌파도 의미 있음)
+        #       _min_breakout_pct: 0.3 → 0.5 (2026-06-08 재강화, 노이즈 감소)
         universe = get_korea_universe()
         watchlist_items = [
             (item["ticker"], item["name"])
@@ -657,21 +659,14 @@ class KoreaStockDeskAgent(BaseAgent):
         catalyst_gap_candidates.sort(key=lambda x: x.get("chg1d", 0.0), reverse=True)
 
         # ── Strategy S23: Universal Pre-Gap Catalyst Scanner ────────────────────
-        # 유니버스 전체(120종목)를 2단계로 스캔 — 모든 종목에 대해 선 파악 후 진입
-        #
-        # [1단계] 기술적 1차 필터 (빠름, 캔들 데이터만 사용)
-        #   - EMA200 위 (기본 상승추세 확인)
-        #   - 오늘 갭 < 3% (이미 갭 발생은 S20이 처리)
-        #   - 거래량 축적: 최근 3일 평균 > 10일 평균 × 1.15 (세력 개입 조짐)
-        #   - RSI 30~78 (극단값 제외)
-        #
-        # [2단계] 뉴스/종토방/매크로 딥 스캔 (상위 20개, 병렬 실행)
-        #   - get_stock_catalyst() : 네이버뉴스 + Google뉴스 + 종토방 통합 분석
-        #   - 매크로 부스트(US 밤사이 급등, 트럼프/머스크 발언)는 가중치로 적용
-        #   - catalyst_rating >= 5 (매크로 부스트 있으면 4로 완화)
-        #   - 악재 뉴스 있는 종목 자동 제외
+        # 2026-06-08: 비활성화 (실전 WR=0%, n=2, 로보티즈/043260 2거래 모두 손절)
+        # 재활성화 조건: 포워드 테스트 n≥20 달성 후 WR≥45% 확인 시
+        # TODO: pre_gap_watch 전략 심층 파라미터 재설계 필요
         pre_gap_watch_candidates: list[dict] = []
         try:
+            # S23 비활성화 (2026-06-08): WR=0%, n=2 (로보티즈·043260 모두 손절)
+            # 재활성화 조건: 포워드 테스트 n≥20 + WR≥45% 확인 후 아래 raise 제거
+            raise StopIteration("S23_disabled_20260608")
             from concurrent.futures import ThreadPoolExecutor as _S23Executor, as_completed as _s23_as_completed
 
             # ── 매크로 부스트 맵 (섹터 매핑 기반, boost multiplier로만 사용) ──
