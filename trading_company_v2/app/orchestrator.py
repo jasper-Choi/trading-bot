@@ -926,8 +926,8 @@ class CompanyOrchestrator:
         # (주문이 없으면 route_live_desks가 비어 현재가 업데이트·손절이 끊기는 문제 수정)
         if not live_korea_enabled:
             try:
-                from app.core.state_store import load_live_positions as _llp
-                live_korea_enabled = bool(_llp("korea"))
+                from app.core.state_store import load_open_positions as _lop
+                live_korea_enabled = any(p.desk == "korea" for p in _lop())
             except Exception:
                 pass
         if live_korea_enabled:
