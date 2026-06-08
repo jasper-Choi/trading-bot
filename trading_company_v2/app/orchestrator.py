@@ -33,6 +33,7 @@ from app.core.state_store import (
     save_live_order_attempts,
     save_paper_orders,
     sync_live_positions,
+    sync_paper_from_kis,
     sync_paper_positions,
     update_positions_unrealized,
 )
@@ -938,6 +939,15 @@ class CompanyOrchestrator:
                 state.notes.append(
                     f"korea broker sync opened={live_sync.get('opened', 0)} updated={live_sync.get('updated', 0)} closed={live_sync.get('closed', 0)}"
                 )
+                # KIS 잔고 ↔ paper_positions 자동 동기화 (kis_hold 포지션 관리)
+                try:
+                    paper_sync = sync_paper_from_kis(account_positions, broker_prices)
+                    if paper_sync.get("opened") or paper_sync.get("kis_sold"):
+                        state.notes.append(
+                            f"paper↔kis sync: +{paper_sync.get('opened',0)} opened, {paper_sync.get('kis_sold',0)} sold"
+                        )
+                except Exception as _pse:
+                    state.notes.append(f"paper↔kis sync failed: {_pse}")
                 _korea_sync_ok = True
             except Exception as exc:
                 state.notes.append(f"korea broker sync failed: {exc}")

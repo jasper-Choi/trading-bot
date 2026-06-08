@@ -766,6 +766,12 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # WR 48.9%, PF 1.97, Sharpe 3.32, MDD_port -2.7%, n=47
         # 2026-06-01: target 12→25%, max_cycles 50000 — trail이 청산 제어, 멀티데이 추세 허용
         return 25.0, -3.0, 50000
+    if desk == "korea" and "kis_hold" in focus:
+        # KIS 계좌 직접 보유 포지션 — 자동 손절 비활성화 (2026-06-09)
+        # - target +25%: trailing이 청산 제어, 반등 수익 최대 확보
+        # - stop -50%: 실질적으로 자동 손절 없음 (수동 관리, 익절 대기)
+        # - max_cycles 99999: 시간 제한 없음 (멀티데이 보유 허용)
+        return 25.0, -50.0, 99999
     if desk == "korea" and "new_high_breakout" in focus:
         # 2026-05-21 백테스트 v3 재검증 (115종목 3년):
         # WR 32.9%, PF 1.86, Sharpe 2.73, stop -2.5%
@@ -1840,6 +1846,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     and peak_pnl < 0.3
                     and position.pnl_pct <= -0.5
                     and "pyramid" not in pos_focus
+                    and "kis_hold" not in pos_focus  # KIS 계좌 직접 보유 포지션은 손절 없음
                 ):
                     _close_position(position, "no_momentum_cut")
                     continue
@@ -2895,6 +2902,100 @@ def sync_live_positions(desk: str, account_positions: list[dict], prices: dict[s
         "updated": updated,
         "closed": closed,
     }
+
+
+def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float]) -> dict:
+    """KIS 계좌 잔고 기준으로 paper_positions 자동 동기화 (2026-06-09 신설).
+
+    규칙:
+      1. KIS에 있는데 paper open에 없으면 → kis_hold 프로필로 open 추가
+      2. paper에 kis_hold 포지션이 있는데 KIS에 없으면 → closed 처리 (KIS에서 이미 매도됨)
+      3. 일반(non-kis_hold) paper 포지션은 건드리지 않음
+
+    이를 통해 봇 대시보드와 KIS 실계좌가 항상 일치하도록 유지.
+    """
+    init_db()
+    from sqlalchemy import select, and_
+    kis_symbols = {
+        str(item.get("market", "") or item.get("symbol", "")).strip()
+        for item in account_positions
+        if float(item.get("balance", 0) or item.get("total_volume", 0) or 0) > 0
+    }
+    opened = 0
+    closed_count = 0
+
+    with SessionLocal() as db:
+        # 현재 open paper_positions (korea, kis_hold)
+        open_rows = db.execute(
+            select(PaperPositionRecord).where(
+                PaperPositionRecord.status == "open",
+                PaperPositionRecord.desk == "korea",
+            )
+        ).scalars().all()
+
+        paper_by_symbol: dict[str, PaperPositionRecord] = {row.symbol: row for row in open_rows}
+        paper_kis_hold_syms = {row.symbol for row in open_rows if "kis_hold" in str(row.entry_profile or "")}
+
+        now = utcnow_iso()
+
+        # 1. KIS에 있는데 paper에 없으면 → 추가
+        capital_base = float(settings.live_capital_krw or settings.paper_capital_krw or 1.0)
+        for item in account_positions:
+            sym = str(item.get("market", "") or item.get("symbol", "")).strip()
+            if not sym or sym in paper_by_symbol:
+                continue
+            balance = float(item.get("balance", 0) or item.get("total_volume", 0) or 0)
+            if balance <= 0:
+                continue
+            avg_price = float(item.get("avg_buy_price", 0) or 0)
+            current = prices.get(sym) or avg_price
+            if avg_price <= 0:
+                continue
+            pnl = round((current - avg_price) / avg_price * 100, 2) if avg_price > 0 else 0.0
+            market_value = current * balance
+            notional = round(market_value / capital_base, 4) if capital_base > 0 else 0.0
+            size_str = f"{notional:.2f}x"
+            db.add(PaperPositionRecord(
+                desk="korea",
+                symbol=sym,
+                status="open",
+                action="probe_longs",
+                size=size_str,
+                opened_at=now,
+                closed_at="",
+                entry_price=avg_price,
+                current_price=current,
+                exit_price=0.0,
+                pnl_pct=pnl,
+                cycles_open=0,
+                closed_reason="",
+                focus="",
+                peak_pnl_pct=max(pnl, 0.0),
+                strategy_id="korea.new_high_breakout",
+                entry_profile="kis_hold",
+                is_pyramided=False,
+                strategy_type="hold_until_profit",
+            ))
+            opened += 1
+            _log.info("sync_paper_from_kis: +open %s avg=%.0f pnl=%.2f%%", sym, avg_price, pnl)
+
+        # 2. paper kis_hold에 있는데 KIS에 없으면 → closed (KIS에서 매도됨)
+        for sym in paper_kis_hold_syms:
+            if sym not in kis_symbols:
+                row = paper_by_symbol[sym]
+                current = prices.get(sym) or float(row.current_price or row.entry_price or 0)
+                pnl = round((current - float(row.entry_price)) / float(row.entry_price) * 100, 2) if float(row.entry_price) > 0 else 0.0
+                row.status = "closed"
+                row.closed_at = now
+                row.exit_price = current
+                row.pnl_pct = pnl
+                row.closed_reason = "kis_sold"
+                closed_count += 1
+                _log.info("sync_paper_from_kis: closed %s (not in KIS) pnl=%.2f%%", sym, pnl)
+
+        db.commit()
+
+    return {"opened": opened, "kis_sold": closed_count}
 
 
 def update_positions_unrealized(prices: dict[str, float]) -> None:
