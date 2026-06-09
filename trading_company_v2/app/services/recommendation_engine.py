@@ -522,8 +522,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                     _wave_leader_name = str(_wave_leader.get("name", _wave_sector))
                     _wave_leader_gap = float(_wave_leader.get("gap_pct", 0) or 0)
                     return {
-                        "action": "selective_probe",
-                        "size": "0.20x",
+                        "action": "probe_longs",
+                        "size": "0.25x",
                         "focus": (
                             f"sector_wave: {_wave_sector} 파동 "
                             f"({len(_leader_tickers)}종목 +{_wave_leader_gap:.0f}%↑) "
@@ -538,7 +538,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                         "notes": [
                             f"섹터 파동 감지: {_wave_sector} — {len(_leader_tickers)}개 종목 {_wave_leader_gap:.0f}%+ 급등",
                             f"미동참 laggard 종목: {', '.join(_laggard_in_universe)}",
-                            "같은 섹터 촉매 — 연대 상승 기대 / 0.20x 소형 진입",
+                            "같은 섹터 촉매 — 연대 상승 기대 / probe_longs 0.25x 진입",
                         ],
                         "quality_score": quality_score,
                     }
@@ -582,10 +582,11 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 3c. Strategy S24: 120일 고점 접근 (pre-breakout accumulation)
+    # ── 3c. Strategy S24/S26: 120일 고점 접근 (pre-breakout accumulation)
     # S22가 돌파 확인 후 진입이라면, S24는 돌파 직전 7% 이내 접근 시 선행 포지션
-    # 거래량 축적 + EMA20>EMA60 + RSI 적정 → 돌파 전 매집
-    # STRESSED만 차단, 0.15x 소형 (돌파 확인 전 리스크 최소화)
+    # S26 (gap_near_120d): S24 종목이 당일 갭업 +10% 이상이면 → probe_longs 0.25x 업그레이드
+    #   근거: 갭업 종목이 120일 고점 근처에 있으면 갭 촉매 + 기술적 돌파가 동시 작동
+    # STRESSED만 차단, 기본 0.15x 소형 (돌파 확인 전 리스크 최소화)
     if near_120d_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _is_paused("korea.near_120d"):
         _n120 = near_120d_candidates[0]  # dist_pct 내림차순 정렬 (0에 가장 가까운 것)
         _n120_ticker = str(_n120.get("ticker", ""))
@@ -593,27 +594,56 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         _n120_price = float(_n120.get("current_price", 0.0) or 0.0)
         _n120_dist = float(_n120.get("dist_pct", 0) or 0)
         _n120_syms = [str(c.get("ticker", "")) for c in near_120d_candidates if c.get("ticker")]
-        _n120_size = "0.12x" if (_k_vix_fear or _k_us_risk_off) else "0.15x"
-        return {
-            "action": "selective_probe",
-            "size": _n120_size,
-            "focus": (
+
+        # S26: 갭업 종목 여부 확인 — stock_leaders에 gap >= 10%로 포함되어 있으면 강화 진입
+        _leaders_gap_tickers = {str(c.get("ticker", "")) for c in stock_leaders if float(c.get("gap_pct", 0) or 0) >= 10.0}
+        _n120_gap_boost = _n120_ticker in _leaders_gap_tickers
+        _n120_leader_gap = next((float(c.get("gap_pct", 0)) for c in stock_leaders if str(c.get("ticker", "")) == _n120_ticker), 0.0)
+
+        if _n120_gap_boost and not _is_paused("korea.gap_near_120d"):
+            # S26: 갭 + 120일 고점 접근 → probe_longs, 0.25x
+            _n120_action = "probe_longs"
+            _n120_size = "0.18x" if (_k_vix_fear or _k_us_risk_off) else "0.25x"
+            _n120_tag = "gap_near_120d"
+            _n120_strat = "korea.gap_near_120d"
+            _n120_focus = (
+                f"gap_near_120d: {_n120_name} 갭+{_n120_leader_gap:.0f}% & "
+                f"120일 고점 {abs(_n120_dist):.1f}% 이내 — 돌파 임박"
+            )
+            _n120_notes = [
+                f"갭업 +{_n120_leader_gap:.1f}% (당일) + 120일 고점 {_n120.get('high_120d', 0):,.0f}원 ({_n120_dist:.2f}%)",
+                f"EMA20={_n120.get('ema20', 0):,.0f} / RSI={_n120.get('rsi14', 'n/a')} / vol={_n120.get('vol_ratio', 0):.1f}x",
+                "S26: 갭 촉매 + 기술적 돌파 임박 — probe_longs 0.25x / stop -2.0%",
+                "갭 + 고점 돌파 복합 신호: 오늘 갭으로 저항 돌파 시도 중",
+            ]
+        else:
+            # S24: 일반 near_120d → selective_probe, 0.15x
+            _n120_action = "selective_probe"
+            _n120_size = "0.12x" if (_k_vix_fear or _k_us_risk_off) else "0.15x"
+            _n120_tag = "near_120d"
+            _n120_strat = "korea.near_120d"
+            _n120_focus = (
                 f"near_120d: {_n120_name} 120일 고점 {abs(_n120_dist):.1f}% 이내 "
                 f"vol={_n120.get('vol_ratio', 0):.1f}x — 돌파 대기"
-            ),
-            "symbol": _n120_ticker,
-            "reference_price": _n120_price,
-            "candidate_prices": _bk_candidate_prices,
-            "candidate_symbols": _n120_syms[:3],
-            "focus_tag": "near_120d",
-            "strategy_id": "korea.near_120d",
-            "entry_profile": "near_120d",
-            "notes": [
+            )
+            _n120_notes = [
                 f"120일 고점 {_n120.get('high_120d', 0):,.0f}원 / 현재 {_n120_price:,.0f}원 ({_n120_dist:.2f}%)",
                 f"EMA20={_n120.get('ema20', 0):,.0f} / EMA60={_n120.get('ema60', 0):,.0f} / RSI={_n120.get('rsi14', 'n/a')}",
                 f"3일 거래량={_n120.get('vol_ratio', 0):.1f}x — 매집 신호",
                 "S24: 돌파 전 선행 포지션 — 0.15x 소형, 돌파 확인 시 S22로 추가 진입",
-            ],
+            ]
+        return {
+            "action": _n120_action,
+            "size": _n120_size,
+            "focus": _n120_focus,
+            "symbol": _n120_ticker,
+            "reference_price": _n120_price,
+            "candidate_prices": _bk_candidate_prices,
+            "candidate_symbols": _n120_syms[:3],
+            "focus_tag": _n120_tag,
+            "strategy_id": _n120_strat,
+            "entry_profile": _n120_tag,
+            "notes": _n120_notes,
             "quality_score": quality_score,
         }
 

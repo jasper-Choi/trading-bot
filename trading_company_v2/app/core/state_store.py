@@ -1245,8 +1245,12 @@ def _build_desk_stats(positions: list[PaperPositionRecord]) -> dict[str, dict]:
     desks = {"crypto", "korea", "us"}
     stats: dict[str, dict] = {}
     for desk in desks:
-        closed = [row for row in positions if row.desk == desk and row.status == "closed"]
-        open_rows = [row for row in positions if row.desk == desk and row.status == "open"]
+        all_closed = [row for row in positions if row.desk == desk and row.status == "closed"]
+        all_open = [row for row in positions if row.desk == desk and row.status == "open"]
+        # KIS 계좌 직접 보유 포지션(kis_hold)은 봇 진입 판단 외 — 통계에서 분리
+        # kis_hold unrealized loss가 allow_new_entries 차단 임계값을 왜곡하는 것을 방지
+        closed = [r for r in all_closed if "kis_hold" not in (r.entry_profile or "")]
+        open_rows = [r for r in all_open if "kis_hold" not in (r.entry_profile or "")]
         wins = sum(1 for row in closed if row.pnl_pct > 0)
         losses = sum(1 for row in closed if row.pnl_pct <= 0)
         stats[desk] = {
