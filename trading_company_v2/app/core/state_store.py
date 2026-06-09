@@ -718,17 +718,17 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "korea" and "near_120d" in focus:
         # S24: 120일 고점 접근 pre-breakout (2026-06-04 신설)
         # 돌파 전 포지션이므로 stop 타이트 (-3.0%) — 돌파 실패 시 빠른 손절
-        return 25.0, -3.0, 50000
+        # 2026-06-09: max_cycles 50000→5400 (~30h, 멀티데이 허용하되 무제한 방지)
+        return 25.0, -3.0, 5400
     if desk == "korea" and "sector_wave" in focus:
         # S25: 섹터 wave 미동참 종목 포착 (2026-06-04 신설)
         # 섹터 촉매 당일 진입 → 빠른 추세 확인, stop -3.5%
-        return 25.0, -3.5, 50000
+        # 2026-06-09: max_cycles 50000→2700 (~6h, 당일 촉매 소멸 전 청산)
+        return 25.0, -3.5, 2700
     if desk == "korea" and "breakout_120d" in focus:
         # S22: 120일 신고가 돌파 (2026-06-02 신설)
-        # B(20일) 대비 false positive 감소 → 승률 향상 기대 (포워드 테스트 중)
-        # stop -2.5%: 120일 돌파는 추세가 강하므로 B전략과 동일 stop
-        # max_cycles 50000: trail이 청산 제어
-        return 25.0, -2.5, 50000
+        # 2026-06-09: stop -2.5%→-2.0% (new_high_breakout과 동일 조정), max 50000→5400
+        return 25.0, -2.0, 5400
     if desk == "korea" and "mongtata_airborne" in focus:
         # 2026-05-21 백테스트 v2/v3 재검증 (115종목 3년):
         # stop -5.0% + EMA20 동적 청산: WR 41-50%, PF 1.50-1.80, MDD_port -7-9%
@@ -775,8 +775,9 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
     if desk == "korea" and "new_high_breakout" in focus:
         # 2026-05-21 백테스트 v3 재검증 (115종목 3년):
         # WR 32.9%, PF 1.86, Sharpe 2.73, stop -2.5%
-        # 2026-06-01: target 10→25%, max_cycles 50000 — trail이 청산 제어, 멀티데이 추세 허용
-        return 25.0, -2.5, 50000
+        # 2026-06-09: stop -2.5%→-2.0% (avg_loss 축소 → 손익비 0.85→개선)
+        #             max_cycles 50000→2700 (~6h): 장기보유 승률 21% 문제 해결, 자본 순환 확보
+        return 25.0, -2.0, 2700
     if desk == "korea" and action == "probe_longs":
         # 2026-05-19: stop -1.5% → -1.0% (avgLoss 축소 → 손익비 개선)
         return 25.0, -1.0, 2700
