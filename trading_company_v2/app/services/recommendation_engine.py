@@ -269,7 +269,17 @@ def _entry_quality_score(candidate: dict, payload: dict) -> tuple[float, str]:
     elif vr >= 1.5:
         score += 0.05
     elif vr < 1.2:
-        score -= 0.12   # 거래량 미수반 = 페널티
+        # RSI2 극단 과매도(≤10)는 vol 부재여도 신호 자체가 품질 — 패널티 면제
+        rsi2_val = float(candidate.get("rsi2", 99) or 99)
+        if rsi2_val > 10:
+            score -= 0.12   # 거래량 미수반 = 페널티 (일반 신호)
+
+    # 2b. RSI2 극단값 보너스 (하락장 과매도 반등 신뢰도 직접 반영)
+    rsi2_val = float(candidate.get("rsi2", 99) or 99)
+    if rsi2_val <= 5:
+        score += 0.20   # 극과매도 — 통계적 반등 확률 매우 높음
+    elif rsi2_val <= 10:
+        score += 0.12   # 강한 과매도
 
     # 3. 추격 매수 방지 — 이미 많이 오른 종목
     burst = float(candidate.get("burst_change_pct", 0.0) or 0.0)
@@ -711,7 +721,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         mt_symbols = [str(c.get("ticker", "")).strip() for c in mongtata_candidates if c.get("ticker")]
         return {
             "action": "probe_longs",
-            "size": "0.25x",  # stop -5% 리스크 → 사이즈 절반으로 손실 제한
+            "size": "0.35x",  # 2026-06-09: RANGING 하락장 반등 — 비중 확대
             "focus": f"mongtata_airborne: {mt_name} EMA20 대비 {mt_dev:.1f}% 이탈",
             "symbol": mt_ticker,
             "reference_price": mt_price,
@@ -736,9 +746,9 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     dual_rsi_candidates = [c for c in rsi2_candidates if c.get("dual_rsi")]
 
     for _mr_cands, _mr_size, _mr_strat, _mr_prof, _mr_note in [
-        (dual_rsi_candidates, "0.50x", "korea.dual_rsi", "dual_rsi",
+        (dual_rsi_candidates, "0.60x", "korea.dual_rsi", "dual_rsi",
          "백테스트 PASS: WR 47.1% / P&L 1.58 / Sharpe 1.55 / MDD -2.1%"),
-        (rsi2_candidates, "0.30x", "korea.rsi2_mean_reversion", "rsi2_mean_reversion",
+        (rsi2_candidates, "0.40x", "korea.rsi2_mean_reversion", "rsi2_mean_reversion",
          "백테스트 WATCH: OOS Sharpe 3.13 / IS P&L 1.44"),
     ]:
         if not _mr_cands:

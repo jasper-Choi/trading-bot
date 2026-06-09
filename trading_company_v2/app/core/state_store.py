@@ -1869,6 +1869,7 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 else:
                     trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
                 protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
+                _early_entry = int(position.cycles_open or 0) < 3  # 진입 직후 초기 변동성 구간
                 if position.pnl_pct >= target_pct:
                     _close_position(position, "target_hit")
                 elif position.pnl_pct <= stop_pct:
@@ -1892,7 +1893,8 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                         )
                     else:
                         _close_position(position, "stop_hit")
-                elif trail_giveback and position.pnl_pct <= protect_level:
+                elif trail_giveback and position.pnl_pct <= protect_level and not _early_entry:
+                    # trail은 진입 후 3사이클 이후부터 — 초기 변동성 오청산 방지 (2026-06-09)
                     _close_position(position, "korea_trail")
                 elif "mongtata_airborne" in pos_focus and "swing_recovery" not in pos_focus:
                     # ── S2 EMA20 동적 청산 (백테스트 v2/v3 검증: 2거래일+ 후 EMA20 회복시 청산) ──
@@ -2400,17 +2402,20 @@ def rapid_guard_korea_positions(prices: dict[str, float]) -> dict:
             else:
                 trail_giveback, profit_floor = _korea_trail_rules(peak_pnl)
             protect_level = max(profit_floor, peak_pnl - trail_giveback) if trail_giveback else 0.0
-            # 청산 판단 — swing_recovery는 넓은 stop 유지하므로 별도 처리 없음
+            # 청산 판단
+            _early_entry = int(position.cycles_open or 0) < 3  # 진입 직후 3사이클 초기 변동성 구간
             if position.pnl_pct >= target_pct and target_pct < 25.0:
                 # target이 25%인 probe_longs 같은 경우는 TP는 full-cycle에서만 처리
                 closed_symbols.append((position.symbol, "rapid_korea_target"))
                 _close_position(position, "rapid_korea_target")
                 paper_closed += 1
             elif position.pnl_pct <= stop_pct:
+                # stop은 초기에도 발동 (급락 방어)
                 closed_symbols.append((position.symbol, "rapid_korea_stop"))
                 _close_position(position, "rapid_korea_stop")
                 paper_closed += 1
-            elif trail_giveback and position.pnl_pct <= protect_level:
+            elif trail_giveback and position.pnl_pct <= protect_level and not _early_entry:
+                # trail은 진입 후 3사이클 이후부터 — 초기 틱 변동성에 의한 오청산 방지 (2026-06-09)
                 closed_symbols.append((position.symbol, "rapid_korea_trail"))
                 _close_position(position, "rapid_korea_trail")
                 paper_closed += 1
