@@ -1,5 +1,52 @@
 # Trading Company V2 Handoff
 
+## 최신: Claude - 2026-06-09 (KIS↔paper 영구 동기화 + kis_hold 손절 방지)
+
+### 커밋 `72d25c9`
+
+### 이번 세션에서 해결한 문제들
+
+#### 1. 봇 paper_positions ↔ KIS 모의투자 계좌 괴리 해결 (핵심 문제)
+- **문제**: 봇 paper_positions와 KIS 계좌가 불일치. 봇 내부 청산 로직이 KIS에 실제 매도 안 됨.
+- **원인**: `no_momentum_cut`이 삽입 후 5사이클 이내 -0.5% 이하면 자동 청산 → KIS 계좌와 달리 봇이 청산 처리
+
+**수정 내용 (state_store.py + orchestrator.py):**
+
+| 수정 | 내용 |
+|------|------|
+| `_position_thresholds` | `kis_hold` 케이스 추가: target=25%, stop=-50% (실질적 손절 없음), max_cycles=99999 |
+| `no_momentum_cut` 조건 | `"kis_hold" not in pos_focus` 예외 추가 — KIS 보유 포지션 자동 컷 방지 |
+| `sync_paper_from_kis()` | 신설: KIS 잔고 → paper_positions 자동 동기화 함수 |
+| `orchestrator.py` | KIS sync 직후 `sync_paper_from_kis()` 호출 — 매 사이클 자동 동기화 |
+
+**동작 방식:**
+- 매 사이클: KIS 잔고 읽기 → positions 테이블 sync → paper_positions 자동 동기화
+- KIS에 있는데 paper에 없으면 → `entry_profile='kis_hold'`로 open 추가
+- paper kis_hold에 있는데 KIS에 없으면 → `closed_reason='kis_sold'`로 처리
+
+**손절 방지 설계:**
+- `kis_hold` 포지션: stop=-50% (사실상 무한 보유)
+- trailing이 수익 구간에서만 작동 (peak_pnl < 1.0% → trail 없음)
+- 손실 중인 포지션은 자연 반등까지 계속 보유
+
+#### 2. 현재 KIS 모의투자 계좌 포지션 (2026-06-09 기준)
+| 종목 | 매입가 | 현재가 | pnl |
+|------|--------|--------|-----|
+| NAVER(035420) | 274,111 | 272,000 | -0.77% |
+| KODEX200(069500) | 140,456 | 124,240 | -11.55% |
+| 현대오토에버(307950) | 954,000 | 737,000 | -22.75% |
+| 디앤디파마텍(347850) | 83,363 | 79,800 | -4.27% |
+
+**전략: 익절 대기 (손절 없이 보유)**
+
+#### 3. 전략 파라미터 개선 (이전 세션 2026-06-08)
+- vol_mult: 1.5 → 2.0 (신호 품질 향상)
+- RSI 범위: 45-85 → 50-80 (최적화)
+- S23(pre_gap_watch) 비활성화 (WR=0%, n=2)
+- WR threshold 0.846 → 0.420 (현실화)
+
+---
+
 ## 0. Claude - 2026-06-01 (추세 탑승 전략 — 소액 수익 조기청산 방지)
 
 ### 커밋 `a238781`
