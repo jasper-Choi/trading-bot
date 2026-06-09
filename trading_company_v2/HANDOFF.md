@@ -1,6 +1,49 @@
 # Trading Company V2 Handoff
 
-## 최신: Claude - 2026-06-09 (KIS↔paper 영구 동기화 + kis_hold 손절 방지)
+## 최신: Claude - 2026-06-09 (allow_new_entries 복원 + S26 갭 전략 신설)
+
+### 커밋 `906f5ff`
+
+### 이번 세션에서 해결한 문제들
+
+#### 1. allow_new_entries=0 차단 해제 (근본 원인 수정)
+- **문제**: `allow_new_entries=0`으로 모든 신규 진입이 차단됨
+- **원인1**: NAVER 버그 루프 37건이 wins/losses에 포함 → 봇 판단 승률 23.1% (실제 63.6%)
+- **원인2**: kis_hold 포지션(-31%, -11%, -8%)의 unrealized loss가 active_combined_pnl을 -1.5% 이하로 끌어내림
+
+**수정 (state_store.py `_build_desk_stats`)**:
+- `entry_profile='kis_hold'`인 포지션을 wins/losses/unrealized_pnl 계산에서 완전 분리
+- 효과: 다음 사이클부터 `allow_new_entries=1` 자동 복원 → 확인됨 ✅
+- 효과: PM edge -0.129 → +0.251, bear_case "loss streak" 사라짐
+
+#### 2. S26 gap_near_120d 전략 신설
+- near_120d 종목이 당일 `stock_leaders`에서 gap >= 10%이면 S26로 자동 업그레이드
+- S24(selective_probe 0.15x) → S26(probe_longs 0.25x) 전환
+- 오늘 즉시 대상: HPSP(gap+22.2%), 유진테크(gap+16.1%)
+
+#### 3. sector_wave 강화
+- selective_probe(0.20x) → probe_longs(0.25x) 변경
+- 현재 semiconductor_equip 파동 활성: 리노공업(036930), 420770, 005290 laggard 대기
+
+#### 4. 현재 봇 상태 (2026-06-09 11:35 KST)
+| 항목 | 값 |
+|------|---|
+| allow_new_entries | 1 (복원) |
+| regime | RANGING |
+| stance | BALANCED |
+| korea_plan | sector_wave 리노공업 probe_longs 0.25x |
+| PM decision | approve, edge=+0.251 |
+
+#### 5. 현재 KIS 보유 포지션 (kis_hold, 봇 관리 외)
+| 종목 | pnl |
+|------|-----|
+| NAVER(035420) | -7.88% |
+| KODEX200(069500) | -11.62% |
+| 현대오토에버(307950) | -31.13% |
+
+---
+
+## 이전: Claude - 2026-06-09 (KIS↔paper 영구 동기화 + kis_hold 손절 방지)
 
 ### 커밋 `72d25c9`
 
