@@ -1731,6 +1731,11 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
                 position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
             position.cycles_open += 1
+            # KIS 계좌 직접 보유 포지션(kis_hold)은 봇이 관리하지 않음
+            # trail/stop/timeout 로직 완전 skip — KIS에서 직접 매도해야 청산됨
+            # 이 체크가 없으면: KIS sync가 kis_hold 생성 → trail/stop 즉시 청산 → 재생성 루프
+            if "kis_hold" in (position.entry_profile or ""):
+                continue
             pos_focus = " ".join(
                 str(part or "")
                 for part in (position.focus, position.entry_profile, position.strategy_id)
