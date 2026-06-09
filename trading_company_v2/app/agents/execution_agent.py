@@ -236,9 +236,18 @@ class ExecutionAgent(BaseAgent):
             return True
         return reason == "stale_exit" and pnl <= -0.5
 
+    @staticmethod
+    def _is_kis_hold(item: dict) -> bool:
+        """KIS 계좌 직접 보유 포지션 여부 — 봇 운용 슬롯 계산에서 제외."""
+        return "kis_hold" in (item.get("entry_profile", "") or "")
+
     def _desk_open_notional(self, desk: str) -> float:
         return round(
-            sum(self._size_to_notional(str(item.get("size", "0.00x"))) for item in self.open_positions if item.get("desk") == desk),
+            sum(
+                self._size_to_notional(str(item.get("size", "0.00x")))
+                for item in self.open_positions
+                if item.get("desk") == desk and not self._is_kis_hold(item)
+            ),
             2,
         )
 
@@ -248,7 +257,7 @@ class ExecutionAgent(BaseAgent):
             sum(
                 self._size_to_notional(str(item.get("size", "0.00x")))
                 for item in self.open_positions
-                if str(item.get("desk") or "") in active_desks
+                if str(item.get("desk") or "") in active_desks and not self._is_kis_hold(item)
             ),
             2,
         )
@@ -262,7 +271,8 @@ class ExecutionAgent(BaseAgent):
         )
 
     def _desk_open_count(self, desk: str) -> int:
-        return sum(1 for item in self.open_positions if item.get("desk") == desk)
+        # KIS 계좌 직접 보유 포지션은 봇 운용 슬롯에서 제외
+        return sum(1 for item in self.open_positions if item.get("desk") == desk and not self._is_kis_hold(item))
 
     def _has_open_position(self, desk: str, symbol: str) -> bool:
         if symbol:
@@ -1033,8 +1043,13 @@ class ExecutionAgent(BaseAgent):
             _pyramid_open = sum(1 for p in self.open_positions if p.get("desk") == desk and "pyramid" in (p.get("entry_profile", "") or "").lower())
             desk_position_cap_hit = _pyramid_open >= 1
         else:
-            # Regular slot: exclude pyramid positions from count
-            _non_pyramid_open = sum(1 for p in self.open_positions if p.get("desk") == desk and "pyramid" not in (p.get("entry_profile", "") or "").lower())
+            # Regular slot: exclude pyramid positions AND kis_hold (KIS 계좌 직접 보유) from count
+            _non_pyramid_open = sum(
+                1 for p in self.open_positions
+                if p.get("desk") == desk
+                and "pyramid" not in (p.get("entry_profile", "") or "").lower()
+                and not self._is_kis_hold(p)
+            )
             desk_position_cap_hit = _non_pyramid_open >= max_positions
         # Per-strategy Korea slot limits (prevent duplicate open_reversal / close_drive)
         if desk == "korea" and action in actionable_entries and not _is_pyramid_entry:
