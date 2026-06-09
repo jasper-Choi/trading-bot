@@ -1851,6 +1851,11 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     _close_position(position, "no_momentum_cut")
                     continue
 
+                # KIS 계좌 직접 보유 포지션: 자동 청산(stop/trail) 없음
+                # KIS에서 수동 매도 시 sync_paper_from_kis()가 closed 처리 (2026-06-09)
+                if "kis_hold" in pos_focus:
+                    continue
+
                 # 전략별 전용 trail 규칙 사용 (백테스트 검증값)
                 if "new_high_breakout" in pos_focus:
                     trail_giveback, profit_floor = _korea_newhi_trail_rules(peak_pnl)
@@ -2376,6 +2381,11 @@ def rapid_guard_korea_positions(prices: dict[str, float]) -> dict:
                 str(part or "")
                 for part in (position.focus, position.entry_profile, position.strategy_id)
             )
+            # KIS 계좌 직접 보유 포지션 — 현재가/pnl 업데이트만 하고 청산 판단 완전 스킵
+            # (trail/stop 발동 → sync_paper_from_kis가 재오픈 → 무한루프 방지 2026-06-09)
+            if "kis_hold" in pos_focus:
+                db.add(position)
+                continue
             target_pct, stop_pct, _ = _position_thresholds(position.desk, position.action, pos_focus)
             peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
             # 전략별 trail 규칙
@@ -2969,9 +2979,9 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
                 pnl_pct=pnl,
                 cycles_open=0,
                 closed_reason="",
-                focus="",
+                focus="kis_hold",
                 peak_pnl_pct=max(pnl, 0.0),
-                strategy_id="korea.new_high_breakout",
+                strategy_id="korea.kis_hold",
                 entry_profile="kis_hold",
                 is_pyramided=False,
                 strategy_type="hold_until_profit",
