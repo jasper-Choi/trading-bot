@@ -1661,6 +1661,9 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
             for _row in _all_recent:
                 _recent_closed_for_risk.append(_row)
                 if (_row.closed_at or "") >= _start_iso:
+                    # kis_hold 포지션은 봇 운용 외 → circuit breaker daily_pnl 계산에서 제외
+                    if "kis_hold" in (str(_row.entry_profile or "")):
+                        continue
                     d = _row.desk
                     _today_pnl_by_desk[d] = _today_pnl_by_desk.get(d, 0.0) + float(_row.pnl_pct or 0.0)
                     _today_n_by_desk[d] = _today_n_by_desk.get(d, 0) + 1
