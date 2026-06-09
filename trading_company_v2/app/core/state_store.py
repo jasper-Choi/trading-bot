@@ -530,6 +530,42 @@ def _notify_trade_exit(payload: dict, reason: str) -> None:
     threading.Thread(target=_send, name="telegram-trade-exit", daemon=True).start()
 
 
+def _send_kis_sell_async(symbol: str, reason: str, entry_profile: str) -> None:
+    """paper stop-cut 발생 시 KIS VTS 계좌에도 매도 주문 자동 발송 (fire-and-forget).
+
+    조건:
+    - desk=korea 인 포지션만 (crypto/us 제외)
+    - 봇이 직접 매수한 종목만 (kis_hold/kis_manual_sync 제외 — 이미 KIS에 있던 것)
+    - 장중이 아니면 KIS API가 거부하므로 결과는 로그로만 남기고 블록하지 않음
+    """
+    import threading
+
+    def _do_sell() -> None:
+        try:
+            from app.core.models import PaperOrder
+            from app.services import kis_broker
+            order = PaperOrder(
+                desk="korea",
+                action="reduce_risk",
+                focus=f"auto_stop_sell:{reason}",
+                size="1.00x",
+                symbol=symbol,
+                strategy_id="auto_stop",
+                entry_profile=entry_profile,
+                rationale=[f"paper stop-cut → KIS sell-through ({reason})"],
+            )
+            result = kis_broker.place_order(order)
+            _log.info(
+                "KIS auto-sell %s: ok=%s mode=%s msg=%s",
+                symbol, result.ok, result.request_mode,
+                result.detail.get("msg1") or result.detail.get("reason") or "",
+            )
+        except Exception as exc:
+            _log.warning("KIS auto-sell %s failed: %s", symbol, exc)
+
+    threading.Thread(target=_do_sell, name=f"kis-auto-sell-{symbol}", daemon=True).start()
+
+
 def _build_price_lookup(market_snapshot: dict) -> dict[tuple[str, str], float]:
     lookup: dict[tuple[str, str], float] = {}
     for item in market_snapshot.get("crypto_leaders", []):
@@ -1469,6 +1505,11 @@ def _close_position(position: PaperPositionRecord, reason: str) -> None:
         ).scalar_one_or_none()
         if shadow is not None:
             session.delete(shadow)
+            # [2026-06-09] paper stop-cut 시 KIS VTS에도 매도 주문 자동 발송
+            # 조건: korea 데스크 + 봇이 직접 매수한 포지션 (kis_hold/kis_manual_sync 제외)
+            _ep = str(position.entry_profile or "")
+            if position.desk == "korea" and "kis_hold" not in _ep and "kis_manual_sync" not in _ep:
+                _send_kis_sell_async(position.symbol, reason, _ep)
     _notify_trade_exit(_paper_trade_payload(position), reason)
 
 

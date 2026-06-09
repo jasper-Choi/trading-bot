@@ -440,7 +440,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # 트럼프/머스크 발언, US 밤사이 급등, 종목 뉴스 급증을 조합한 선행 포착
     # 갭이 발생하기 전 장 초반에 진입 — S20(post-gap)보다 1단계 앞선 예측형 전략
     # NAVER +26.7% 같은 케이스를 사전 포착하기 위한 매크로-뉴스 드리븐 전략
-    if pre_gap_watch_candidates and stance != "DEFENSE" and not _is_paused("korea.pre_gap_watch"):
+    # [2026-06-09] RANGING/STRESSED 레짐에서는 비활성화 — 뉴스 촉매도 추세 없는 장에서 즉시 되돌림
+    if pre_gap_watch_candidates and stance != "DEFENSE" and regime not in {"RANGING", "STRESSED"} and not _is_paused("korea.pre_gap_watch"):
         _pg = pre_gap_watch_candidates[0]
         _pg_ticker = str(_pg.get("ticker", ""))
         _pg_name = str(_pg.get("name", _pg_ticker))
