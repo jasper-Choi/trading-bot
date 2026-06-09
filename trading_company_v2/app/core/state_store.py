@@ -1251,6 +1251,19 @@ def _build_desk_stats(positions: list[PaperPositionRecord]) -> dict[str, dict]:
         # kis_hold unrealized loss가 allow_new_entries 차단 임계값을 왜곡하는 것을 방지
         closed = [r for r in all_closed if "kis_hold" not in (r.entry_profile or "")]
         open_rows = [r for r in all_open if "kis_hold" not in (r.entry_profile or "")]
+        # 루프 버그 감지: 같은 종목이 세션 내 10건 초과 청산 = 비정상 반복 진입/청산
+        # realized_pnl 오염 방지 — max 3슬롯 정상 운용 시 한 종목 10건 초과 불가
+        _ticker_count: dict[str, int] = {}
+        for r in closed:
+            sym = r.symbol or ""
+            _ticker_count[sym] = _ticker_count.get(sym, 0) + 1
+        _loop_bug_tickers = {sym for sym, n in _ticker_count.items() if n > 10}
+        if _loop_bug_tickers:
+            _log.warning(
+                "loop_bug_detected: desk=%s tickers=%s — excluding from realized_pnl stat",
+                desk, _loop_bug_tickers,
+            )
+            closed = [r for r in closed if r.symbol not in _loop_bug_tickers]
         wins = sum(1 for row in closed if row.pnl_pct > 0)
         losses = sum(1 for row in closed if row.pnl_pct <= 0)
         stats[desk] = {
@@ -1658,11 +1671,21 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 .order_by(PaperPositionRecord.id.desc())
                 .limit(200)
             ).scalars().all()
+            # 루프 버그 감지: 오늘 같은 desk+종목 10건 초과 = 비정상 반복 → circuit breaker 제외
+            _today_ticker_count: dict[tuple, int] = {}
+            for _row in _all_recent:
+                if (_row.closed_at or "") >= _start_iso and "kis_hold" not in (str(_row.entry_profile or "")):
+                    _key = (_row.desk, _row.symbol)
+                    _today_ticker_count[_key] = _today_ticker_count.get(_key, 0) + 1
+            _loop_bug_keys = {k for k, n in _today_ticker_count.items() if n > 10}
             for _row in _all_recent:
                 _recent_closed_for_risk.append(_row)
                 if (_row.closed_at or "") >= _start_iso:
                     # kis_hold 포지션은 봇 운용 외 → circuit breaker daily_pnl 계산에서 제외
                     if "kis_hold" in (str(_row.entry_profile or "")):
+                        continue
+                    # 루프 버그 종목 제외 (10건 초과 = 정상 운용 불가)
+                    if (_row.desk, _row.symbol) in _loop_bug_keys:
                         continue
                     d = _row.desk
                     _today_pnl_by_desk[d] = _today_pnl_by_desk.get(d, 0.0) + float(_row.pnl_pct or 0.0)
