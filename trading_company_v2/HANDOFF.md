@@ -1,6 +1,40 @@
 # Trading Company V2 Handoff
 
-## 최신: Claude - 2026-06-09 세션3 (성과 진단 + 3중 구조 수정)
+## 최신: Claude - 2026-06-10 세션4 (전략 5종 개선 + 봇 재배포)
+
+### 커밋 순서 (세션4)
+1. `80de8e9` — **S27/S29 신규전략 + sector_wave 사이즈 보정 + EMA200 완화 + RANGING pre_gap 차단**
+
+---
+
+### 세션4에서 구현한 5가지 개선
+
+#### [1] pre_gap_watch RANGING 진입 차단
+- `recommendation_engine.py`: `regime not in {"RANGING","STRESSED"}` 가드 추가
+- RANGING 장에서 갭 모멘텀 오신호 방지
+
+#### [2] sector_wave stop_pressure 억제 해제
+- `execution_agent.py`: `_is_sector_wave` → `stop_pressure_scale=1.0`
+- 0.15x size floor 추가 (stop_pressure != "high" 조건)
+- 기존: base 0.25x × risk_budget 0.18 × stop_pressure 0.5 × cold_streak 0.5 ≈ 0.01x → 정상화
+
+#### [3] EMA200 필터 완화
+- `korea_stock_desk_agent.py`: `closes[-1] <= ema200 * 0.95` (기존 `<= ema200`)
+- RANGING 장에서 EMA200 근처 종목도 mongtata/RSI2 후보 포함
+
+#### [4] S27: 볼린저 밴드 스퀴즈 → 상향 돌파
+- `korea_stock_desk_agent.py`: `bb_width_ratio < 4%` 스퀴즈 감지 + upper_bb 돌파
+- `recommendation_engine.py`: `bb_squeeze` 전략 블록 (OFFENSE: 0.35x, 그외: 0.25x)
+- `state_store.py`: `candidate_keys`에 `bb_squeeze_candidates` 등록
+
+#### [5] S29: 거래량 폭발 + 가격 횡보 (세력 집결)
+- `korea_stock_desk_agent.py`: `vol_ratio ≥ 5.0x` + `price_chg < 2%` 스캐너
+- `recommendation_engine.py`: `volume_surge` 전략 블록 (0.20x, STRESSED 제외)
+- `state_store.py`: `candidate_keys`에 `volume_surge_candidates` 등록
+
+---
+
+## 이전: Claude - 2026-06-09 세션3 (성과 진단 + 3중 구조 수정)
 
 ### 커밋 순서 (세션3)
 1. `9948f77` — **stop-cut→KIS sell 연동 + RANGING 진입 차단 + VTS 청산 크론**
@@ -60,12 +94,29 @@ regime = RANGING
 
 ---
 
+### 세션4 현재 상태 (종료 시점)
+
+```
+봇 PID: 3900243 (재시작됨 02:31 UTC)
+커밋: 80de8e9
+신규 전략: S27(bb_squeeze), S29(volume_surge) 활성
+regime = RANGING, stance = BALANCED, risk_budget = 0.18
+```
+
+**남은 kis_hold 포지션 (307950/069500/035420 청산 완료):**
+| 종목 | profile | 비고 |
+|---|---|---|
+| 035420 NAVER | kis_hold | -7.15% 보유 중, 익절 대기 |
+| 420770 (반도체장비) | kis_hold | +0.35% 유지 |
+| 036930 주성엔지니어링 | kis_hold | 사용자 15주 실계좌 보유 |
+
 ### 잔여 이슈
 
-1. **VTS 자동 매도 확인**: 2026-06-10 09:05 KST에 `sell_stuck_vts.py` 실행 여부 확인
-   - 로그: `/home/ubuntu/trading-bot/trading_company_v2/logs/sell_stuck_vts.log`
-2. **420770 probe_longs**: 모의투자 24주 보유 중, 추적 필요
-3. **Fix 2 검증**: 다음 stop-cut 발생 시 KIS 자동 매도가 실제로 실행되는지 로그 확인
+1. **NAVER 익절 대기**: VTS에서 -7.15%, 수익 회복 시 수동 매도
+2. **S27/S29 실전 확인**: 장중 bb_squeeze_candidates / volume_surge_candidates 신호 로그 확인
+   - `journalctl -u trading-loop.service -f | grep -E "bb_squeeze|volume_surge"`
+3. **Fix 2 검증**: 다음 stop-cut 발생 시 KIS 자동 매도 로그 확인
+   - `journalctl -u trading-loop.service | grep "KIS auto-sell"`
 
 ---
 
