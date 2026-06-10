@@ -1,6 +1,52 @@
 # Trading Company V2 Handoff
 
-## 최신: Claude - 2026-06-10 세션4 (전략 5종 개선 + 봇 재배포)
+## 최신: Claude - 2026-06-10 세션4 파트2 (전략 회고 + 4가지 추가 개선)
+
+### 커밋 순서 (세션4 파트2)
+1. `80de8e9` — S27/S29 신규전략 + sector_wave 사이즈 보정 + EMA200 완화 + RANGING pre_gap 차단
+2. `e784dcd` — **전략 회고 기반 4가지 개선 (진입차단 완화 + mongtata 필터 + breakout_120d 강화 + 신호임계값)**
+
+---
+
+### 최종 상태 (세션4 파트2 종료)
+```
+allow_new_entries: True  ✅ (pending order 해소로 복구)
+pending live orders: 0건 ✅
+봇 오픈 포지션: 420770 기가비스 +5.34%, 036930 주성엔지 +3.11% (모두 kis_hold)
+regime=RANGING, stance=BALANCED, risk_budget=0.18
+내일(06-11) 오전 장 오픈 시 신규 전략 가동 예정
+```
+
+### 세션4 파트2 회고 결과 및 개선
+
+#### 진단된 문제
+| 문제 | 원인 | 영향 |
+|---|---|---|
+| allow_new_entries=0 | Korea floor -1.5%, 오늘 청산으로 combined_pnl << -1.5% | 종일 진입 차단 |
+| mongtata 추세하락 진입 | deviation -18%, -12% 종목에도 진입 시도 | 손실 리스크 |
+| breakout_120d 미발동 | 모두 0.20x selective_probe, 강돌파도 동일 처리 | 기회 미활용 |
+| new_high_breakout 되돌림 손절 | signal_score 0.50이면 진입 → 약한 신호 포함 | rapid_korea_stop 남발 |
+
+#### [A] allow_new_entries floor 완화
+- `orchestrator.py` + `risk_committee_agent.py`: `-1.5%` → `-4.0%`
+- 포지션 정리일의 paper PnL sum이 threshold를 건드리지 않도록
+
+#### [B] mongtata_airborne 필터 + 사이즈
+- `recommendation_engine.py`: `deviation_pct >= -12.0%` 필터
+- 삼성SDI(-18%), HD현대(-12%) 같은 추세하락 차단
+- 사이즈: 0.35x → 0.25x
+
+#### [C] breakout_120d 강돌파 → probe_longs 0.30x
+- `breakout_pct >= 5%`: `probe_longs 0.30x` (기존 모두 `selective_probe 0.20x`)
+- 120일 신고가 5%+ 돌파 시 비중 확대
+
+#### [D] new_high_breakout signal_score 강화
+- `0.50 → 0.65` (confirmed), `0.52 → 0.65` (partial)
+- 약한 신호 필터링 → 갭 되돌림 rapid_korea_stop 감소
+
+---
+
+## 이전: Claude - 2026-06-10 세션4 (전략 5종 개선 + 봇 재배포)
 
 ### 커밋 순서 (세션4)
 1. `80de8e9` — **S27/S29 신규전략 + sector_wave 사이즈 보정 + EMA200 완화 + RANGING pre_gap 차단**
