@@ -49,7 +49,8 @@ class RiskCommitteeAgent(BaseAgent):
         compounding_mode = str(capital_profile.get("mode", "neutral") or "neutral")
         profit_buffer_pct = float(capital_profile.get("profit_buffer_pct", 0.0) or 0.0)
         global_multiplier = float(capital_profile.get("global_multiplier", 1.0) or 1.0)
-        drawdown_entry_floor = -20.0 if active_desks == {"crypto"} else -1.5
+        # [2026-06-10] Korea floor -1.5% → -4.0%: orchestrator와 동일 기준으로 통일
+        drawdown_entry_floor = -20.0 if active_desks == {"crypto"} else -4.0
         state.allow_new_entries = state.regime != "STRESSED" and combined_pnl > drawdown_entry_floor
         if active_desks == {"crypto"} and combined_pnl <= -1.5 and state.allow_new_entries:
             note = f"crypto recovery mode keeps entries open at throttled risk ({combined_pnl:.2f}% active P&L)"

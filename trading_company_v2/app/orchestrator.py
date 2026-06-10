@@ -839,7 +839,9 @@ class CompanyOrchestrator:
             + float((active_desk_stats.get(desk, {}) or {}).get("unrealized_pnl_pct", 0.0) or 0.0)
             for desk in active_desks
         )
-        drawdown_entry_floor = -6.0 if active_desks == {"crypto"} else -1.5
+        # [2026-06-10] Korea floor -1.5% → -4.0%: 의도적 청산/정리 日에 봇이 완전 차단되는 것 방지
+        # -4.0%는 실제 트레이딩 손실 기준으로도 충분한 circuit breaker (포지션 크기 감안)
+        drawdown_entry_floor = -6.0 if active_desks == {"crypto"} else -4.0
         provisional_allow_new_entries = state.regime != "STRESSED" and active_combined_pnl > drawdown_entry_floor
         if active_desks == {"crypto"} and active_combined_pnl <= -1.5 and provisional_allow_new_entries:
             state.notes.append(

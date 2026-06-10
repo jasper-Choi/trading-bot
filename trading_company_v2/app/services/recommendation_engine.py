@@ -562,11 +562,21 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         _b120_name = str(_b120.get("name", _b120_ticker))
         _b120_price = float(_b120.get("current_price", 0.0) or 0.0)
         _b120_syms = [str(c.get("ticker", "")) for c in _s22_candidates if c.get("ticker")]
-        _b120_size = "0.15x" if (_k_vix_fear or _k_us_risk_off) else "0.20x"
+        _b120_breakout_pct = float(_b120.get("breakout_pct", 0) or 0)
+        # [2026-06-10] 강돌파(≥5%) → probe_longs 0.30x 업그레이드 (기존 모두 0.20x selective_probe)
+        #   근거: 120일 신고가를 5%+ 돌파한 종목은 추세 방향이 매우 명확 → 비중 확대 정당
+        if _b120_breakout_pct >= 5.0 and not (_k_vix_fear or _k_us_risk_off):
+            _b120_action = "probe_longs"
+            _b120_size = "0.30x"
+            _b120_type = "강돌파"
+        else:
+            _b120_action = "selective_probe"
+            _b120_size = "0.15x" if (_k_vix_fear or _k_us_risk_off) else "0.20x"
+            _b120_type = "표준돌파"
         return {
-            "action": "selective_probe",
+            "action": _b120_action,
             "size": _b120_size,
-            "focus": f"breakout_120d: {_b120_name} 120일 신고가 +{_b120.get('breakout_pct', 0):.1f}% vol={_b120.get('vol_ratio', 0):.1f}x",
+            "focus": f"breakout_120d({_b120_type}): {_b120_name} 120일 신고가 +{_b120_breakout_pct:.1f}% vol={_b120.get('vol_ratio', 0):.1f}x",
             "symbol": _b120_ticker,
             "reference_price": _b120_price,
             "candidate_prices": _bk_candidate_prices,
@@ -575,10 +585,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "strategy_id": "korea.breakout_120d",
             "entry_profile": "breakout_120d",
             "notes": [
-                f"120일 신고가 {_b120.get('high_120d', 0):,.0f}원 → 현재 {_b120_price:,.0f}원 (+{_b120.get('breakout_pct', 0):.2f}%)",
+                f"120일 신고가 {_b120.get('high_120d', 0):,.0f}원 → 현재 {_b120_price:,.0f}원 (+{_b120_breakout_pct:.2f}%)",
                 f"EMA20={_b120.get('ema20', 0):,.0f} / RSI={_b120.get('rsi14', 'n/a')} / vol={_b120.get('vol_ratio', 0):.1f}x",
                 f"적격 종목 {len(_s22_candidates)}개 (breakout≥2% + vol≥1.5x + RSI≥55)",
-                "RANGING 허용: 섹터 촉매 개별 돌파 — 0.20x selective_probe",
+                f"{'강돌파(≥5%) → probe_longs 0.30x' if _b120_action == 'probe_longs' else 'RANGING 허용: 섹터 촉매 개별 돌파 — 0.20x selective_probe'}",
             ],
             "quality_score": quality_score,
         }
@@ -660,7 +670,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
         bk_signal = float(bk_leader.get("signal_score", 0.0) or 0.0)
         # 현재 bullish 확인 필수 (과거 돌파만으로는 추세 반전 가능)
-        if bk_bias != "bullish" or bk_signal < 0.50:
+        # [2026-06-10] signal_score 임계값 0.50 → 0.65: 약한 신호 진입 감소 (갭 직후 되돌림 방지)
+        if bk_bias != "bullish" or bk_signal < 0.65:
             return {
                 "action": "stand_by",
                 "size": "0.00x",
@@ -711,7 +722,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
         bk_signal = float(bk_leader.get("signal_score", 0.0) or 0.0)
-        if bk_bias != "bullish" or bk_signal < 0.52:
+        # [2026-06-10] partial도 0.52 → 0.65로 통일 (confirmed와 동일 기준)
+        if bk_bias != "bullish" or bk_signal < 0.65:
             return {
                 "action": "stand_by",
                 "size": "0.00x",
@@ -740,20 +752,24 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # ── 5. Strategy S2: MONGTATA — RANGING에서 평균회귀 용도로 허용 (사이즈 0.25x 축소)
     # 백테스트 구조 문제(-5% stop)는 유지하되 사이즈 축소로 손실 제한
     # RANGING: 볼린저 하단 반등 패턴 유효, WR 84.5% 활용
+    # [2026-06-10] deviation_pct 제한: -12% 초과 낙폭은 단순 dip이 아닌 추세 하락
+    #   삼성SDI -18.16%, HD현대 -12.08% → 이런 경우는 반등이 아닌 추가 하락 리스크가 큼
     mongtata_candidates = payload.get("mongtata_airborne_candidates", []) or []
-    if mongtata_candidates and stance != "DEFENSE" and not _is_paused("korea.mongtata_airborne"):
-        mt_leader = mongtata_candidates[0]
+    # deviation_pct 필터 적용: -12% 이내인 후보만 허용
+    _mt_filtered = [c for c in mongtata_candidates if float(c.get("deviation_pct", -99) or -99) >= -12.0]
+    if _mt_filtered and stance != "DEFENSE" and not _is_paused("korea.mongtata_airborne"):
+        mt_leader = _mt_filtered[0]
         mt_ticker = str(mt_leader.get("ticker", ""))
         mt_name = str(mt_leader.get("name", mt_ticker))
         mt_dev = float(mt_leader.get("deviation_pct", 0.0) or 0.0)
         mt_ema20 = float(mt_leader.get("ema20", 0.0) or 0.0)
         mt_lower_bb = float(mt_leader.get("lower_bb", 0.0) or 0.0)
         mt_price = float(mt_leader.get("current_price", 0.0) or 0.0)
-        mt_symbols = [str(c.get("ticker", "")).strip() for c in mongtata_candidates if c.get("ticker")]
+        mt_symbols = [str(c.get("ticker", "")).strip() for c in _mt_filtered if c.get("ticker")]
         return {
             "action": "probe_longs",
-            "size": "0.35x",  # 2026-06-09: RANGING 하락장 반등 — 비중 확대
-            "focus": f"mongtata_airborne: {mt_name} EMA20 대비 {mt_dev:.1f}% 이탈",
+            "size": "0.25x",  # [2026-06-10] 0.35x → 0.25x: RANGING 낙폭 반등 리스크 반영
+            "focus": f"mongtata_airborne: {mt_name} EMA20 대비 {mt_dev:.1f}% 이탈 (dip)",
             "symbol": mt_ticker,
             "reference_price": mt_price,
             "candidate_symbols": mt_symbols[:3],
@@ -762,8 +778,8 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "entry_profile": "mongtata_airborne",
             "notes": [
                 f"close < lower_BB={mt_lower_bb:,.0f}원 / EMA20={mt_ema20:,.0f}원 (이탈 {mt_dev:.2f}%)",
-                f"총 {len(mongtata_candidates)}개 종목 신호 발생",
-                "EMA200 상승장 레짐 필터 통과",
+                f"적격 후보 {len(_mt_filtered)}개 (deviation ≥-12% 필터, 전체 {len(mongtata_candidates)}개 중)",
+                "EMA200 95% 이상 필터 통과 + dip 범위 -12% 이내 확인",
                 "백테스트: Sharpe 8.60 / WR 56.5% / MDD -5.9%",
             ],
             "quality_score": quality_score,
