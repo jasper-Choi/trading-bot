@@ -599,6 +599,8 @@ def _build_korea_ema20_lookup(market_snapshot: dict) -> dict[str, float]:
         "close_panic_candidates",
         "gap_momentum_candidates",
         "inst_foreign_candidates",
+        "bb_squeeze_candidates",
+        "volume_surge_candidates",
     )
     for key in candidate_keys:
         for item in market_snapshot.get(key, []):

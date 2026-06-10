@@ -954,7 +954,10 @@ class ExecutionAgent(BaseAgent):
         elif action == "probe_longs" and desk_stop_pressure == "high":
             action = "selective_probe"
             downgrade_notes.append(f"{desk} desk stop pressure high, reduced to selective_probe")
-        stop_pressure_scale = 0.5 if desk_stop_pressure == "medium" else 1.0
+        # [2026-06-10] sector_wave는 섹터 레벨 신호 — 개별/데스크 stop_pressure로 억제하지 않음
+        # 근거: 7종목 +18% 파동을 포착했는데 개별 종목 히스토리 때문에 0.01x로 눌리는 것은 비합리적
+        _is_sector_wave = str(plan.get("strategy_id", "") or "").endswith("sector_wave")
+        stop_pressure_scale = 1.0 if _is_sector_wave else (0.5 if desk_stop_pressure == "medium" else 1.0)
         scaled_notional_pct = round(risk_scaled_notional * stop_pressure_scale, 2)
         if (
             desk == "korea"
@@ -985,6 +988,10 @@ class ExecutionAgent(BaseAgent):
         strategy_recovery_allowed = self._strategy_recovery_allowed(desk, _sid_early, action)
         if strategy_recovery_allowed and scaled_notional_pct < 0.10 and desk_stop_pressure != "high":
             scaled_notional_pct = 0.10
+        # [2026-06-10] sector_wave 최소 0.15x 보장 — 파동 신호가 강하면 최소 진입 보장
+        if _is_sector_wave and scaled_notional_pct < 0.15 and desk_stop_pressure != "high":
+            scaled_notional_pct = 0.15
+            rotation_notes.append("sector_wave: size floor 0.15x applied (섹터 파동 최소 보장)")
         size = f"{scaled_notional_pct:.2f}x"
         notional_pct = scaled_notional_pct
         reference_price = self._reference_price(desk, symbol)

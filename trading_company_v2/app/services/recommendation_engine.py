@@ -900,16 +900,79 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 10. 신호 없음 → 관망 ──────────────────────────────────────────────
+    # ── 10. Strategy S27: 볼린저 밴드 스퀴즈 → 상향 돌파 (레짐 무관) ──────────
+    # RANGING이 오히려 최적 — 압축 후 방향 분출, 추세장과 횡보장 모두 가능
+    # BB폭(4σ/EMA20) < 4% → 에너지 축적 완료 → 상향 돌파 시 즉시 진입
+    bb_squeeze_candidates = payload.get("bb_squeeze_candidates", []) or []
+    if bb_squeeze_candidates and stance != "DEFENSE" and not _is_paused("korea.bb_squeeze"):
+        _sq = bb_squeeze_candidates[0]
+        _sq_ticker = str(_sq.get("ticker", ""))
+        _sq_name = str(_sq.get("name", _sq_ticker))
+        _sq_price = float(_sq.get("current_price", 0.0) or 0.0)
+        _sq_syms = [str(c.get("ticker", "")) for c in bb_squeeze_candidates if c.get("ticker")]
+        _sq_width = float(_sq.get("bb_width_ratio_pct", 0.0) or 0.0)
+        _sq_size = "0.35x" if stance == "OFFENSE" else "0.25x"
+        return {
+            "action": "probe_longs",
+            "size": _sq_size,
+            "focus": f"bb_squeeze: {_sq_name} ({_sq_ticker}) BB폭 {_sq_width:.1f}% 압축 → 상향 돌파",
+            "symbol": _sq_ticker,
+            "reference_price": _sq_price,
+            "candidate_symbols": _sq_syms[:3],
+            "focus_tag": "bb_squeeze_breakout",
+            "strategy_id": "korea.bb_squeeze",
+            "entry_profile": "bb_squeeze_breakout",
+            "notes": [
+                f"볼린저 밴드 폭 {_sq_width:.1f}% — 4% 미만 압축 상태에서 상단 돌파",
+                f"총 {len(bb_squeeze_candidates)}종목 신호",
+                "S27: 에너지 압축 → 방향 분출 — 레짐 무관 작동 (RANGING 최적)",
+                "trail: _korea_trail_rules / stop -2.0%",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 11. Strategy S29: 거래량 폭발 + 가격 횡보 (세력 집결) ────────────────
+    # 평균 대비 5배+ 거래량 && 가격 변동 2% 미만 = 대량 매집 후 급등 전조
+    # 레짐 무관, 단 STRESSED에서는 차단
+    volume_surge_candidates = payload.get("volume_surge_candidates", []) or []
+    if volume_surge_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _is_paused("korea.volume_surge"):
+        _vs = volume_surge_candidates[0]
+        _vs_ticker = str(_vs.get("ticker", ""))
+        _vs_name = str(_vs.get("name", _vs_ticker))
+        _vs_price = float(_vs.get("current_price", 0.0) or 0.0)
+        _vs_syms = [str(c.get("ticker", "")) for c in volume_surge_candidates if c.get("ticker")]
+        _vs_ratio = float(_vs.get("vol_ratio", 0.0) or 0.0)
+        return {
+            "action": "selective_probe",
+            "size": "0.20x",
+            "focus": f"volume_surge: {_vs_name} ({_vs_ticker}) 거래량 {_vs_ratio:.1f}배 폭발 + 가격 횡보",
+            "symbol": _vs_ticker,
+            "reference_price": _vs_price,
+            "candidate_symbols": _vs_syms[:3],
+            "focus_tag": "volume_surge",
+            "strategy_id": "korea.volume_surge",
+            "entry_profile": "volume_surge",
+            "notes": [
+                f"거래량 {_vs_ratio:.1f}배 (5배+ 기준) / 가격 변동 {_vs.get('price_chg_pct', 0):.2f}%",
+                f"총 {len(volume_surge_candidates)}종목 감지",
+                "S29: 세력 매집 징후 — 당일 폭발 감지 → 익일 가격 추종",
+                "selective_probe 0.20x / stop -2.5%",
+            ],
+            "quality_score": quality_score,
+        }
+
+    # ── 12. 신호 없음 → 관망 ──────────────────────────────────────────────
+    _bb_cnt = len(bb_squeeze_candidates)
+    _vs_cnt = len(volume_surge_candidates)
     return {
         "action": "stand_by",
         "size": "0.00x",
-        "focus": "No signal. B/S15/S18/S2/S9/S10/S20 not triggered.",
+        "focus": "No signal. B/S15/S18/S2/S9/S10/S20/S27/S29 not triggered.",
         "symbol": candidate_symbols[0] if candidate_symbols else "",
         "candidate_symbols": candidate_symbols,
         "notes": [
-            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S15={len(gap_momentum_candidates)} S18/19={len(inst_foreign_candidates)} S20={len(catalyst_gap_candidates)} S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)}",
-            "Waiting for B/S15/S18/S19/S2/S9/S10/S13/S20 signal.",
+            f"B={breakout_confirmed_count}c/{breakout_partial_count}p S15={len(gap_momentum_candidates)} S18/19={len(inst_foreign_candidates)} S20={len(catalyst_gap_candidates)} S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)} S27={_bb_cnt} S29={_vs_cnt}",
+            "Waiting for B/S15/S18/S19/S2/S9/S10/S13/S20/S27/S29 signal.",
         ],
         "quality_score": quality_score,
     }
