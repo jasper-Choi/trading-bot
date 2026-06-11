@@ -1,6 +1,39 @@
 # Trading Company V2 Handoff
 
-## 최신: Claude - 2026-06-11 세션5 파트2 (kis_hold 트레일 익절 활성화)
+## 최신: Claude - 2026-06-11 세션5 파트3 (수익 극대화: 시장별 분리 + 레이스/매도유실 수정)
+
+### 커밋 순서
+1. `597b62f` — 반등일 조기 포착: 당일 +2% 반등 시 STRESSED→RANGING 완화
+2. `c7825f4` — KOSPI/KOSDAQ 시장별 분리 운용 (사용자 승인) — STRESSED 시장 종목만 제외
+3. `0801380` — 봇 매수 포지션이 kis_hold로 둔갑하는 레이스 수정 (주문 payload에 전략 프로필 동봉)
+4. `4711881` — KIS 자동매도 3회 재시도 + live_order_log 감사 기록 + [kis-auto-sell] print 로깅
+5. `5778763` — sync 프로필 복원 윈도우 2h→72h
+
+### 사용자 결정 사항
+- 크립토 데스크: **korea만 유지** (재활성화 안 함)
+- KOSDAQ 분리 운용: 승인
+- 레이스 버그 포지션 sector_wave 교정: 095610/319660/031980 모두 승인 (DB 수정 + payload 백필 완료)
+
+### 06-11 거래 결과 (시장별 분리 배포 직후)
+- sector_wave 발동: 반도체장비 7종목 +26% 파동 → laggard 3종목 매수 (095610/319660/031980, 각 0.25x)
+- 031980: 트레일 청산 -0.42% (급락 슬리피지), 319660: +0.03% — **둘 다 KIS 매도 유실** (재시도 코드 이전)
+- 095610: open, sector_wave 프로필로 교정 완료
+
+### ⚠️ 내일(06-12) 개장 시 확인 필요
+1. **KIS 실보유 3종목** (031980 114주 / 319660 103주 / 095610 90주):
+   sync가 031980/319660 재생성 → payload 백필 + 72h 윈도우로 **sector_wave 자동 부여** 확인
+   (`SELECT symbol, entry_profile FROM paper_positions WHERE status='open'`)
+2. **live_order_log 1075 (095610) pending 잔류** — KIS 상태조회 연결오류로 pending.
+   해소 안 되면 allow_new_entries 차단됨 (06-09 기가비스 1073과 동일 패턴) — 체결 확인 후 settled 처리 필요할 수 있음
+3. 트레일 청산 시 `[kis-auto-sell]` journald 로그 + live_order_log 감사 기록 확인 (재시도 동작 검증)
+
+### 알려진 한계
+- 트레일 슬리피지: 사이클(20-45s) 체크라 급락 시 트레일 라인보다 낮게 청산될 수 있음 (031980 +1.2% 라인 → -0.42% 체결)
+- state_store의 _log.*는 핸들러 부재로 어디에도 안 남음 — 중요 이벤트는 print(flush=True) 사용
+
+---
+
+## 이전: Claude - 2026-06-11 세션5 파트2 (kis_hold 트레일 익절 활성화)
 
 ### 커밋: `cdbd82e`
 - kis_hold 포지션도 봇이 **트레일 익절** 수행 (사용자 지시: "청산라인까지 하락하면 바로 익절")
