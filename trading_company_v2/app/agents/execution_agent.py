@@ -288,9 +288,10 @@ class ExecutionAgent(BaseAgent):
         if desk == "us":
             return 3, 1.5
         if desk == "korea":
-            # Max 3 concurrent — supports: 1 open_reversal + 1 breakout + 1 close_drive
-            # Pyramid positions are separate and use a 4th slot tracked independently.
-            return 3, 1.8
+            # [2026-06-11] 3→4 슬롯: sector_wave가 3슬롯을 채우면 검증된
+            # new_high_breakout 신호가 막히는 기회비용 해소 (페이스 상향)
+            # Pyramid positions are separate and use a 5th slot tracked independently.
+            return 4, 2.0
         return 2, 1.2
 
     @staticmethod
@@ -835,6 +836,30 @@ class ExecutionAgent(BaseAgent):
             return True
         return False
 
+    def _strategy_hot_streak(self, strategy_id: str, min_trades: int = 8) -> bool:
+        """[2026-06-11] cold streak의 대칭 — 실전 성과가 검증된 전략 감지.
+
+        기준 (최근 20거래 중 해당 전략 거래):
+          거래 수 >= 8 AND 승률 >= 42% AND 합산 PnL >= +8%
+        사용처: _plan_to_order에서 hot strategy → 사이즈 1.3x 부스트
+        근거: live 기대값이 증명된 전략에만 페이스 상향 (new_high_breakout
+        20건 +14.76% WR45% 케이스) — 성과 악화 시 자동 해제되는 동적 증액.
+        """
+        if not strategy_id:
+            return False
+        relevant = [
+            t for t in (self.closed_positions or [])[:20]
+            if (str(t.get("strategy_id", "") or "") == strategy_id
+                or str(t.get("entry_profile", "") or "") == strategy_id.split(".", 1)[-1])
+            and not self._is_retired_strategy_trade(t)
+        ]
+        if len(relevant) < min_trades:
+            return False
+        wins = sum(1 for t in relevant if float(t.get("pnl_pct", 0.0) or 0.0) > 0)
+        win_rate = wins / len(relevant)
+        total_pnl = sum(float(t.get("pnl_pct", 0.0) or 0.0) for t in relevant)
+        return win_rate >= 0.42 and total_pnl >= 8.0
+
     def _pick_symbol(self, desk: str, plan: dict) -> tuple[str, list[str]]:
         notes: list[str] = []
         candidates = []
@@ -936,6 +961,13 @@ class ExecutionAgent(BaseAgent):
             risk_scaled_notional = round(risk_scaled_notional * _cold_scale, 2)
             rotation_notes.append(
                 f"strategy cold streak: {_strategy_id_for_cold} WR<30% or PnL<=-10% → size ×{_cold_scale}"
+            )
+        # [2026-06-11] hot streak 부스트 (cold의 대칭): live 성과가 검증된 전략은
+        # 사이즈 1.3x — 데이터 기반 페이스 상향, 성과 꺾이면 자동 해제
+        elif desk == "korea" and self._strategy_hot_streak(_strategy_id_for_cold):
+            risk_scaled_notional = round(risk_scaled_notional * 1.30, 2)
+            rotation_notes.append(
+                f"strategy hot streak: {_strategy_id_for_cold} WR>=42% & PnL>=+8% → size ×1.30"
             )
 
         desk_stop_pressure = self._desk_stop_pressure(desk)

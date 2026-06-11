@@ -135,8 +135,9 @@ class RiskCommitteeAgent(BaseAgent):
             # 0.32 floor: 연패 후 0.10x 회복 진입 × 3개 정도 가능한 수준
             state.risk_budget = max(state.risk_budget, 0.32)
         elif active_desks.issubset({"korea", "us"}) and state.allow_new_entries:
-            # Korea/US only: 이전 0.18 유지
-            state.risk_budget = max(state.risk_budget, 0.18)
+            # [2026-06-11] 0.18 → 0.22: 실전 10일 검증(손절/트레일 작동 확인) 후
+            # 페이스 소폭 상향 (사용자 지시) — floor만 상향, 상한·감산 로직은 기존 유지
+            state.risk_budget = max(state.risk_budget, 0.22)
 
         if "risk committee enforcing conservative defaults" not in state.notes:
             state.notes.append("risk committee enforcing conservative defaults")
