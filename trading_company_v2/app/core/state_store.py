@@ -3138,7 +3138,9 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
             _profile, _strategy, _focus, _action = "kis_hold", "korea.kis_hold", "kis_hold", "probe_longs"
             _stype = "hold_until_profit"
             try:
-                _ord_cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+                # 72h: 오버나이트/주말 보유 후 재생성도 원래 전략 프로필 유지
+                # (2h였으나 익일 개장 시 재생성이 kis_hold로 폴백되는 문제 — 06-11)
+                _ord_cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
                 _recent_buy = db.execute(
                     select(LiveOrderRecord)
                     .where(
