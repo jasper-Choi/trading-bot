@@ -78,7 +78,11 @@ def _compute_korea_market_regime() -> dict:
         허용하므로 데드캣 반등이어도 손실 제한적.
       TRENDING: 종가 > EMA20 > EMA60 & 20일 수익률 ≥ +1.5% (상승 추세만 — long-only)
       RANGING : 그 외 (만성 하락장 포함 — 평균회귀 전략은 유지, 모멘텀만 차단)
-    결합: 하나라도 STRESSED → STRESSED / 아니면 하나라도 TRENDING → TRENDING / 그 외 RANGING
+    결합 (2026-06-11 시장별 분리 운용 — 사용자 승인):
+      모두 STRESSED → STRESSED (전면 차단)
+      하나만 STRESSED → 결합은 RANGING/TRENDING으로 두되, STRESSED 시장 소속
+        종목은 데스크 스캔 단계에서 후보 제외 (korea_regime_by_market 사용)
+      하나라도 TRENDING (STRESSED 아닌 지수 중) → TRENDING / 그 외 RANGING
     실패 시 빈 dict 반환 → 글로벌 레짐 폴백 (fail-open, 기존 동작 유지)
 
     설계 노트: 만성 하락(EMA60 아래 + 20일 -5%)을 STRESSED로 두면 몇 주간
@@ -88,6 +92,7 @@ def _compute_korea_market_regime() -> dict:
     out: dict = {}
     details: list[str] = []
     verdicts: list[str] = []
+    by_market: dict[str, str] = {}
     for idx_symbol in ("KOSPI", "KOSDAQ"):
         try:
             candles = get_naver_daily_prices(idx_symbol, count=130)
@@ -108,6 +113,7 @@ def _compute_korea_market_regime() -> dict:
             else:
                 verdict = "RANGING"
             verdicts.append(verdict)
+            by_market[idx_symbol] = verdict
             details.append(
                 f"{idx_symbol}:{verdict} chg1d={chg1d:+.1f}% chg5={chg5:+.1f}% chg20={chg20:+.1f}%"
             )
@@ -116,13 +122,18 @@ def _compute_korea_market_regime() -> dict:
             continue
     if not verdicts:
         return {}
-    if "STRESSED" in verdicts:
+    # [2026-06-11] 시장별 분리: 모두 STRESSED일 때만 전면 차단.
+    # 하나만 STRESSED면 결합 레짐은 비-STRESSED 지수 기준으로 두고,
+    # STRESSED 시장 소속 종목은 스캔 단계에서 제외 (korea_regime_by_market)
+    _non_stressed = [v for v in verdicts if v != "STRESSED"]
+    if not _non_stressed:
         combined = "STRESSED"
-    elif "TRENDING" in verdicts:
+    elif "TRENDING" in _non_stressed:
         combined = "TRENDING"
     else:
         combined = "RANGING"
     out["korea_market_regime"] = combined
+    out["korea_regime_by_market"] = by_market
     out["korea_regime_detail"] = " / ".join(details)
     return out
 
@@ -960,6 +971,45 @@ class KoreaStockDeskAgent(BaseAgent):
         except Exception:
             pass
 
+        # ── 한국 시장 자체 레짐 (KOSPI/KOSDAQ 지수 일봉 기반, 2026-06-11) ────
+        # 글로벌 레짐(crypto 신호 기반)의 한국 데스크 오판 보정 — fail-open
+        korea_regime_ctx: dict = {}
+        try:
+            korea_regime_ctx = _compute_korea_market_regime()
+        except Exception:
+            pass
+
+        # ── 시장별 분리 운용 (2026-06-11 사용자 승인): STRESSED 시장 종목만 제외 ──
+        # 예: KOSPI STRESSED + KOSDAQ 반등(RANGING)이면 KOSDAQ 종목은 후보 유지
+        # 시장 정보 없는 종목은 유지 (fail-open)
+        _stressed_markets = {
+            mkt for mkt, v in (korea_regime_ctx.get("korea_regime_by_market") or {}).items()
+            if v == "STRESSED"
+        }
+        if _stressed_markets:
+            _mkt_by_ticker = {
+                str(u.get("ticker", "")): str(u.get("market", "") or "").upper()
+                for u in universe
+            }
+
+            def _drop_stressed_market(cands: list[dict]) -> list[dict]:
+                return [
+                    c for c in cands
+                    if _mkt_by_ticker.get(str(c.get("ticker", "")), "") not in _stressed_markets
+                ]
+
+            breakout_candidates = _drop_stressed_market(breakout_candidates)
+            mongtata_candidates = _drop_stressed_market(mongtata_candidates)
+            rsi2_candidates = _drop_stressed_market(rsi2_candidates)
+            breakout_120d_candidates = _drop_stressed_market(breakout_120d_candidates)
+            near_120d_candidates = _drop_stressed_market(near_120d_candidates)
+            gap_momentum_candidates = _drop_stressed_market(gap_momentum_candidates)
+            catalyst_gap_candidates = _drop_stressed_market(catalyst_gap_candidates)
+            inst_foreign_candidates = _drop_stressed_market(inst_foreign_candidates)
+            pre_gap_watch_candidates = _drop_stressed_market(pre_gap_watch_candidates)
+            bb_squeeze_candidates = _drop_stressed_market(bb_squeeze_candidates)
+            volume_surge_candidates = _drop_stressed_market(volume_surge_candidates)
+
         breakout_confirmed_count = sum(
             1 for c in breakout_candidates if int(c.get("breakout_count", 0) or 0) >= 4
         )
@@ -1001,14 +1051,6 @@ class KoreaStockDeskAgent(BaseAgent):
         us_ctx: dict = {}
         try:
             us_ctx = get_us_market_context()
-        except Exception:
-            pass
-
-        # ── 한국 시장 자체 레짐 (KOSPI/KOSDAQ 지수 일봉 기반) ────────────────
-        # 글로벌 레짐(crypto 신호 기반)의 한국 데스크 오판 보정 — fail-open
-        korea_regime_ctx: dict = {}
-        try:
-            korea_regime_ctx = _compute_korea_market_regime()
         except Exception:
             pass
 
