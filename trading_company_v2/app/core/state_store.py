@@ -3099,11 +3099,39 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
             market_value = current * balance
             notional = round(market_value / capital_base, 4) if capital_base > 0 else 0.0
             size_str = f"{notional:.2f}x"
+            # [2026-06-11] 봇 매수 직후의 잔고 동기화면 원래 전략 프로필로 생성
+            # 레이스 수정: 주문 체결 → awaiting_balance_sync → sync가 kis_hold로 생성
+            # → sector_wave 등이 stop -3.5% 대신 무손절(kis_hold -50%)로 운용되던 문제
+            _profile, _strategy, _focus, _action = "kis_hold", "korea.kis_hold", "kis_hold", "probe_longs"
+            _stype = "hold_until_profit"
+            try:
+                _ord_cutoff = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+                _recent_buy = db.execute(
+                    select(LiveOrderRecord)
+                    .where(
+                        LiveOrderRecord.desk == "korea",
+                        LiveOrderRecord.symbol == sym,
+                        LiveOrderRecord.action.in_(["probe_longs", "attack_opening_drive", "selective_probe"]),
+                        LiveOrderRecord.created_at >= _ord_cutoff,
+                    )
+                    .order_by(LiveOrderRecord.id.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+                if _recent_buy is not None:
+                    _op = dict(_recent_buy.payload or {})
+                    if _op.get("entry_profile"):
+                        _profile = str(_op.get("entry_profile"))
+                        _strategy = str(_op.get("strategy_id") or f"korea.{_profile}")
+                        _focus = str(_op.get("order_focus") or _profile)
+                        _action = str(_recent_buy.action or _action)
+                        _stype = ""
+            except Exception:
+                pass
             db.add(PaperPositionRecord(
                 desk="korea",
                 symbol=sym,
                 status="open",
-                action="probe_longs",
+                action=_action,
                 size=size_str,
                 opened_at=now,
                 closed_at="",
@@ -3113,15 +3141,15 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
                 pnl_pct=pnl,
                 cycles_open=0,
                 closed_reason="",
-                focus="kis_hold",
+                focus=_focus,
                 peak_pnl_pct=max(pnl, 0.0),
-                strategy_id="korea.kis_hold",
-                entry_profile="kis_hold",
+                strategy_id=_strategy,
+                entry_profile=_profile,
                 is_pyramided=False,
-                strategy_type="hold_until_profit",
+                strategy_type=_stype,
             ))
             opened += 1
-            _log.info("sync_paper_from_kis: +open %s avg=%.0f pnl=%.2f%%", sym, avg_price, pnl)
+            _log.info("sync_paper_from_kis: +open %s profile=%s avg=%.0f pnl=%.2f%%", sym, _profile, avg_price, pnl)
 
         # 2. paper kis_hold에 있는데 KIS에 없으면 → closed (KIS에서 매도됨)
         for sym in paper_kis_hold_syms:
@@ -3574,7 +3602,14 @@ def save_live_order_attempts(route_summary: dict, paper_orders: list[PaperOrder]
                     reason=str(detail.get("reason", "") or ""),
                     message=str(detail.get("message", "") or ""),
                     effect_status=effect_status,
-                    payload=dict(detail),
+                    # [2026-06-11] 전략 정보 동봉: sync_paper_from_kis가 봇 매수 포지션을
+                    # kis_hold가 아닌 원래 전략 프로필로 생성할 수 있도록 (레이스 수정)
+                    payload={
+                        **dict(detail),
+                        "entry_profile": str(getattr(order, "entry_profile", "") or "") if order else "",
+                        "strategy_id": str(getattr(order, "strategy_id", "") or "") if order else "",
+                        "order_focus": str(getattr(order, "focus", "") or "") if order else "",
+                    },
                 )
             )
         db.commit()
