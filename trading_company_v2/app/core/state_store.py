@@ -1516,10 +1516,16 @@ def _close_position(position: PaperPositionRecord, reason: str) -> None:
         ).scalar_one_or_none()
         if shadow is not None:
             session.delete(shadow)
-            # [2026-06-09] paper stop-cut 시 KIS VTS에도 매도 주문 자동 발송
-            # 조건: korea 데스크 + 봇이 직접 매수한 포지션 (kis_hold/kis_manual_sync 제외)
-            _ep = str(position.entry_profile or "")
-            if position.desk == "korea" and "kis_hold" not in _ep and "kis_manual_sync" not in _ep:
+        # [2026-06-09] paper stop-cut 시 KIS VTS에도 매도 주문 자동 발송
+        # [2026-06-11] kis_hold 트레일 익절(kis_hold_trail_profit)도 KIS 매도 발송
+        #   - kis_hold는 shadow 유무와 무관하게 KIS에 실보유 → reason 기반으로 발송
+        #   - 그 외 kis_hold 청산(kis_sold 등)은 발송 안 함 / kis_manual_sync 항상 제외
+        _ep = str(position.entry_profile or "")
+        if position.desk == "korea" and "kis_manual_sync" not in _ep:
+            if "kis_hold" in _ep:
+                if reason == "kis_hold_trail_profit":
+                    _send_kis_sell_async(position.symbol, reason, _ep)
+            elif shadow is not None:
                 _send_kis_sell_async(position.symbol, reason, _ep)
     _notify_trade_exit(_paper_trade_payload(position), reason)
 
@@ -1783,10 +1789,27 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                     position.pnl_pct = round(((current_price - position.entry_price) / position.entry_price) * 100, 2)
                 position.peak_pnl_pct = max(float(position.peak_pnl_pct or 0.0), position.pnl_pct)
             position.cycles_open += 1
-            # KIS 계좌 직접 보유 포지션(kis_hold)은 봇이 관리하지 않음
-            # trail/stop/timeout 로직 완전 skip — KIS에서 직접 매도해야 청산됨
-            # 이 체크가 없으면: KIS sync가 kis_hold 생성 → trail/stop 즉시 청산 → 재생성 루프
+            # KIS 계좌 직접 보유 포지션(kis_hold): 손절/타임아웃은 미적용 유지하되
+            # [2026-06-11] 트레일 익절은 봇이 수행 (사용자 지시: "청산라인까지 하락하면 바로 익절")
+            #   - peak ≥ 1% 도달 후 protect 라인까지 하락 시 청산 + KIS 매도 발송
+            #   - protect 라인은 항상 양수(floor ≥ 0.7%) → 손실 매도는 절대 발생하지 않음
+            #   - 장중에만 발동: 장외에 페이퍼만 닫히면 KIS 미체결 → sync 재생성 루프
             if "kis_hold" in (position.entry_profile or ""):
+                try:
+                    _kst_now = datetime.now(ZoneInfo("Asia/Seoul"))
+                    _kis_market_open = (
+                        _kst_now.weekday() < 5
+                        and (9, 0) <= (_kst_now.hour, _kst_now.minute) <= (15, 20)
+                    )
+                except Exception:
+                    _kis_market_open = False
+                if _kis_market_open:
+                    _kh_peak = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
+                    _kh_giveback, _kh_floor = _korea_trail_rules(_kh_peak)
+                    if _kh_giveback:
+                        _kh_protect = max(_kh_floor, _kh_peak - _kh_giveback)
+                        if position.pnl_pct <= _kh_protect:
+                            _close_position(position, "kis_hold_trail_profit")
                 continue
             pos_focus = " ".join(
                 str(part or "")
@@ -3041,11 +3064,29 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
 
         now = utcnow_iso()
 
+        # [2026-06-11] kis_hold 트레일 익절 직후 재생성 방지 (30분 가드)
+        # 매도 주문 발송 → 체결/잔고 반영 전에 sync가 돌면 KIS에 여전히 보유로 보여
+        # kis_hold가 재생성되고 트레일이 재발동 → 중복 매도 주문 루프 발생 가능
+        _recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+        recent_trail_sold = {
+            r.symbol
+            for r in db.execute(
+                select(PaperPositionRecord).where(
+                    PaperPositionRecord.desk == "korea",
+                    PaperPositionRecord.status == "closed",
+                    PaperPositionRecord.closed_reason == "kis_hold_trail_profit",
+                    PaperPositionRecord.closed_at >= _recent_cutoff,
+                )
+            ).scalars().all()
+        }
+
         # 1. KIS에 있는데 paper에 없으면 → 추가
         capital_base = float(settings.live_capital_krw or settings.paper_capital_krw or 1.0)
         for item in account_positions:
             sym = str(item.get("market", "") or item.get("symbol", "")).strip()
             if not sym or sym in paper_by_symbol:
+                continue
+            if sym in recent_trail_sold:
                 continue
             balance = float(item.get("balance", 0) or item.get("total_volume", 0) or 0)
             if balance <= 0:
