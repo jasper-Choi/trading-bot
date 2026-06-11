@@ -1,6 +1,49 @@
 # Trading Company V2 Handoff
 
-## 최신: Claude - 2026-06-10 세션4 파트2 (전략 회고 + 4가지 추가 개선)
+## 최신: Claude - 2026-06-11 세션5 (한국 로컬 레짐 신설 + S27/S29 죽은코드 복구)
+
+### 배경: 코스피 폭락 중 구조 결함 발견
+- 코스피 06-02 고점 8,801 → 06-11 7,534 (-14%), 06-08 서킷브레이커 발동
+- 글로벌 레짐은 crypto 신호 기반(RANGING)이라 한국 시장 폭락을 전혀 인지 못함
+
+### 진단된 구조 결함 3가지
+| # | 결함 | 영향 |
+|---|---|---|
+| 1 | `_determine_regime()`이 crypto 신호 유무로만 결정, `trend_structure_agent`는 0.58 고정 스텁 | KOSPI 추세/폭락과 무관하게 한국 데스크 레짐 고정 → B/S15/S23 영구 차단 or 폭락장 진입 허용 |
+| 2 | S27/S29는 80de8e9 커밋 메시지에만 있고 스캐너 코드 미커밋 (소비측만 존재) | bb_squeeze/volume_surge 후보 항상 빈 리스트 = 죽은 전략 |
+| 3 | EMA200 ×0.95 완화도 미반영 + S27/S29 전용 스탑 부재 | mongtata/RSI2 후보 부족, 신설 전략 리스크 불일치 |
+
+### 수정 내역 (세션5)
+1. **한국 로컬 레짐** — `korea_stock_desk_agent._compute_korea_market_regime()`:
+   - KOSPI/KOSDAQ 지수 일봉 (naver fchart, symbol=KOSPI/KOSDAQ 동작 검증됨)
+   - STRESSED: chg5 ≤ -3.5% (급성 폭락만, 5거래일 내 자동 해제)
+   - TRENDING: 종가 > EMA20 > EMA60 & chg20 ≥ +1.5% (상승만, long-only)
+   - 그 외 RANGING (만성 하락장 포함 — 평균회귀 유지, 전면 차단 금지 원칙)
+   - `build_korea_plan` 최상단에서 글로벌 레짐 오버라이드 (글로벌 STRESSED는 유지, fail-open)
+2. **S27/S29 스캐너 복구** — BB폭<4% 압축+상단돌파+거래량1.3x / 거래량5x+횡보<2%
+3. **EMA200 ×0.95 완화 복구** (mongtata/RSI2 스캔)
+4. **S27 스탑 -2.0% / S29 스탑 -2.5%** 전용 분기 (`_position_thresholds`, generic 폴백 제거)
+
+### 배포 확인 (06-11 00:59 UTC, 장중)
+```
+korea_plan.action = capital_preservation ("Stress regime")  ✅ 폭락장 신규 진입 차단
+글로벌 regime=RANGING (crypto 데스크 영향 없음), allow_new_entries=1
+보유: 420770 기가비스 +3.81% (peak 11.78), 036930 주성엔지 +8.81% (peak 18.13) — 모두 kis_hold
+06-10~11 봇 신규 진입 0건 (스캐너 무신호로 자연 보호됨)
+```
+
+### 레짐 전환 시나리오 (전략-시장 매칭)
+- 폭락 진행 (현재): STRESSED → capital_preservation
+- 안정화 (chg5 > -3.5% 회복): RANGING → 평균회귀(S2/S9/S13) + S18/S22/S27/S29 반등 포착
+- 추세 회복 (EMA 정배열 + chg20 ≥ +1.5%): TRENDING → B/S15/S23 모멘텀 재가동
+
+### 관찰 포인트
+- 데스크 reason에 `K-regime=STRESSED/RANGING/TRENDING` 표기, stand_by 노트에 korea-local 상세
+- 안정화 후 mongtata 후보 다수 발생 예상 — deviation ≥ -12% 필터(e784dcd)가 낙폭 과대 차단
+
+---
+
+## 이전: Claude - 2026-06-10 세션4 파트2 (전략 회고 + 4가지 추가 개선)
 
 ### 커밋 순서 (세션4 파트2)
 1. `80de8e9` — S27/S29 신규전략 + sector_wave 사이즈 보정 + EMA200 완화 + RANGING pre_gap 차단

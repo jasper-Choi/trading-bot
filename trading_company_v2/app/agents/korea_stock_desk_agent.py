@@ -62,6 +62,62 @@ def _std_last(values: list[float], period: int) -> float:
     return (sum((v - mean) ** 2 for v in window) / period) ** 0.5
 
 
+def _compute_korea_market_regime() -> dict:
+    """KOSPI/KOSDAQ 지수 일봉 기반 한국 시장 자체 레짐 판정 (2026-06-11).
+
+    배경(구조 결함): orchestrator._determine_regime은 crypto 신호 유무로 레짐을
+    결정하고 trend_structure_agent는 score 0.58 고정 스텁 → KOSPI가 추세장이어도
+    crypto 무신호면 글로벌 레짐이 RANGING으로 고정되어 한국 추세 전략
+    (B/new_high_breakout, S15/gap_momentum, S23/pre_gap_watch)이 영구 차단됨.
+
+    규칙 (지수별 판정):
+      STRESSED: 5일 수익률 ≤ -3.5% (급성 폭락만 — 5거래일 내 자동 해제됨)
+      TRENDING: 종가 > EMA20 > EMA60 & 20일 수익률 ≥ +1.5% (상승 추세만 — long-only)
+      RANGING : 그 외 (만성 하락장 포함 — 평균회귀 전략은 유지, 모멘텀만 차단)
+    결합: 하나라도 STRESSED → STRESSED / 아니면 하나라도 TRENDING → TRENDING / 그 외 RANGING
+    실패 시 빈 dict 반환 → 글로벌 레짐 폴백 (fail-open, 기존 동작 유지)
+
+    설계 노트: 만성 하락(EMA60 아래 + 20일 -5%)을 STRESSED로 두면 몇 주간
+    전면 차단될 수 있어 "영구적 진입 제한 금지" 운영 원칙과 충돌 → RANGING으로
+    분류해 평균회귀(S2/S9/S13)와 개별 돌파(S18/S22/S27/S29)는 계속 허용.
+    """
+    out: dict = {}
+    details: list[str] = []
+    verdicts: list[str] = []
+    for idx_symbol in ("KOSPI", "KOSDAQ"):
+        try:
+            candles = get_naver_daily_prices(idx_symbol, count=130)
+            closes = [float(c.get("close") or 0.0) for c in candles if float(c.get("close") or 0.0) > 0]
+            if len(closes) < 65:
+                continue
+            ema20 = _ema(closes, 20)
+            ema60 = _ema(closes, 60)
+            chg5 = (closes[-1] / closes[-6] - 1.0) * 100.0 if len(closes) >= 6 else 0.0
+            chg20 = (closes[-1] / closes[-21] - 1.0) * 100.0 if len(closes) >= 21 else 0.0
+            if chg5 <= -3.5:
+                verdict = "STRESSED"
+            elif closes[-1] > ema20 > ema60 and chg20 >= 1.5:
+                verdict = "TRENDING"
+            else:
+                verdict = "RANGING"
+            verdicts.append(verdict)
+            details.append(f"{idx_symbol}:{verdict} chg5={chg5:+.1f}% chg20={chg20:+.1f}%")
+            out[f"{idx_symbol.lower()}_chg20_pct"] = round(chg20, 2)
+        except Exception:
+            continue
+    if not verdicts:
+        return {}
+    if "STRESSED" in verdicts:
+        combined = "STRESSED"
+    elif "TRENDING" in verdicts:
+        combined = "TRENDING"
+    else:
+        combined = "RANGING"
+    out["korea_market_regime"] = combined
+    out["korea_regime_detail"] = " / ".join(details)
+    return out
+
+
 def _check_close_panic_reversal(existing_candidates: list[dict]) -> list[dict]:
     """Strategy S16: 장 막판(15:20~15:29) 패닉셀 감지 — 포워드 테스트용 신호 수집.
 
@@ -314,6 +370,10 @@ class KoreaStockDeskAgent(BaseAgent):
         rsi2_candidates: list[dict] = []       # S9/S13: ACTIVATE/WATCH
         breakout_120d_candidates: list[dict] = []  # S22: 포워드 모니터링
         near_120d_candidates: list[dict] = []  # S24: 120일 고점 접근 (pre-breakout)
+        # [2026-06-11] S27/S29 스캐너 — 80de8e9에서 recommendation_engine 소비측만
+        # 커밋되고 데스크 스캐너(생산측)가 누락됐던 버그 복구 (이전까지 항상 빈 리스트)
+        bb_squeeze_candidates: list[dict] = []   # S27: BB 스퀴즈 → 상향 돌파
+        volume_surge_candidates: list[dict] = [] # S29: 거래량 폭발 + 가격 횡보
 
         for ticker, name, candles in results:
             if len(candles) < 205:
@@ -323,7 +383,10 @@ class KoreaStockDeskAgent(BaseAgent):
                 if not closes or closes[-1] <= 0:
                     continue
                 ema200 = _ema(closes, 200)
-                if closes[-1] <= ema200 or ema200 <= 0:
+                # [2026-06-11] EMA200 필터 완화 (ema200 * 0.95): 80de8e9 커밋 메시지에
+                # 포함됐으나 실제 코드 반영이 누락됐던 변경 복구 — RANGING 장에서
+                # EMA200 부근 종목도 mongtata/RSI2 후보에 포함
+                if ema200 <= 0 or closes[-1] <= ema200 * 0.95:
                     continue
                 ema20 = _ema(closes, 20)
                 std20 = _std_last(closes, 20)
@@ -424,6 +487,46 @@ class KoreaStockDeskAgent(BaseAgent):
                                         "ema60": round(ema60_s24, 0),
                                         "focus_tag": "near_120d",
                                     })
+
+                # ── S27: 볼린저 밴드 스퀴즈 → 상향 돌파 (2026-06-11 스캐너 복구) ──
+                # 전일 기준 BB폭(4σ/EMA20) < 4% 압축 + 당일 종가가 전일 상단밴드 돌파
+                # + 거래량 1.3x 이상 동반 — 압축된 에너지의 방향 분출 포착
+                _vols_s27 = [float(c.get("volume") or 0.0) for c in candles[-22:]]
+                _avg_vol20_s27 = sum(_vols_s27[:-1]) / max(len(_vols_s27) - 1, 1)
+                _vol_ratio_today = (_vols_s27[-1] / _avg_vol20_s27) if _avg_vol20_s27 > 0 else 0.0
+                _closes_prev = closes[:-1]
+                _ema20_prev = _ema(_closes_prev, 20)
+                _std20_prev = _std_last(_closes_prev, 20)
+                if _ema20_prev > 0 and _std20_prev > 0:
+                    _bb_width_pct = (4.0 * _std20_prev) / _ema20_prev * 100.0
+                    _upper_bb_prev = _ema20_prev + 2.0 * _std20_prev
+                    if (
+                        _bb_width_pct < 4.0                # 에너지 압축 완료
+                        and closes[-1] > _upper_bb_prev    # 상향 돌파
+                        and _vol_ratio_today >= 1.3        # 거래량 동반 확인
+                    ):
+                        bb_squeeze_candidates.append({
+                            "ticker": ticker,
+                            "name": name,
+                            "current_price": closes[-1],
+                            "bb_width_ratio_pct": round(_bb_width_pct, 2),
+                            "upper_bb": round(_upper_bb_prev, 0),
+                            "vol_ratio": round(_vol_ratio_today, 2),
+                            "focus_tag": "bb_squeeze_breakout",
+                        })
+
+                # ── S29: 거래량 폭발(5x+) + 가격 횡보(<2%) — 세력 매집 징후 ──
+                if len(closes) >= 2 and closes[-2] > 0:
+                    _price_chg_pct = (closes[-1] / closes[-2] - 1.0) * 100.0
+                    if _vol_ratio_today >= 5.0 and abs(_price_chg_pct) < 2.0:
+                        volume_surge_candidates.append({
+                            "ticker": ticker,
+                            "name": name,
+                            "current_price": closes[-1],
+                            "vol_ratio": round(_vol_ratio_today, 2),
+                            "price_chg_pct": round(_price_chg_pct, 2),
+                            "focus_tag": "volume_surge",
+                        })
             except Exception:
                 continue
 
@@ -892,6 +995,14 @@ class KoreaStockDeskAgent(BaseAgent):
         except Exception:
             pass
 
+        # ── 한국 시장 자체 레짐 (KOSPI/KOSDAQ 지수 일봉 기반) ────────────────
+        # 글로벌 레짐(crypto 신호 기반)의 한국 데스크 오판 보정 — fail-open
+        korea_regime_ctx: dict = {}
+        try:
+            korea_regime_ctx = _compute_korea_market_regime()
+        except Exception:
+            pass
+
         return AgentResult(
             name=self.name,
             score=max(score, 0.2),
@@ -902,6 +1013,8 @@ class KoreaStockDeskAgent(BaseAgent):
                 f"S18/19:{len(inst_foreign_candidates)} S20:{len(catalyst_gap_candidates)} "
                 f"S22:{len(breakout_120d_candidates)} S23:{len(pre_gap_watch_candidates)} "
                 f"S24:{len(near_120d_candidates)} "
+                f"S27:{len(bb_squeeze_candidates)} S29:{len(volume_surge_candidates)} "
+                f"K-regime={korea_regime_ctx.get('korea_market_regime', 'n/a')} "
                 f"vol_thr={_vol_mult}x RSI={_rsi_min:.0f}-{_rsi_max:.0f} "
                 f"(universe {len(universe)}종목/{len(watchlist_items)}스캔)"
             ),
@@ -944,6 +1057,20 @@ class KoreaStockDeskAgent(BaseAgent):
                 # 강한 갭업(gap>=5%) + EMA200 위 + 거래량 폭증 — 포워드 테스트
                 "catalyst_gap_candidates": catalyst_gap_candidates[:5],
                 "catalyst_gap_count": len(catalyst_gap_candidates),
+                # Strategy S27 BB Squeeze Breakout (2026-06-11 스캐너 복구)
+                # BB폭 좁은 순(압축 강한 순) 정렬 — 분출 에너지 큰 종목 우선
+                "bb_squeeze_candidates": sorted(
+                    bb_squeeze_candidates, key=lambda c: c.get("bb_width_ratio_pct", 99)
+                )[:5],
+                "bb_squeeze_count": len(bb_squeeze_candidates),
+                # Strategy S29 Volume Surge + 횡보 (2026-06-11 스캐너 복구)
+                "volume_surge_candidates": sorted(
+                    volume_surge_candidates, key=lambda c: c.get("vol_ratio", 0), reverse=True
+                )[:5],
+                "volume_surge_count": len(volume_surge_candidates),
+                # ── 한국 시장 자체 레짐 (KOSPI/KOSDAQ 기반, 2026-06-11) ──
+                # build_korea_plan에서 글로벌(crypto 기반) 레짐 대신 우선 사용
+                **korea_regime_ctx,
                 # ── 미국 시장 컨텍스트 ──
                 "us_regime":      us_ctx.get("us_regime", "unknown"),
                 "vix":            us_ctx.get("vix", 0.0),

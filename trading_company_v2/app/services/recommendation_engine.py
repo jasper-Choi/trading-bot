@@ -348,6 +348,16 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
       RANGING : S13/S9(평균회귀) + S2(볼린저반등) + S18/S19/S20/S23
       TRENDING: 위 + B(신고점) + S15(갭모멘텀) 추가 활성
     """
+    # ── 0. 한국 로컬 레짐 오버라이드 (2026-06-11) ──────────────────────────
+    # 글로벌 regime은 crypto 신호 유무로 결정됨 (orchestrator._determine_regime
+    # + trend_structure_agent 0.58 고정 스텁) → KOSPI 추세장에도 crypto 무신호면
+    # RANGING 고정 → B/S15/S23 추세 전략이 한국 시장 상태와 무관하게 영구 차단.
+    # korea_stock_desk_agent가 KOSPI/KOSDAQ 지수로 계산한 korea_market_regime 우선.
+    # 글로벌 STRESSED(VIX panic·매크로 붕괴)는 안전 우선으로 유지 (오버라이드 불가).
+    _k_local_regime = str(payload.get("korea_market_regime", "") or "")
+    if regime != "STRESSED" and _k_local_regime in {"TRENDING", "RANGING", "STRESSED"}:
+        regime = _k_local_regime
+
     # ── 최소 진입 품질 기준 ────────────────────────────────────────────────
     _MIN_QUALITY = 0.38   # 이 미만이면 스킵
 
@@ -679,7 +689,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 "symbol": bk_ticker,
                 "candidate_symbols": candidate_symbols,
                 "notes": [
-                    f"bias={bk_bias} / signal={bk_signal:.2f} — requires bullish+0.50",
+                    f"bias={bk_bias} / signal={bk_signal:.2f} — requires bullish+0.65",
                     "Daily breakout without current bullish momentum is a reversal trap.",
                 ],
                 "quality_score": quality_score,
@@ -730,7 +740,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 "focus": f"Breakout partial ({bk_name}) but signal not bullish — skip.",
                 "symbol": bk_ticker,
                 "candidate_symbols": candidate_symbols,
-                "notes": [f"bias={bk_bias} / signal={bk_signal:.2f} — requires bullish+0.52"],
+                "notes": [f"bias={bk_bias} / signal={bk_signal:.2f} — requires bullish+0.65"],
                 "quality_score": quality_score,
             }
         _bk_price2 = float(bk_leader.get("current_price", 0.0) or 0.0)
@@ -989,6 +999,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         "notes": [
             f"B={breakout_confirmed_count}c/{breakout_partial_count}p S15={len(gap_momentum_candidates)} S18/19={len(inst_foreign_candidates)} S20={len(catalyst_gap_candidates)} S2={len(mongtata_candidates)} S9/S13={len(rsi2_candidates)}(dual={len(dual_rsi_candidates)}) S10={len(nday_candidates)} S27={_bb_cnt} S29={_vs_cnt}",
             "Waiting for B/S15/S18/S19/S2/S9/S10/S13/S20/S27/S29 signal.",
+            f"regime={regime}" + (
+                f" (korea-local: {payload.get('korea_regime_detail', '')})"
+                if payload.get("korea_regime_detail") else " (global fallback)"
+            ),
         ],
         "quality_score": quality_score,
     }

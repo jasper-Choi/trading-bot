@@ -738,6 +738,15 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         # must not become loose swing positions. SFA 036540 showed the previous
         # -0.8% stop can cut a valid +2% continuation after only a few minutes.
         return 2.8, -1.3, 540
+    if desk == "korea" and "bb_squeeze" in focus:
+        # S27: BB 스퀴즈 → 상향 돌파 (2026-06-11 스캐너 복구와 함께 신설)
+        # 압축 후 분출 실패 시 빠른 손절 — stop -2.0% (전략 노트 명시값과 일치)
+        # max ~30h: 분출은 보통 1-2일 내 발생, 멀티데이 추세는 trail이 제어
+        return 25.0, -2.0, 5400
+    if desk == "korea" and "volume_surge" in focus:
+        # S29: 거래량 폭발(5x+) + 가격 횡보 — 세력 매집 후 익일 분출 대기
+        # 분출 불발 시 -2.5% 손절 (전략 노트 명시값과 일치), max ~30h
+        return 25.0, -2.5, 5400
     if desk == "korea" and action == "selective_probe":
         # 2026-06-01: 추세 보유 전략으로 전환 — "소액 수익 매도" 방지
         # target 25%: rapid_guard target 조기청산 비활성화 (target<25 조건) → trail이 청산 제어
