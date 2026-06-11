@@ -72,6 +72,10 @@ def _compute_korea_market_regime() -> dict:
 
     규칙 (지수별 판정):
       STRESSED: 5일 수익률 ≤ -3.5% (급성 폭락만 — 5거래일 내 자동 해제됨)
+        단, 당일 +2% 이상 반등 중이면 RANGING으로 완화 (반등일 조기 포착)
+        근거: 2026-06 폭락에서 06-09 하루 +8.2% 반등 — chg5 기준만으로는
+        V반등 첫날을 통째로 차단함. RANGING 완화는 평균회귀(stop -1.4%)만
+        허용하므로 데드캣 반등이어도 손실 제한적.
       TRENDING: 종가 > EMA20 > EMA60 & 20일 수익률 ≥ +1.5% (상승 추세만 — long-only)
       RANGING : 그 외 (만성 하락장 포함 — 평균회귀 전략은 유지, 모멘텀만 차단)
     결합: 하나라도 STRESSED → STRESSED / 아니면 하나라도 TRENDING → TRENDING / 그 외 RANGING
@@ -92,16 +96,21 @@ def _compute_korea_market_regime() -> dict:
                 continue
             ema20 = _ema(closes, 20)
             ema60 = _ema(closes, 60)
+            chg1d = (closes[-1] / closes[-2] - 1.0) * 100.0 if len(closes) >= 2 else 0.0
             chg5 = (closes[-1] / closes[-6] - 1.0) * 100.0 if len(closes) >= 6 else 0.0
             chg20 = (closes[-1] / closes[-21] - 1.0) * 100.0 if len(closes) >= 21 else 0.0
-            if chg5 <= -3.5:
+            # 당일 +2% 이상 반등 중이면 급성 STRESSED를 RANGING으로 완화
+            # (fchart 마지막 캔들은 장중 실시간 갱신 — 당일 반등을 즉시 반영)
+            if chg5 <= -3.5 and chg1d < 2.0:
                 verdict = "STRESSED"
             elif closes[-1] > ema20 > ema60 and chg20 >= 1.5:
                 verdict = "TRENDING"
             else:
                 verdict = "RANGING"
             verdicts.append(verdict)
-            details.append(f"{idx_symbol}:{verdict} chg5={chg5:+.1f}% chg20={chg20:+.1f}%")
+            details.append(
+                f"{idx_symbol}:{verdict} chg1d={chg1d:+.1f}% chg5={chg5:+.1f}% chg20={chg20:+.1f}%"
+            )
             out[f"{idx_symbol.lower()}_chg20_pct"] = round(chg20, 2)
         except Exception:
             continue
