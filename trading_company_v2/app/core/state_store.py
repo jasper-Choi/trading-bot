@@ -539,29 +539,62 @@ def _send_kis_sell_async(symbol: str, reason: str, entry_profile: str) -> None:
     - 장중이 아니면 KIS API가 거부하므로 결과는 로그로만 남기고 블록하지 않음
     """
     import threading
+    import time as _time_mod
 
     def _do_sell() -> None:
+        # [2026-06-11] 재시도 추가: KIS VTS의 간헐적 500/연결 오류로 단발 시도가
+        # 조용히 실패 → KIS에 실보유가 남는데 paper만 닫히는 불일치 발생
+        # (06-11 실사례: 036930, 031980 매도 유실). 3회 재시도 + 감사 기록.
+        from app.core.models import PaperOrder
+        from app.services import kis_broker
+        last_err = ""
+        result = None
+        for attempt in range(3):
+            try:
+                order = PaperOrder(
+                    desk="korea",
+                    action="reduce_risk",
+                    focus=f"auto_stop_sell:{reason}",
+                    size="1.00x",
+                    symbol=symbol,
+                    strategy_id="auto_stop",
+                    entry_profile=entry_profile,
+                    rationale=[f"paper stop-cut → KIS sell-through ({reason})"],
+                )
+                result = kis_broker.place_order(order)
+                print(f"[kis-auto-sell] {symbol} attempt={attempt+1} ok={result.ok} "
+                      f"msg={result.detail.get('msg1') or result.detail.get('reason') or ''}", flush=True)
+                if result.ok:
+                    break
+                last_err = str(result.detail.get("msg1") or result.detail.get("reason") or "not ok")
+            except Exception as exc:
+                last_err = f"{type(exc).__name__}: {exc}"
+                print(f"[kis-auto-sell] {symbol} attempt={attempt+1} error={last_err}", flush=True)
+            _time_mod.sleep(8.0)
+        # 감사 기록: 성공/실패 모두 live_order_log에 남겨 유실을 가시화
         try:
-            from app.core.models import PaperOrder
-            from app.services import kis_broker
-            order = PaperOrder(
-                desk="korea",
-                action="reduce_risk",
-                focus=f"auto_stop_sell:{reason}",
-                size="1.00x",
-                symbol=symbol,
-                strategy_id="auto_stop",
-                entry_profile=entry_profile,
-                rationale=[f"paper stop-cut → KIS sell-through ({reason})"],
-            )
-            result = kis_broker.place_order(order)
-            _log.info(
-                "KIS auto-sell %s: ok=%s mode=%s msg=%s",
-                symbol, result.ok, result.request_mode,
-                result.detail.get("msg1") or result.detail.get("reason") or "",
-            )
+            with SessionLocal() as _adb:
+                _ok = bool(result.ok) if result is not None else False
+                _adb.add(LiveOrderRecord(
+                    created_at=utcnow_iso(),
+                    desk="korea",
+                    symbol=symbol,
+                    action="reduce_risk",
+                    size="1.00x",
+                    requested_mode="kis_live",
+                    applied_mode="kis_live" if _ok else "failed",
+                    broker_live=_ok,
+                    request_status="submitted" if _ok else "failed",
+                    broker_order_id=str((result.detail.get("broker_order_id") if result else "") or ""),
+                    broker_state="submitted" if _ok else "dispatch_failed",
+                    reason=f"auto_sell:{reason}"[:100],
+                    message=("" if _ok else last_err)[:300],
+                    effect_status="pending" if _ok else "sell_dispatch_failed",
+                    payload={"entry_profile": entry_profile, "auto_sell_reason": reason},
+                ))
+                _adb.commit()
         except Exception as exc:
-            _log.warning("KIS auto-sell %s failed: %s", symbol, exc)
+            print(f"[kis-auto-sell] {symbol} audit-log failed: {exc}", flush=True)
 
     threading.Thread(target=_do_sell, name=f"kis-auto-sell-{symbol}", daemon=True).start()
 
