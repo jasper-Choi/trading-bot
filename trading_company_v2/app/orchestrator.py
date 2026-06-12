@@ -933,6 +933,14 @@ class CompanyOrchestrator:
                 live_korea_enabled = any(p.desk == "korea" for p in _lop())
             except Exception:
                 pass
+        # [2026-06-12] pending live order 잔류 시에도 sync/reconcile 실행
+        # catch-22 수정: pending이 진입 차단 → 주문 없음 → live_korea_enabled False
+        # → reconcile 미실행 → pending 영구 고착 (1087/1088 실사례)
+        if not live_korea_enabled:
+            try:
+                live_korea_enabled = any(l.get("desk") == "korea" for l in live_locks)
+            except Exception:
+                pass
         _korea_sync_ok = False
         if live_korea_enabled:
             try:
