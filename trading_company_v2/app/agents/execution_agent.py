@@ -545,6 +545,14 @@ class ExecutionAgent(BaseAgent):
         for item in self.closed_positions:
             if item.get("desk") != desk or self._is_retired_strategy_trade(item):
                 continue
+            # [2026-06-12] kis_hold/manual 청산은 봇 전략 성과가 아님 — desk 성과
+            # 판정(loss_pressure/recovery/offense)에서 제외 (_build_desk_stats 동일 원칙)
+            # 실사례: NAVER kis_hold -10.26/-7.15(루프버그 잔재 수동정리)가 06-12
+            # desk loss pressure를 발동시켜 sector_wave 정상 신호를 차단함
+            _ep = str(item.get("entry_profile", "") or "")
+            _cr = str(item.get("closed_reason", "") or "")
+            if "kis_hold" in _ep or "kis_manual" in _ep or "manual" in _cr:
+                continue
             recent.append(item)
             if len(recent) >= limit:
                 break
