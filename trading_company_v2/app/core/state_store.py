@@ -3827,13 +3827,22 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
                     and row.action in {"probe_longs", "attack_opening_drive", "selective_probe"}
                 ):
                     # open 포지션 = 체결 증거 → linked_open
-                    # 이미 청산된 포지션(opened_at >= 주문시각) = 체결+청산 완료 → already_reconciled
+                    # 이미 청산된 포지션 = 체결+청산 완료 → already_reconciled
                     # (빠른 트레일이 reconcile 주기보다 먼저 청산하는 케이스 — 06-12 실사례)
+                    # 주문 기록이 포지션 생성보다 몇 초 늦을 수 있어 10분 여유 적용
+                    _ord_created = str(row.created_at or "")
+                    try:
+                        _heal_cut = (
+                            datetime.fromisoformat(_ord_created.replace("Z", "+00:00"))
+                            - timedelta(minutes=10)
+                        ).isoformat()
+                    except (ValueError, TypeError):
+                        _heal_cut = _ord_created
                     _heal_pos = db.execute(
                         select(PaperPositionRecord).where(
                             PaperPositionRecord.desk == row.desk,
                             PaperPositionRecord.symbol == row.symbol,
-                            PaperPositionRecord.opened_at >= row.created_at,
+                            PaperPositionRecord.opened_at >= _heal_cut,
                         ).order_by(PaperPositionRecord.id.desc())
                     ).scalars().first()
                     if _heal_pos is not None:
