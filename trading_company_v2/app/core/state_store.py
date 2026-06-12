@@ -589,7 +589,10 @@ def _send_kis_sell_async(symbol: str, reason: str, entry_profile: str) -> None:
                     broker_state="submitted" if _ok else "dispatch_failed",
                     reason=f"auto_sell:{reason}"[:100],
                     message=("" if _ok else last_err)[:300],
-                    effect_status="pending" if _ok else "sell_dispatch_failed",
+                    # [2026-06-12] 감사 전용 기록 — settled로 마감 (pending이면 broker_order_id
+                    # 추적 없이 영구 잔류 → has_pending_exit 가드레일이 신규 진입 차단.
+                    # 실제 체결 정합성은 KIS 잔고 sync(kis_sold)가 담당)
+                    effect_status="settled" if _ok else "sell_dispatch_failed",
                     payload={"entry_profile": entry_profile, "auto_sell_reason": reason},
                 ))
                 _adb.commit()
