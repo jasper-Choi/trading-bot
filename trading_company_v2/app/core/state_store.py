@@ -3826,18 +3826,24 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
                     row.request_status == "submitted"
                     and row.action in {"probe_longs", "attack_opening_drive", "selective_probe"}
                 ):
+                    # open 포지션 = 체결 증거 → linked_open
+                    # 이미 청산된 포지션(opened_at >= 주문시각) = 체결+청산 완료 → already_reconciled
+                    # (빠른 트레일이 reconcile 주기보다 먼저 청산하는 케이스 — 06-12 실사례)
                     _heal_pos = db.execute(
                         select(PaperPositionRecord).where(
                             PaperPositionRecord.desk == row.desk,
                             PaperPositionRecord.symbol == row.symbol,
-                            PaperPositionRecord.status == "open",
                             PaperPositionRecord.opened_at >= row.created_at,
-                        )
+                        ).order_by(PaperPositionRecord.id.desc())
                     ).scalars().first()
                     if _heal_pos is not None:
                         row.request_status = "filled"
-                        row.effect_status = "linked_open"
-                        row.linked_position_symbol = _heal_pos.symbol
+                        if _heal_pos.status == "open":
+                            row.effect_status = "linked_open"
+                            row.linked_position_symbol = _heal_pos.symbol
+                        else:
+                            row.effect_status = "already_reconciled"
+                            row.linked_closed_symbol = _heal_pos.symbol
                         updated += 1
                 continue
             if row.action in {"probe_longs", "attack_opening_drive", "selective_probe"}:
