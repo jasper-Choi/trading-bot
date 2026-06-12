@@ -3817,6 +3817,28 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
                 updated += 1
                 continue
             if row.request_status not in {"filled", "partial"}:
+                # [2026-06-12] 자가 치유: KIS 주문 상태조회가 간헐 500으로 실패하면
+                # submitted 매수가 영구 pending 잔류 → has_pending_entry 가드레일이
+                # 후속 진입을 계속 차단 (1075/1087/1088 실사례).
+                # 잔고 sync가 생성한 동일 종목 open 포지션(opened_at >= 주문시각)은
+                # 체결의 확정 증거 → filled/linked_open으로 자동 해소.
+                if (
+                    row.request_status == "submitted"
+                    and row.action in {"probe_longs", "attack_opening_drive", "selective_probe"}
+                ):
+                    _heal_pos = db.execute(
+                        select(PaperPositionRecord).where(
+                            PaperPositionRecord.desk == row.desk,
+                            PaperPositionRecord.symbol == row.symbol,
+                            PaperPositionRecord.status == "open",
+                            PaperPositionRecord.opened_at >= row.created_at,
+                        )
+                    ).scalars().first()
+                    if _heal_pos is not None:
+                        row.request_status = "filled"
+                        row.effect_status = "linked_open"
+                        row.linked_position_symbol = _heal_pos.symbol
+                        updated += 1
                 continue
             if row.action in {"probe_longs", "attack_opening_drive", "selective_probe"}:
                 open_position = db.execute(
