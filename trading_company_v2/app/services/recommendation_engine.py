@@ -518,7 +518,16 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # ── 3b-pre. Strategy S25: 섹터 Wave — 동일 섹터 2종목 이상 10%+ 급등 시 미동참 종목 포착
     # 조건: stock_leaders에서 같은 섹터 2개 이상 gap≥10% → 섹터 laggard 진입
     # 장 중에만 유효, STRESSED 차단, 0.20x selective_probe
-    if stock_leaders and session.get("korea_mid_session") and regime != "STRESSED" and stance != "DEFENSE":
+    # [2026-06-12] 13:30 KST 이후 신규 진입 차단: 아침 파동을 오후에 쫓아 들어가면
+    # 모멘텀 소진 — 06-12 실사례: 14시 이후 진입분(-1.54/-2.6/-0.92)이 당일 손실 대부분
+    try:
+        from datetime import datetime as _sw_dt
+        from zoneinfo import ZoneInfo as _sw_zi
+        _sw_now = _sw_dt.now(_sw_zi("Asia/Seoul"))
+        _sw_window_ok = (_sw_now.hour, _sw_now.minute) < (13, 30)
+    except Exception:
+        _sw_window_ok = True
+    if stock_leaders and session.get("korea_mid_session") and regime != "STRESSED" and stance != "DEFENSE" and _sw_window_ok:
         try:
             from app.services.macro_sector_map import detect_sector_wave, get_sector_laggards
             _wave = detect_sector_wave(stock_leaders, min_gap_pct=10.0, min_count=2)

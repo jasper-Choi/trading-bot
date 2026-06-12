@@ -888,6 +888,25 @@ class ExecutionAgent(BaseAgent):
         total_pnl = sum(float(t.get("pnl_pct", 0.0) or 0.0) for t in relevant)
         return win_rate >= 0.42 and total_pnl >= 8.0
 
+    def _daily_entry_cap_hit(self, desk: str, symbol: str, cap: int = 2) -> bool:
+        """[2026-06-12] 같은 종목 하루 재진입 상한 (기본 2회, korea 전용).
+
+        같은 신호(sector_wave 등)가 하루 종일 유지되면 동일 종목을 반복
+        매수 → 오후 모멘텀 소진 구간에서 손실 누적 (06-12 실사례: 036930
+        4회 진입 합산 -3.7%). 오늘 개시된 청산 기록이 cap 이상이면 추가
+        진입 차단 — 날짜가 바뀌면 자동 초기화. 한국 장은 KST 09~15:30
+        = UTC 00~06:30이라 UTC 날짜 비교로 충분.
+        """
+        if not symbol or desk != "korea":
+            return False
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        n = sum(
+            1 for t in (self.closed_positions or [])
+            if t.get("desk") == desk and t.get("symbol") == symbol
+            and str(t.get("opened_at", "") or "")[:10] == today
+        )
+        return n >= cap
+
     def _pick_symbol(self, desk: str, plan: dict) -> tuple[str, list[str]]:
         notes: list[str] = []
         candidates = []
@@ -914,8 +933,11 @@ class ExecutionAgent(BaseAgent):
             # 심볼 edge 상태 — cold(연속손실)이면 차단 (기존엔 size 축소만 했음)
             edge = self._symbol_edge_state(desk, symbol)
             symbol_cold = not edge.get("entry_allowed", True)
-            if existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold:
-                if symbol_cold and not (existing_open or cooldown_loss or repeated_loss_block or extended_block):
+            daily_cap = self._daily_entry_cap_hit(desk, symbol)
+            if existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold or daily_cap:
+                if daily_cap and not (existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold):
+                    notes.append(f"daily entry cap: {symbol} 오늘 2회 진입 완료 — 재진입 차단")
+                elif symbol_cold and not (existing_open or cooldown_loss or repeated_loss_block or extended_block):
                     notes.append(f"symbol cold streak: {symbol} edge={edge.get('tone')} score={edge.get('score')} — skipped")
                 continue
             if idx > 0:
@@ -1073,6 +1095,9 @@ class ExecutionAgent(BaseAgent):
         reentry_override = self._quality_reentry_override(desk, symbol, plan)
         cooldown_loss = self._recent_loss_cooldown(desk, symbol) and not reentry_override
         repeated_loss_block = self._repeated_loss_block(desk, symbol)
+        # [2026-06-12] 하루 2회 재진입 상한 — repeated_loss_block과 동일하게 차단 처리
+        if not repeated_loss_block and self._daily_entry_cap_hit(desk, symbol):
+            repeated_loss_block = True
         extended_symbol_block = self._extended_symbol_block(desk, symbol)
         desk_loss_pressure = self._desk_loss_pressure(desk)
         # crypto_recovery_mode: Korea 병행 여부와 무관하게 crypto는 항상 loss_pressure 비차단

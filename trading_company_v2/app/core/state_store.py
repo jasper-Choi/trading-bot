@@ -3100,21 +3100,23 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
 
         now = utcnow_iso()
 
-        # [2026-06-11] kis_hold 트레일 익절 직후 재생성 방지 (30분 가드)
-        # 매도 주문 발송 → 체결/잔고 반영 전에 sync가 돌면 KIS에 여전히 보유로 보여
-        # kis_hold가 재생성되고 트레일이 재발동 → 중복 매도 주문 루프 발생 가능
+        # [2026-06-12] 유령 재생성 방지 확장 (기존: kis_hold_trail_profit만 → 전체 청산)
+        # 봇 청산(korea_trail/no_momentum_cut/early_failure 등) 후 KIS 매도가 잔고에
+        # 반영되기 전 sync가 돌면 유령 포지션 재생성 → 재청산 → 손실 이중 집계
+        # (06-12 실사례: 095610 -1.07×2, 036930 -2.6×2 중복 기록).
+        # 청산 후 30분간 재생성 금지. 단, 청산 이후 새 매수 주문이 있으면
+        # 정상 재진입으로 보고 허용.
         _recent_cutoff = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
-        recent_trail_sold = {
-            r.symbol
-            for r in db.execute(
-                select(PaperPositionRecord).where(
-                    PaperPositionRecord.desk == "korea",
-                    PaperPositionRecord.status == "closed",
-                    PaperPositionRecord.closed_reason == "kis_hold_trail_profit",
-                    PaperPositionRecord.closed_at >= _recent_cutoff,
-                )
-            ).scalars().all()
-        }
+        recent_closed_at: dict[str, str] = {}
+        for r in db.execute(
+            select(PaperPositionRecord).where(
+                PaperPositionRecord.desk == "korea",
+                PaperPositionRecord.status == "closed",
+                PaperPositionRecord.closed_at >= _recent_cutoff,
+            )
+        ).scalars().all():
+            if str(r.closed_at or "") > recent_closed_at.get(r.symbol, ""):
+                recent_closed_at[r.symbol] = str(r.closed_at or "")
 
         # 1. KIS에 있는데 paper에 없으면 → 추가
         capital_base = float(settings.live_capital_krw or settings.paper_capital_krw or 1.0)
@@ -3122,8 +3124,18 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
             sym = str(item.get("market", "") or item.get("symbol", "")).strip()
             if not sym or sym in paper_by_symbol:
                 continue
-            if sym in recent_trail_sold:
-                continue
+            _last_close = recent_closed_at.get(sym, "")
+            if _last_close:
+                _rebuy = db.execute(
+                    select(LiveOrderRecord).where(
+                        LiveOrderRecord.desk == "korea",
+                        LiveOrderRecord.symbol == sym,
+                        LiveOrderRecord.action.in_(["probe_longs", "attack_opening_drive", "selective_probe"]),
+                        LiveOrderRecord.created_at >= _last_close,
+                    ).limit(1)
+                ).scalar_one_or_none()
+                if _rebuy is None:
+                    continue
             balance = float(item.get("balance", 0) or item.get("total_volume", 0) or 0)
             if balance <= 0:
                 continue
