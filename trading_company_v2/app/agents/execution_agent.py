@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from app.agents.base import BaseAgent
 
@@ -596,8 +597,26 @@ class ExecutionAgent(BaseAgent):
         # With -2.5% stop per trade, 2 stops = -5%; block after -5% cumulative or 2 stops
         return stop_like >= 2 or pnl_total <= -5.0
 
+    @staticmethod
+    def _filter_recent_72h(trades: list[dict]) -> list[dict]:
+        """[2026-06-12] 최근 72시간 내 청산 거래만 반환 (closed_at 없으면 유지).
+
+        배경: 거래 빈도가 낮은 주간엔 '최근 N건' 윈도우가 1주+ 전 손실까지
+        끌어와 현재와 무관한 차단을 만든다. 실사례: 06-02/05의 pre_gap_watch
+        손실(현재는 레짐 차단으로 봉인된 전략)이 06-12 sector_wave 진입을 차단
+        — 최근 1주 실거래 2건은 모두 수익이었음. (crypto loss streak 시간감쇠와 동일 원리)
+        """
+        try:
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
+            return [
+                t for t in trades
+                if not str(t.get("closed_at", "") or "") or str(t.get("closed_at", "")) >= cutoff
+            ]
+        except Exception:
+            return trades
+
     def _desk_loss_pressure(self, desk: str) -> bool:
-        recent = self._desk_recent_trades(desk, limit=6)
+        recent = self._filter_recent_72h(self._desk_recent_trades(desk, limit=6))
         if len(recent) < 2:
             return False
         if self._desk_recovery_ready(desk):
@@ -620,7 +639,8 @@ class ExecutionAgent(BaseAgent):
         return losses >= 3 or realized <= -5.0        # 2 × -2.5% stops
 
     def _desk_chronic_drawdown(self, desk: str) -> bool:
-        recent = self._desk_recent_trades(desk, limit=5)
+        # [2026-06-12] loss_pressure와 동일하게 72h 윈도우 적용 (낡은 손실 억압 방지)
+        recent = self._filter_recent_72h(self._desk_recent_trades(desk, limit=5))
         if len(recent) < 4:
             return False
         realized = sum(float(item.get("pnl_pct", 0.0) or 0.0) for item in recent)
