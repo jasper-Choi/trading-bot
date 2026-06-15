@@ -258,6 +258,25 @@ class KoreaStockDeskAgent(BaseAgent):
         with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as executor:
             results = list(executor.map(_fetch, watchlist_items))
 
+        # ── 데이터 무결성 검증 (2026-06-15) — 깨진 캔들 종목 사전 제외 ────────
+        # OHLC 논리위반/갭폭주/스테일 데이터 종목을 스캔 전에 걸러 잘못된 신호 차단
+        # fail-open: 검증 모듈 자체 오류 시 전체 통과 (기존 동작 유지)
+        try:
+            from app.services.data_validation import validate_candles
+            _clean_results = []
+            _dropped = 0
+            for _t, _nm, _cd in results:
+                _v = validate_candles(_cd, min_len=22)
+                if _v.ok:
+                    _clean_results.append((_t, _nm, _cd))
+                else:
+                    _dropped += 1
+            if _dropped:
+                self._last_data_drop = _dropped
+            results = _clean_results
+        except Exception:
+            pass
+
         # ── 수급 데이터 (기관 레이더 종목집합) ──────────────────────────────
         try:
             inst_tickers = get_institutional_tickers()

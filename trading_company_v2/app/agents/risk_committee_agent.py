@@ -135,9 +135,45 @@ class RiskCommitteeAgent(BaseAgent):
             # 0.32 floor: 연패 후 0.10x 회복 진입 × 3개 정도 가능한 수준
             state.risk_budget = max(state.risk_budget, 0.32)
         elif active_desks.issubset({"korea", "us"}) and state.allow_new_entries:
-            # [2026-06-11] 0.18 → 0.22: 실전 10일 검증(손절/트레일 작동 확인) 후
-            # 페이스 소폭 상향 (사용자 지시) — floor만 상향, 상한·감산 로직은 기존 유지
-            state.risk_budget = max(state.risk_budget, 0.22)
+            # [2026-06-15] 켈리 공식 동적 사이징 — 실거래 edge가 사이즈를 좌우.
+            # edge 강함 → floor 상향(페이스↑), edge 약함/음수 → 상한 cap(억제).
+            # 표본 부족(<10)이면 기존 0.22 floor 유지(보수적 기본값).
+            # half-kelly 사용(추정오차/분산 완충) — full-kelly는 과베팅 위험.
+            _kelly_applied = False
+            try:
+                from app.core.state_store import load_paper_closed_positions
+                from app.services.quant_metrics import kelly_fraction
+                _closed = load_paper_closed_positions(limit=60)
+                _pnls = [
+                    float(t.get("pnl_pct", 0) or 0)
+                    for t in _closed
+                    if t.get("desk") in active_desks
+                    and "kis_hold" not in str(t.get("entry_profile", "") or "")
+                    and "manual" not in str(t.get("closed_reason", "") or "")
+                ]
+                if len(_pnls) >= 10:
+                    _k = kelly_fraction(_pnls)
+                    _hk = float(_k.get("half_kelly", 0.0) or 0.0)
+                    if _hk <= 0.0:
+                        state.risk_budget = min(state.risk_budget, 0.15)
+                        _kn = (f"kelly: 음의 edge (half={_hk:.2f} WR={_k['win_rate']:.0%} "
+                               f"payoff={_k['payoff_ratio']:.1f}) → 사이즈 상한 0.15")
+                    elif _hk < 0.15:
+                        state.risk_budget = min(state.risk_budget, 0.25)
+                        _kn = (f"kelly: 약한 edge (half={_hk:.2f} WR={_k['win_rate']:.0%} "
+                               f"payoff={_k['payoff_ratio']:.1f}) → 사이즈 상한 0.25")
+                    else:
+                        _kfloor = min(0.30, round(0.22 + (_hk - 0.15), 2))
+                        state.risk_budget = max(state.risk_budget, _kfloor)
+                        _kn = (f"kelly: 강한 edge (half={_hk:.2f} WR={_k['win_rate']:.0%} "
+                               f"payoff={_k['payoff_ratio']:.1f}) → floor {_kfloor:.2f}")
+                    if _kn not in state.notes:
+                        state.notes.append(_kn)
+                    _kelly_applied = True
+            except Exception:
+                pass
+            if not _kelly_applied:
+                state.risk_budget = max(state.risk_budget, 0.22)
 
         if "risk committee enforcing conservative defaults" not in state.notes:
             state.notes.append("risk committee enforcing conservative defaults")
