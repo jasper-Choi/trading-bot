@@ -945,6 +945,26 @@ class ExecutionAgent(BaseAgent):
         )
         return n >= cap
 
+    def _profit_exit_today(self, desk: str, symbol: str) -> bool:
+        """[2026-06-15] 당일 익절 청산 종목 재진입 차단 (korea 전용, 사용자 지시).
+
+        익절(pnl>0)로 청산했다는 건 상승이 꺾이기 시작한 타이밍 — 같은 자리
+        재진입은 모멘텀 소진 구간 진입이라 불리(06-15 실사례: 403870 익절 +0.11
+        후 재진입 -0.79). 손절 청산은 별도 cooldown 로직이 담당하므로 여기선
+        익절(pnl>0)만 차단. 날짜 바뀌면 자동 초기화.
+        """
+        if not symbol or desk != "korea":
+            return False
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        for t in (self.closed_positions or []):
+            if t.get("desk") != desk or t.get("symbol") != symbol:
+                continue
+            if str(t.get("closed_at", "") or "")[:10] != today:
+                continue
+            if float(t.get("pnl_pct", 0.0) or 0.0) > 0:
+                return True
+        return False
+
     def _pick_symbol(self, desk: str, plan: dict) -> tuple[str, list[str]]:
         notes: list[str] = []
         candidates = []
@@ -972,8 +992,11 @@ class ExecutionAgent(BaseAgent):
             edge = self._symbol_edge_state(desk, symbol)
             symbol_cold = not edge.get("entry_allowed", True)
             daily_cap = self._daily_entry_cap_hit(desk, symbol)
-            if existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold or daily_cap:
-                if daily_cap and not (existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold):
+            profit_reentry = self._profit_exit_today(desk, symbol)
+            if existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold or daily_cap or profit_reentry:
+                if profit_reentry and not (existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold or daily_cap):
+                    notes.append(f"profit re-entry block: {symbol} 당일 익절 청산 — 재진입 자제 (꺾임 신호)")
+                elif daily_cap and not (existing_open or cooldown_loss or repeated_loss_block or extended_block or symbol_cold):
                     notes.append(f"daily entry cap: {symbol} 오늘 2회 진입 완료 — 재진입 차단")
                 elif symbol_cold and not (existing_open or cooldown_loss or repeated_loss_block or extended_block):
                     notes.append(f"symbol cold streak: {symbol} edge={edge.get('tone')} score={edge.get('score')} — skipped")
@@ -1143,6 +1166,9 @@ class ExecutionAgent(BaseAgent):
         repeated_loss_block = self._repeated_loss_block(desk, symbol)
         # [2026-06-12] 하루 2회 재진입 상한 — repeated_loss_block과 동일하게 차단 처리
         if not repeated_loss_block and self._daily_entry_cap_hit(desk, symbol):
+            repeated_loss_block = True
+        # [2026-06-15] 당일 익절 청산 종목 재진입 차단 (사용자 지시)
+        if not repeated_loss_block and self._profit_exit_today(desk, symbol):
             repeated_loss_block = True
         extended_symbol_block = self._extended_symbol_block(desk, symbol)
         desk_loss_pressure = self._desk_loss_pressure(desk)

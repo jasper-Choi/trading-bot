@@ -862,7 +862,7 @@ class CompanyOrchestrator:
             regime=state.regime,
             market_snapshot=state.market_snapshot,
             open_positions=state.open_positions,
-            closed_positions=load_paper_closed_positions(limit=12),
+            closed_positions=load_paper_closed_positions(limit=30),
             daily_summary=state.daily_summary,
             allow_new_entries=provisional_allow_new_entries,
             risk_budget=execution_risk_budget,
