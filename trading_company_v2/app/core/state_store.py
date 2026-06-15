@@ -3810,11 +3810,18 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
     checked = 0
     updated = 0
     with SessionLocal() as db:
+        # [2026-06-15] partial_balance_sync / linked_partial_open도 재검사 대상에 포함.
+        # 부분체결 주문이 이 상태가 되면 다시 reconcile되지 않아 영구 고착 →
+        # _live_execution_guardrails.has_partial이 신규 진입을 영영 차단하는 버그
+        # (1099 실사례: 06-12 131290 10/54주 부분체결 → 3일간 진입 0건).
+        # 체결분 포지션이 청산되면 already_reconciled로 자동 해소되도록 함.
         rows = db.execute(
             select(LiveOrderRecord)
             .where(
                 LiveOrderRecord.broker_live.is_(True),
-                LiveOrderRecord.effect_status.in_(["pending", "awaiting_balance_sync"]),
+                LiveOrderRecord.effect_status.in_(
+                    ["pending", "awaiting_balance_sync", "partial_balance_sync", "linked_partial_open"]
+                ),
             )
             .order_by(LiveOrderRecord.id.desc())
             .limit(30)
@@ -3891,6 +3898,18 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
                         row.linked_closed_symbol = closed_position.symbol
                         updated += 1
                         continue
+                    # [2026-06-15] 부분체결인데 체결분 포지션 흔적이 전혀 없고 4h+ 경과 →
+                    # 미체결 잔량 만료로 보고 마감 (한국장 미체결분은 장 마감 시 자동취소).
+                    # 영구 partial_balance_sync 잔류 → 진입 차단 방지 (1099 이중 안전장치).
+                    if row.request_status == "partial":
+                        try:
+                            _age_cut = (datetime.now(timezone.utc) - timedelta(hours=4)).isoformat()
+                            if str(row.created_at or "") < _age_cut:
+                                row.effect_status = "settled"
+                                updated += 1
+                                continue
+                        except Exception:
+                            pass
                     row.effect_status = "partial_balance_sync" if row.request_status == "partial" else "awaiting_balance_sync"
                     continue
                 row.effect_status = "linked_partial_open" if row.request_status == "partial" else "linked_open"
