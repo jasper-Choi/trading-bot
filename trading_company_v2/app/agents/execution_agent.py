@@ -888,6 +888,44 @@ class ExecutionAgent(BaseAgent):
         total_pnl = sum(float(t.get("pnl_pct", 0.0) or 0.0) for t in relevant)
         return win_rate >= 0.42 and total_pnl >= 8.0
 
+    def _strategy_kelly_multiplier(self, strategy_id: str, min_trades: int = 8) -> tuple[float | None, str]:
+        """[2026-06-15] 전략별 켈리 기반 사이즈 배수 — hot/cold streak보다 정밀.
+
+        해당 전략의 실거래 트레이드로 half-kelly 계산:
+          half_kelly <= -0.03 (뚜렷한 음의 edge) → ×0.40 (강한 억제, 0 아님 — 블랙리스트 금지)
+          half_kelly >=  0.10 (강한 양의 edge)   → ×1.25 (부스트)
+          그 사이 (중립)                          → ×1.00 (유지)
+        표본 부족(<min_trades)이면 None → 호출측이 hot/cold streak로 폴백.
+
+        근거(06-15 리포트): sector_wave half-K -0.26 PF0.56(음의 edge) /
+        new_high_breakout half-K +0.03 PF1.77(양호). 데이터가 사이즈를 좌우 —
+        성과 변하면 배수도 자동으로 따라감(동적, 영구 차단 아님).
+        """
+        if not strategy_id:
+            return None, ""
+        relevant = [
+            float(t.get("pnl_pct", 0.0) or 0.0)
+            for t in (self.closed_positions or [])[:40]
+            if (str(t.get("strategy_id", "") or "") == strategy_id
+                or str(t.get("entry_profile", "") or "") == strategy_id.split(".", 1)[-1])
+            and not self._is_retired_strategy_trade(t)
+        ]
+        if len(relevant) < min_trades:
+            return None, ""
+        try:
+            from app.services.quant_metrics import kelly_fraction, profit_factor
+            k = kelly_fraction(relevant)
+            _pf = profit_factor(relevant)
+        except Exception:
+            return None, ""
+        hk = float(k.get("half_kelly", 0.0) or 0.0)
+        short = strategy_id.split(".", 1)[-1]
+        if hk <= -0.03:
+            return 0.40, f"strategy kelly: {short} 음의 edge (half-K {hk:.2f}, PF {_pf:.2f}) → size ×0.40"
+        if hk >= 0.10:
+            return 1.25, f"strategy kelly: {short} 강한 edge (half-K {hk:.2f}, PF {_pf:.2f}) → size ×1.25"
+        return 1.0, f"strategy kelly: {short} 중립 edge (half-K {hk:.2f}, PF {_pf:.2f}) → size ×1.00"
+
     def _daily_entry_cap_hit(self, desk: str, symbol: str, cap: int = 2) -> bool:
         """[2026-06-12] 같은 종목 하루 재진입 상한 (기본 2회, korea 전용).
 
@@ -1005,8 +1043,16 @@ class ExecutionAgent(BaseAgent):
         # ── 전략 cold streak 체크 ─────────────────────────────────────────────
         # 특정 전략이 WR < 30% or 합산 PnL <= -10% → 사이즈 50% 축소
         _strategy_id_for_cold = str(plan.get("strategy_id", "") or "")
-        _strategy_cold = desk in {"korea", "crypto"} and self._strategy_cold_streak(_strategy_id_for_cold)
-        if _strategy_cold:
+        # [2026-06-15] 전략별 켈리 사이징을 1순위로 — hot/cold streak보다 정밀.
+        # 표본 충분(>=8)하면 켈리 배수(음의 edge ×0.40 / 강한 edge ×1.25 / 중립 ×1.0),
+        # 부족하면 기존 hot/cold streak로 폴백. 데이터가 사이즈를 좌우(블랙리스트 아님).
+        _kelly_mult, _kelly_note = (None, "")
+        if desk in {"korea", "crypto"}:
+            _kelly_mult, _kelly_note = self._strategy_kelly_multiplier(_strategy_id_for_cold)
+        if _kelly_mult is not None:
+            risk_scaled_notional = round(risk_scaled_notional * _kelly_mult, 2)
+            rotation_notes.append(_kelly_note)
+        elif desk in {"korea", "crypto"} and self._strategy_cold_streak(_strategy_id_for_cold):
             _cold_scale = 0.50
             risk_scaled_notional = round(risk_scaled_notional * _cold_scale, 2)
             rotation_notes.append(
