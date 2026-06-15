@@ -1,6 +1,42 @@
 # Trading Company V2 Handoff
 
-## 최신: Claude - 2026-06-12 세션6 (장중 차단버그 연쇄 수정 + 손실 패턴 3종 수정)
+## 최신: Claude - 2026-06-15 세션7 (자동매매 19개 검증 테스트 정량 메트릭 구현)
+
+### 커밋
+- `7a48e1f` — 부분체결 주문 영구 고착 수정 (봇 3일 진입 차단 — 1099 좀비)
+- `6855de8` — **정량 메트릭 9종 구현 (quant_metrics + data_validation + 켈리 연동 + 리포트)**
+
+### 신규 인프라
+- `app/services/quant_metrics.py` — 순수 라이브러리(표준 라이브러리만):
+  sharpe/sortino/calmar/recovery_factor/profit_factor/max_drawdown,
+  monte_carlo(2000회 부트스트랩)+risk_of_ruin, kelly_fraction, capacity_estimate, factor_beta
+- `app/services/data_validation.py` — validate_candles/price/position_consistency
+  (korea_stock_desk_agent 스캔 전 게이트, 실종목 6/6 통과 검증)
+- `tools/quant_report.py` — 실거래 DB → 19개 테스트 통합 리포트 (VM에서 실행)
+- `risk_committee_agent` — 켈리 동적 사이징(korea/us): 실거래 edge로 risk_budget 좌우
+
+### ⚠️ 리포트 핵심 발견 (실거래 42건, 06-15)
+```
+전체 korea: 샤프0.40 소르티노0.62 PF1.08 Recovery0.10 MDD-13.79% 승률45%
+켈리: half=-0.06 (음의 edge!) → risk_committee가 risk_budget 0.15로 자동 cap
+파산확률 7.5%, 하위5% 시나리오 -24.4%
+
+전략별:
+  new_high_breakout: 20건 45% +14.51% PF1.77 half-K +0.03  ← 양의 edge, 유지
+  sector_wave:       16건 50% -4.54%  PF0.56 half-K -0.26  ← 음의 edge, 손실원
+```
+→ sector_wave가 전체 켈리를 음수로 끌어내림. 승률 50%인데 PF 0.56(큰 손실이
+  작은 이익 다수 잠식). 이번 주 손실의 주범이 정량적으로 확인됨.
+
+### 다음 세션 우선순위
+1. **전략별 켈리를 execution_agent 사이징에 연동** — 전체 켈리(데스크)는 좋은
+   전략까지 억제. sector_wave(음의 edge) 자동 축소 + new_high_breakout(양의 edge) 유지
+2. sector_wave 일시중지 또는 진입조건 강화 검토 (PF 0.56은 구조적 문제)
+3. 팩터 익스포저(19): 코스피 일간수익 회귀 — 데이터 누적 후
+
+---
+
+## 이전: Claude - 2026-06-12 세션6 (장중 차단버그 연쇄 수정 + 손실 패턴 3종 수정)
 
 ### 커밋 순서
 1. `761541f` — desk loss pressure 72h 윈도우 (낡은 손실 소급 차단 해소)
