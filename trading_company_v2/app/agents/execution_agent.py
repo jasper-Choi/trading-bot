@@ -1089,6 +1089,20 @@ class ExecutionAgent(BaseAgent):
                 f"strategy hot streak: {_strategy_id_for_cold} WR>=42% & PnL>=+8% → size ×1.30"
             )
 
+        # [2026-06-16] 개장 직후(09:00~09:05 KST) 변동성 회피 — 사이즈 ×0.4.
+        # 근거(실거래 분해): 봇 전략 최대 손실 3건이 전부 개장 직후 진입 직후 급락
+        # (000150 17초만에 -6.04%, 226950 5초만에 -4.22%). 호가 공백+변동성 폭발
+        # 구간이라 체결과 동시에 무너짐. opening_drive 전략(개장 초반이 핵심)은 예외.
+        if desk == "korea" and "opening_drive" not in str(plan.get("focus", "") or ""):
+            try:
+                from zoneinfo import ZoneInfo
+                _kst = datetime.now(ZoneInfo("Asia/Seoul"))
+                if _kst.hour == 9 and _kst.minute < 5:
+                    risk_scaled_notional = round(risk_scaled_notional * 0.40, 2)
+                    rotation_notes.append("개장 직후 5분 변동성 회피 → size ×0.40 (진입 직후 급락 방지)")
+            except Exception:
+                pass
+
         desk_stop_pressure = self._desk_stop_pressure(desk)
         symbol_stop_pressure = self._symbol_stop_pressure(desk, symbol)
         downgrade_notes: list[str] = []

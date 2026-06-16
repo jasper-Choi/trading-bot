@@ -1986,11 +1986,15 @@ def sync_paper_positions(paper_orders: list[PaperOrder], market_snapshot: dict) 
                 peak_pnl = float(position.peak_pnl_pct or position.pnl_pct or 0.0)
 
                 # ── 진입 직후 모멘텀 없음 → 즉시 컷 (뒤늦게 올라타기 2차 방어선) ──
-                # 조건: 5사이클(~75초) 이내 + peak < 0.3% + 현재 -0.5% 이하
-                # 의미: 진입 후 전혀 올라가지 않고 바로 밀리는 종목 = 모멘텀 소진
+                # [2026-06-16] 손익비 개선: 시간 창 75초→3분, peak 0.3→0.4 완화.
+                # 근거(실거래 45건 분해): no_momentum_cut 평균 -1.33% vs
+                # rapid_korea_stop 평균 -2.56%. 모멘텀 없는 거래를 빠른 작은 컷으로
+                # 잡으면 큰 손절(-2.5%) 도달 전 청산 → 손익비 직접 개선.
+                # 보유 5분 내 25건 승률 32% = 진입 직후 모멘텀 없으면 대부분 짐.
+                # 시간 기반(cycles는 사이클 길이 가변이라 부정확).
                 if (
-                    position.cycles_open <= 5
-                    and peak_pnl < 0.3
+                    minutes_open <= 3.0
+                    and peak_pnl < 0.4
                     and position.pnl_pct <= -0.5
                     and "pyramid" not in pos_focus
                     and "kis_hold" not in pos_focus  # KIS 계좌 직접 보유 포지션은 손절 없음
