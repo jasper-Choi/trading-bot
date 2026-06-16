@@ -278,9 +278,14 @@ def _live_execution_guardrails(live_locks: list[dict]) -> dict[str, object]:
             "notes": [],
         }
 
+    # [2026-06-16] linked_partial_open 제외: 부분체결이어도 체결분이 정상 포지션화
+    # 됐으면 "미해결"이 아님(미체결 잔량은 장 마감 자동취소). 이를 차단하면
+    # 부분체결 1건이 후속 진입을 종일 막음(222800 실사례). partial_balance_sync
+    # (체결분 포지션 못 찾음 = 진짜 미해결)는 차단 유지.
     has_partial = any(
-        str(item.get("request_status") or "") == "partial"
-        or str(item.get("effect_status") or "").startswith("partial")
+        (str(item.get("request_status") or "") == "partial"
+         or str(item.get("effect_status") or "").startswith("partial"))
+        and str(item.get("effect_status") or "") != "linked_partial_open"
         for item in live_locks
     )
     has_pending_entry = any(

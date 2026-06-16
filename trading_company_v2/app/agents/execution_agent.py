@@ -955,13 +955,20 @@ class ExecutionAgent(BaseAgent):
         """
         if not symbol or desk != "korea":
             return False
+        # [2026-06-16] pnl>0뿐 아니라 익절성 청산사유도 차단 — target_hit가 pnl=0
+        # (가짜진입가 정정값)이라 pnl 조건을 못 넘겨 재진입된 222800 실사례.
+        # 익절 의도 청산(target/trail)은 "상승 꺾임" 신호이므로 pnl 무관 차단.
+        _profit_reasons = {
+            "target_hit", "korea_trail", "rapid_korea_trail", "rapid_korea_target",
+            "korea_newhi_trail", "kis_hold_trail_profit",
+        }
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         for t in (self.closed_positions or []):
             if t.get("desk") != desk or t.get("symbol") != symbol:
                 continue
             if str(t.get("closed_at", "") or "")[:10] != today:
                 continue
-            if float(t.get("pnl_pct", 0.0) or 0.0) > 0:
+            if float(t.get("pnl_pct", 0.0) or 0.0) > 0 or str(t.get("closed_reason", "") or "") in _profit_reasons:
                 return True
         return False
 
