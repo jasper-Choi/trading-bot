@@ -277,6 +277,23 @@ class KoreaStockDeskAgent(BaseAgent):
         except Exception:
             pass
 
+        # ── ETF/ETN 제외 (2026-06-16) — 개별주 모멘텀/돌파/평균회귀 전략에 부적합 ──
+        # 동적 거래대금 스크랩에 지수·해외·레버리지 ETF가 섞여 들어와 near_120d 등이
+        # 잡음(360750 TIGER 미국S&P500 실사례). ETF는 변동성·역학이 개별주와 달라
+        # 전략 신호가 무의미 → 종목명 기준으로 스캔 단계에서 제외.
+        _ETF_KW = (
+            "KODEX", "TIGER", "KBSTAR", "ARIRANG", "KOSEF", "HANARO", "TIMEFOLIO",
+            "ACE ", "SOL ", "PLUS ", "RISE ", "KIWOOM", "FOCUS", "BNK ", "1Q ",
+            "ETF", "ETN", "레버리지", "인버스", "선물", "채권", "국고", "달러",
+        )
+        _before = len(results)
+        results = [
+            (t, n, c) for (t, n, c) in results
+            if not any(kw in str(n).upper() for kw in _ETF_KW)
+        ]
+        if _before != len(results):
+            self._last_etf_drop = _before - len(results)
+
         # ── 수급 데이터 (기관 레이더 종목집합) ──────────────────────────────
         try:
             inst_tickers = get_institutional_tickers()
