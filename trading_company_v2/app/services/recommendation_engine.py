@@ -662,13 +662,21 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 f"3일 거래량={_n120.get('vol_ratio', 0):.1f}x — 매집 신호",
                 "S24: 돌파 전 선행 포지션 — 0.15x 소형, 돌파 확인 시 S22로 추가 진입",
             ]
+        # [2026-06-16] near_120d 전용 가격맵 — _bk_candidate_prices에는 near_120d
+        # 종목이 없어 rotation 시 _fetch_live_price 폴백 → 잘못된 진입가 기록 버그
+        # (222800 entry 28,355원 vs 실제 132,400원 = 가짜 +359%). 후보 자체 가격 사용.
+        _n120_prices = {
+            str(c.get("ticker", "")): float(c.get("current_price", 0.0) or 0.0)
+            for c in near_120d_candidates
+            if c.get("ticker") and float(c.get("current_price", 0.0) or 0.0) > 0
+        }
         return {
             "action": _n120_action,
             "size": _n120_size,
             "focus": _n120_focus,
             "symbol": _n120_ticker,
             "reference_price": _n120_price,
-            "candidate_prices": _bk_candidate_prices,
+            "candidate_prices": _n120_prices,
             "candidate_symbols": _n120_syms[:3],
             "focus_tag": _n120_tag,
             "strategy_id": _n120_strat,

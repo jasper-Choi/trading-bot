@@ -3914,6 +3914,24 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
                     continue
                 row.effect_status = "linked_partial_open" if row.request_status == "partial" else "linked_open"
                 row.linked_position_symbol = open_position.symbol
+                # [2026-06-16] KIS 실체결가로 entry_price 보정 — reference_price가
+                # _fetch_live_price 폴백(개장 직후 이상 틱 등)으로 잘못 기록되는 버그 방어.
+                # KIS 체결가는 항상 진실. 5% 이상 괴리 시 체결가로 교정 + pnl 재계산.
+                # (222800 entry 28,355 vs 실체결 132,400 = 가짜 +359% 같은 사고 차단)
+                _avg_fill = _safe_float(payload.get("avg_fill_price"))
+                if _avg_fill > 0 and open_position.entry_price > 0:
+                    _dev = abs(_avg_fill - open_position.entry_price) / open_position.entry_price
+                    if _dev > 0.05:
+                        _old = open_position.entry_price
+                        open_position.entry_price = _avg_fill
+                        if open_position.current_price <= 0 or abs(open_position.current_price - _avg_fill) / _avg_fill > 0.50:
+                            open_position.current_price = _avg_fill
+                        open_position.pnl_pct = round(
+                            (open_position.current_price - _avg_fill) / _avg_fill * 100, 2
+                        )
+                        open_position.peak_pnl_pct = max(open_position.pnl_pct, 0.0)
+                        print(f"[entry-fix] {open_position.symbol} entry {_old:.0f}→{_avg_fill:.0f} "
+                              f"(KIS 체결가 보정, 괴리 {_dev*100:.0f}%)", flush=True)
                 updated += 1
                 continue
             if row.action in {"reduce_risk", "capital_preservation"}:
