@@ -194,6 +194,25 @@ class ExecutionAgent(BaseAgent):
             return False
         stats = self._strategy_stats(strategy_id)
         if not stats:
+            # [2026-06-17] daily_summary.strategy_performance_stats가 비면(생성 누락)
+            # 검증된 전략조차 recovery_allowed=False → loss pressure에 막히는 버그.
+            # closed_positions로 직접 판정: n>=8 & (PF>=1.2 or half-kelly>0)이면 검증된
+            # 양의 edge 전략 → recovery 허용. new_high_breakout(20건 PF1.77) 해당.
+            # 약한 전략(sector_wave PF0.56, breakout_120d n<8)은 False 유지.
+            _rp = [
+                float(t.get("pnl_pct", 0.0) or 0.0)
+                for t in (self.closed_positions or [])
+                if (str(t.get("strategy_id", "") or "") == strategy_id
+                    or str(t.get("entry_profile", "") or "") == strategy_id.split(".", 1)[-1])
+                and not self._is_retired_strategy_trade(t)
+            ]
+            if len(_rp) >= 8:
+                try:
+                    from app.services.quant_metrics import kelly_fraction, profit_factor
+                    if profit_factor(_rp) >= 1.2 or float(kelly_fraction(_rp).get("half_kelly", 0) or 0) > 0:
+                        return True
+                except Exception:
+                    pass
             return False
         health = str(stats.get("health", "") or "")
         count = int(stats.get("count", stats.get("closed_positions", 0)) or 0)
