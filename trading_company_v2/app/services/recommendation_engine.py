@@ -393,6 +393,16 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         if c.get("ticker") and float(c.get("current_price", 0.0) or 0.0) > 0
     }
 
+    # [2026-06-17] 검증된 new_high_breakout 신호가 진입가능 상태면 약한 전략
+    # (breakout_120d/near_120d, PF 0.04/0.76)이 양보 — 검증 전략 우선순위 보장.
+    # 코드 순서상 약한 전략이 먼저 평가돼 종목을 선점하는 문제 해결.
+    _nhb_signal_ready = (
+        (breakout_confirmed_count >= 1 or breakout_partial_count >= 1)
+        and bk_leader is not None
+        and str(bk_leader.get("signal_bias", "") or "").lower() == "bullish"
+        and float(bk_leader.get("signal_score", 0.0) or 0.0) >= 0.65
+    )
+
     # ── 1. 장외 시간 ────────────────────────────────────────────────────────
     if not (session.get("korea_opening_window") or session.get("korea_mid_session")):
         return {
@@ -575,7 +585,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         and float(c.get("vol_ratio", 0) or 0) >= 1.5
         and float(c.get("rsi14", 0) or 0) >= 55
     ]
-    if _s22_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _is_paused("korea.breakout_120d"):
+    if _s22_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _nhb_signal_ready and not _is_paused("korea.breakout_120d"):
         _b120 = _s22_candidates[0]
         _b120_ticker = str(_b120.get("ticker", ""))
         _b120_name = str(_b120.get("name", _b120_ticker))
@@ -617,7 +627,7 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     # S26 (gap_near_120d): S24 종목이 당일 갭업 +10% 이상이면 → probe_longs 0.25x 업그레이드
     #   근거: 갭업 종목이 120일 고점 근처에 있으면 갭 촉매 + 기술적 돌파가 동시 작동
     # STRESSED만 차단, 기본 0.15x 소형 (돌파 확인 전 리스크 최소화)
-    if near_120d_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _is_paused("korea.near_120d"):
+    if near_120d_candidates and regime != "STRESSED" and stance != "DEFENSE" and not _nhb_signal_ready and not _is_paused("korea.near_120d"):
         _n120 = near_120d_candidates[0]  # dist_pct 내림차순 정렬 (0에 가장 가까운 것)
         _n120_ticker = str(_n120.get("ticker", ""))
         _n120_name = str(_n120.get("name", _n120_ticker))
@@ -690,7 +700,12 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
     #               TRENDING/BULLISH에서는 모멘텀 유효 → 레짐별 분리 적용
     # live 실적: P&L 1.42 (backtest 0.72보다 양호, n=15 소표본)
     _b_regime_ok = regime not in {"RANGING", "STRESSED"}  # TRENDING/BULLISH만 허용
-    if _b_regime_ok and breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
+    # [2026-06-17] RANGING에서도 confirmed new_high_breakout 소액 허용 (사용자 승인).
+    # 근거: 검증된 유일 전략(실거래 20건 +14.76% PF1.77)을 RANGING에서 차단하면
+    # 약한 전략만 거래 → 손실 → loss pressure 악순환. confirmed(4개 조건 충족)만,
+    # 소액(0.15x), STRESSED는 안전 위해 차단 유지. partial은 RANGING 차단 유지.
+    _b_confirmed_allowed = _b_regime_ok or regime == "RANGING"
+    if _b_confirmed_allowed and breakout_confirmed_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_score = float(bk_leader.get("candidate_score", 0.0) or 0.0)
@@ -721,6 +736,9 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
         _bk_base_size = "0.70x" if stance == "OFFENSE" else "0.50x"
         _bk_raw_size = "0.35x" if (_k_vix_fear or _k_us_risk_off) else _bk_base_size
         _bk_size = _quality_size(_bk_raw_size, _bk_quality)
+        # [2026-06-17] RANGING에선 소액 캡 0.15x (TRENDING 대비 보수적 — 모멘텀 불확실)
+        if regime == "RANGING":
+            _bk_size = "0.15x"
         _us_note = f"US {_k_us_regime} / VIX={_k_vix_val:.1f}({_k_vix_regime}) SPY{_k_spy_chg:+.1f}%"
         _bk_price = float(bk_leader.get("current_price", 0.0) or 0.0)
         return {
@@ -743,8 +761,10 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
             "quality_score": quality_score,
         }
 
-    # ── 4. Strategy B partial — TRENDING에서만 허용 (RANGING/STRESSED 제외)
-    if _b_regime_ok and breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
+    # ── 4. Strategy B partial — TRENDING + RANGING 허용 (STRESSED 제외)
+    # [2026-06-17] RANGING 허용 (사용자 승인): signal 0.65 게이트가 품질 보장,
+    # RANGING은 소액 캡(0.15x). confirmed가 드물어 partial까지 풀어야 실거래 발생.
+    if _b_confirmed_allowed and breakout_partial_count >= 1 and bk_leader and stance != "DEFENSE" and not _is_paused("korea.new_high_breakout"):
         bk_ticker = str(bk_leader.get("ticker", ""))
         bk_name = str(bk_leader.get("name", bk_ticker))
         bk_bias = str(bk_leader.get("signal_bias", "neutral") or "neutral").lower()
@@ -761,9 +781,11 @@ def build_korea_plan(stance: str, regime: str, payload: dict[str, Any], session:
                 "quality_score": quality_score,
             }
         _bk_price2 = float(bk_leader.get("current_price", 0.0) or 0.0)
+        # [2026-06-17] RANGING은 partial 소액 0.10x (TRENDING 0.35x 대비 보수적)
+        _bk_partial_size = "0.10x" if regime == "RANGING" else "0.35x"
         return {
             "action": "selective_probe",
-            "size": "0.35x",
+            "size": _bk_partial_size,
             "focus": f"new_high_breakout partial: {bk_name} — 3/3 signals confirmed.",
             "symbol": bk_ticker,
             "reference_price": _bk_price2,  # execution_agent 폴백용 (primary 종목 전용)
