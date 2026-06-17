@@ -87,66 +87,84 @@ def place_order(order: PaperOrder) -> KisOrderResult:
             },
         )
 
-    try:
-        response = _request(
-            "POST",
-            KIS_ORDER_CASH_PATH,
-            json_body=payload,
-            tr_id=_order_tr_id(order.action),
-            include_hashkey=True,
-        )
-        output = _extract_output(response)
-        broker_order_id = str(
-            output.get("ODNO")
-            or output.get("odno")
-            or response.get("ODNO")
-            or response.get("odno")
-            or ""
-        )
-        return KisOrderResult(
-            ok=True,
-            request_mode="kis_live",
-            detail={
-                "desk": order.desk,
-                "symbol": order.symbol,
-                "action": order.action,
-                "side": "buy" if _is_buy_action(order.action) else "sell",
-                "ord_dvsn": payload.get("ORD_DVSN", ""),
-                "requested_qty": payload.get("ORD_QTY", ""),
-                "requested_price": payload.get("ORD_UNPR", ""),
-                "broker_order_id": broker_order_id,
-                "ord_gno_brno": str(output.get("KRX_FWDG_ORD_ORGNO") or output.get("ORD_GNO_BRNO") or ""),
-                "broker_state": "submitted",
-                "rt_cd": str(response.get("rt_cd", "") or ""),
-                "msg1": str(response.get("msg1", "") or ""),
-            },
-        )
-    except RequestException as exc:
-        return KisOrderResult(
-            ok=False,
-            request_mode="paper_fallback",
-            detail={
-                "desk": order.desk,
-                "symbol": order.symbol,
-                "action": order.action,
-                "reason": "request_exception",
-                "message": _request_exception_message(exc),
-                "reference_price": order.reference_price,
-                "notional_pct": order.notional_pct,
-            },
-        )
-    except RuntimeError as exc:
-        return KisOrderResult(
-            ok=False,
-            request_mode="paper_fallback",
-            detail={
-                "desk": order.desk,
-                "symbol": order.symbol,
-                "action": order.action,
-                "reason": "kis_error",
-                "message": str(exc),
-            },
-        )
+    # [2026-06-17] 주문 전송 재시도 (사용자 선택 B). 연결 실패(ConnectionError/
+    # ConnectTimeout)는 서버가 요청을 받지 못한 게 확실 → 재시도해도 중복 없음.
+    # ReadTimeout은 서버가 받았을 수 있어(체결 가능성) 재시도 금지 — 중복매수 방지.
+    # 402340 사례(HTTPSConnectionPool 연결오류, KIS 미체결)가 재시도로 살아남.
+    import time as _time_mod
+    from requests.exceptions import ConnectionError as _ConnErr, ConnectTimeout as _ConnTO
+    _max_send_retry = 3
+    for _send_attempt in range(_max_send_retry):
+        try:
+            response = _request(
+                "POST",
+                KIS_ORDER_CASH_PATH,
+                json_body=payload,
+                tr_id=_order_tr_id(order.action),
+                include_hashkey=True,
+            )
+            output = _extract_output(response)
+            broker_order_id = str(
+                output.get("ODNO")
+                or output.get("odno")
+                or response.get("ODNO")
+                or response.get("odno")
+                or ""
+            )
+            return KisOrderResult(
+                ok=True,
+                request_mode="kis_live",
+                detail={
+                    "desk": order.desk,
+                    "symbol": order.symbol,
+                    "action": order.action,
+                    "side": "buy" if _is_buy_action(order.action) else "sell",
+                    "ord_dvsn": payload.get("ORD_DVSN", ""),
+                    "requested_qty": payload.get("ORD_QTY", ""),
+                    "requested_price": payload.get("ORD_UNPR", ""),
+                    "broker_order_id": broker_order_id,
+                    "ord_gno_brno": str(output.get("KRX_FWDG_ORD_ORGNO") or output.get("ORD_GNO_BRNO") or ""),
+                    "broker_state": "submitted",
+                    "rt_cd": str(response.get("rt_cd", "") or ""),
+                    "msg1": str(response.get("msg1", "") or ""),
+                    "send_attempt": _send_attempt + 1,
+                },
+            )
+        except (_ConnErr, _ConnTO) as exc:
+            # 연결 실패 = 서버 미수신 확실 → 재시도 안전 (지수 백오프)
+            if _send_attempt < _max_send_retry - 1:
+                print(f"[kis-order-retry] {order.symbol} {order.action} attempt={_send_attempt+1} "
+                      f"connect-fail, retrying", flush=True)
+                _time_mod.sleep(1.5 * (_send_attempt + 1))
+                continue
+            return KisOrderResult(
+                ok=False, request_mode="paper_fallback",
+                detail={"desk": order.desk, "symbol": order.symbol, "action": order.action,
+                        "reason": "request_exception", "message": _request_exception_message(exc),
+                        "reference_price": order.reference_price, "notional_pct": order.notional_pct,
+                        "send_attempt": _send_attempt + 1},
+            )
+        except RequestException as exc:
+            # ReadTimeout 등 — 서버 수신 가능성 있어 재시도 금지 (중복매수 방지)
+            return KisOrderResult(
+                ok=False, request_mode="paper_fallback",
+                detail={"desk": order.desk, "symbol": order.symbol, "action": order.action,
+                        "reason": "request_exception", "message": _request_exception_message(exc),
+                        "reference_price": order.reference_price, "notional_pct": order.notional_pct},
+            )
+        except RuntimeError as exc:
+            # KIS 응답 에러(rt_cd!=0 등) — 재시도 무의미, 즉시 fallback
+            return KisOrderResult(
+                ok=False, request_mode="paper_fallback",
+                detail={"desk": order.desk, "symbol": order.symbol, "action": order.action,
+                        "reason": "kis_error", "message": str(exc)},
+            )
+    # 모든 재시도 소진 — 도달 불가(루프 내 항상 return)하지만 타입 안전 위해 fallback
+    return KisOrderResult(
+        ok=False, request_mode="paper_fallback",
+        detail={"desk": order.desk, "symbol": order.symbol, "action": order.action,
+                "reason": "request_exception", "message": "all send retries exhausted"},
+    )
 
 
 def get_account_positions() -> list[dict[str, Any]]:
