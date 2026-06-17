@@ -1437,6 +1437,13 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
     for row in positions:
         if row.status != "closed":
             continue
+        # [2026-06-17] kis_hold/manual 청산 제외 — 봇 직접 매수 전략 성과만 집계.
+        # NAVER 루프버그(035420 kis_hold)가 strategy_id=korea.new_high_breakout로
+        # 기록돼 new_high_breakout 통계를 count48/raw_pnl-122%/WR20%로 오염시켜,
+        # 검증된 전략을 recovery_allowed=False로 만들어 진입을 막던 버그.
+        _ep = str(row.entry_profile or "")
+        if "kis" in _ep or "manual" in str(row.closed_reason or ""):
+            continue
         # Only count explicitly-tagged positions. Focus-text inference caused old RANGING-era
         # positions to poison strategy stats (e.g. obvious_trend disabled by pre-gate failures).
         strategy_id = str(row.strategy_id or "unknown")
