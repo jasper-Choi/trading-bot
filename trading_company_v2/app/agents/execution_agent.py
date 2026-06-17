@@ -201,8 +201,14 @@ class ExecutionAgent(BaseAgent):
             # 약한 전략(sector_wave PF0.56, breakout_120d n<8)은 False 유지.
             _short = strategy_id.split(".", 1)[-1]
             def _match(t: dict) -> bool:
+                # [2026-06-17] kis_hold/manual 청산 제외 — NAVER 루프버그(035420 kis_hold,
+                # strategy_id=korea.new_high_breakout) 76건이 봇 전략 성과를 오염시켜
+                # PF/켈리를 낮춰 recovery를 막던 버그. 봇 직접 매수 거래만 집계.
+                _ep = str(t.get("entry_profile", "") or "")
+                if "kis" in _ep or "manual" in str(t.get("closed_reason", "") or ""):
+                    return False
                 return (str(t.get("strategy_id", "") or "") == strategy_id
-                        or str(t.get("entry_profile", "") or "") == _short) \
+                        or _ep == _short) \
                     and not self._is_retired_strategy_trade(t)
             _rp = [float(t.get("pnl_pct", 0.0) or 0.0) for t in (self.closed_positions or []) if _match(t)]
             # 주입된 윈도우(최근 60건)에 부족하면 DB 전체 기간 조회 — 검증 전략의
@@ -929,11 +935,15 @@ class ExecutionAgent(BaseAgent):
         """
         if not strategy_id:
             return None, ""
+        _short = strategy_id.split(".", 1)[-1]
+        # kis_hold/manual 제외 (NAVER 루프버그 오염 방지 — recovery_allowed와 동일)
         relevant = [
             float(t.get("pnl_pct", 0.0) or 0.0)
             for t in (self.closed_positions or [])[:40]
-            if (str(t.get("strategy_id", "") or "") == strategy_id
-                or str(t.get("entry_profile", "") or "") == strategy_id.split(".", 1)[-1])
+            if "kis" not in str(t.get("entry_profile", "") or "")
+            and "manual" not in str(t.get("closed_reason", "") or "")
+            and (str(t.get("strategy_id", "") or "") == strategy_id
+                 or str(t.get("entry_profile", "") or "") == _short)
             and not self._is_retired_strategy_trade(t)
         ]
         if len(relevant) < min_trades:
