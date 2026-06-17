@@ -199,13 +199,20 @@ class ExecutionAgent(BaseAgent):
             # closed_positions로 직접 판정: n>=8 & (PF>=1.2 or half-kelly>0)이면 검증된
             # 양의 edge 전략 → recovery 허용. new_high_breakout(20건 PF1.77) 해당.
             # 약한 전략(sector_wave PF0.56, breakout_120d n<8)은 False 유지.
-            _rp = [
-                float(t.get("pnl_pct", 0.0) or 0.0)
-                for t in (self.closed_positions or [])
-                if (str(t.get("strategy_id", "") or "") == strategy_id
-                    or str(t.get("entry_profile", "") or "") == strategy_id.split(".", 1)[-1])
-                and not self._is_retired_strategy_trade(t)
-            ]
+            _short = strategy_id.split(".", 1)[-1]
+            def _match(t: dict) -> bool:
+                return (str(t.get("strategy_id", "") or "") == strategy_id
+                        or str(t.get("entry_profile", "") or "") == _short) \
+                    and not self._is_retired_strategy_trade(t)
+            _rp = [float(t.get("pnl_pct", 0.0) or 0.0) for t in (self.closed_positions or []) if _match(t)]
+            # 주입된 윈도우(최근 60건)에 부족하면 DB 전체 기간 조회 — 검증 전략의
+            # 과거 거래(예: new_high_breakout 06-02분)가 윈도우 밖으로 밀린 경우 보정.
+            if len(_rp) < 8:
+                try:
+                    from app.core.state_store import load_paper_closed_positions
+                    _rp = [float(t.get("pnl_pct", 0.0) or 0.0) for t in load_paper_closed_positions(limit=300) if _match(t)]
+                except Exception:
+                    pass
             if len(_rp) >= 8:
                 try:
                     from app.services.quant_metrics import kelly_fraction, profit_factor
