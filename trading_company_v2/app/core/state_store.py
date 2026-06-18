@@ -3823,6 +3823,52 @@ def reconcile_live_order_effects(prices: dict[str, float]) -> dict:
     checked = 0
     updated = 0
     with SessionLocal() as db:
+        # [2026-06-18] fallback(KIS 미체결) 매수의 paper position 자동 shadow 마킹.
+        # 어제 shadow 제외 코드는 수동 마킹에만 의존 → 새 fallback(319660)이 통계
+        # 오염. fallback 매수 주문(noop)을 감지해 대응 paper를 shadow_unfilled로
+        # 마킹 → 통계(strategy_performance_stats/켈리/recovery)에서 자동 제외.
+        try:
+            _td = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            _fb_buys = db.execute(
+                select(LiveOrderRecord).where(
+                    LiveOrderRecord.request_status == "fallback",
+                    LiveOrderRecord.action.in_(["probe_longs", "selective_probe", "attack_opening_drive"]),
+                    LiveOrderRecord.effect_status == "noop",
+                    LiveOrderRecord.created_at >= _td,
+                )
+            ).scalars().all()
+            for _fb in _fb_buys:
+                _cut = _fb.created_at[:16]  # 분 단위 근사 (paper는 주문 직후 생성)
+                _pos = db.execute(
+                    select(PaperPositionRecord).where(
+                        PaperPositionRecord.desk == "korea",
+                        PaperPositionRecord.symbol == _fb.symbol,
+                        PaperPositionRecord.opened_at >= _cut,
+                    ).order_by(PaperPositionRecord.id.desc())
+                ).scalars().first()
+                if _pos is None:
+                    _fb.effect_status = "shadow_no_paper"  # 재처리 방지
+                    continue
+                if not str(_pos.closed_reason or "").startswith("shadow_"):
+                    if _pos.status == "closed":
+                        _pos.closed_reason = f"shadow_unfilled_{_pos.closed_reason or 'exit'}"
+                    else:
+                        # open이면 즉시 청산 — KIS 미체결 = 봇 미보유 (정합성).
+                        # closed_reason이 shadow_로 시작 → 통계 자동 제외.
+                        _pos.status = "closed"
+                        _pos.closed_at = utcnow_iso()
+                        _pos.exit_price = _pos.entry_price
+                        _pos.pnl_pct = 0.0
+                        _pos.closed_reason = "shadow_unfilled_no_fill"
+                    print(f"[shadow-mark] {_fb.symbol} paper#{_pos.id} "
+                          f"KIS 미체결 → shadow 청산/마킹", flush=True)
+                    updated += 1
+                _fb.effect_status = "shadow_marked"  # 재처리 방지
+            if _fb_buys:
+                db.commit()
+        except Exception as _shexc:
+            print(f"[shadow-mark] error: {_shexc}", flush=True)
+
         # [2026-06-15] partial_balance_sync / linked_partial_open도 재검사 대상에 포함.
         # 부분체결 주문이 이 상태가 되면 다시 reconcile되지 않아 영구 고착 →
         # _live_execution_guardrails.has_partial이 신규 진입을 영영 차단하는 버그
