@@ -205,7 +205,8 @@ class ExecutionAgent(BaseAgent):
                 # strategy_id=korea.new_high_breakout) 76건이 봇 전략 성과를 오염시켜
                 # PF/켈리를 낮춰 recovery를 막던 버그. 봇 직접 매수 거래만 집계.
                 _ep = str(t.get("entry_profile", "") or "")
-                if "kis" in _ep or "manual" in str(t.get("closed_reason", "") or ""):
+                _cr = str(t.get("closed_reason", "") or "")
+                if "kis" in _ep or "manual" in _cr or _cr.startswith("shadow_"):
                     return False
                 return (str(t.get("strategy_id", "") or "") == strategy_id
                         or _ep == _short) \
@@ -942,6 +943,7 @@ class ExecutionAgent(BaseAgent):
             for t in (self.closed_positions or [])[:40]
             if "kis" not in str(t.get("entry_profile", "") or "")
             and "manual" not in str(t.get("closed_reason", "") or "")
+            and not str(t.get("closed_reason", "") or "").startswith("shadow_")
             and (str(t.get("strategy_id", "") or "") == strategy_id
                  or str(t.get("entry_profile", "") or "") == _short)
             and not self._is_retired_strategy_trade(t)

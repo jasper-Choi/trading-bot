@@ -32,6 +32,7 @@ def _load_trades(desk: str = "korea") -> list[dict]:
              AND entry_profile NOT LIKE '%kis_hold%'
              AND entry_profile NOT LIKE '%manual%'
              AND closed_reason NOT LIKE '%manual%'
+             AND closed_reason NOT LIKE 'shadow_%'
            ORDER BY closed_at""",
         (desk,),
     ).fetchall()

@@ -1442,7 +1442,9 @@ def _strategy_performance_stats(positions: list[PaperPositionRecord], limit: int
         # 기록돼 new_high_breakout 통계를 count48/raw_pnl-122%/WR20%로 오염시켜,
         # 검증된 전략을 recovery_allowed=False로 만들어 진입을 막던 버그.
         _ep = str(row.entry_profile or "")
-        if "kis" in _ep or "manual" in str(row.closed_reason or ""):
+        _cr = str(row.closed_reason or "")
+        # [2026-06-18] shadow_ 마킹(KIS 미체결 fallback) 추가 제외 — 실체결 거래만 집계.
+        if "kis" in _ep or "manual" in _cr or _cr.startswith("shadow_"):
             continue
         # Only count explicitly-tagged positions. Focus-text inference caused old RANGING-era
         # positions to poison strategy stats (e.g. obvious_trend disabled by pre-gate failures).
