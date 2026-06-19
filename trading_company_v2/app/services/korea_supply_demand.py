@@ -24,6 +24,9 @@ _log = logging.getLogger(__name__)
 _SISE_INVEST_URL = "https://finance.naver.com/sise/sise_invest.naver?sosok={sosok}&page={page}"
 # 종목별 외국인/기관 수급 (당일 + 최근 5일)
 _FRGN_URL = "https://finance.naver.com/item/frgn.naver?code={ticker}"
+# [2026-06-19] 네이버 금융 개편으로 sise_invest(404)·frgn 파싱 폐기 → m.stock API로 복구.
+# 외국인/기관 순매수 수량을 일자별로 제공 (list, [0]=최신).
+_TREND_URL = "https://m.stock.naver.com/api/stock/{ticker}/trend"
 
 _CACHE_TTL     = 3600.0  # 1시간
 _FLOW_CACHE_TTL = 1800.0  # 30분 (장중 변화 반영)
@@ -61,20 +64,27 @@ def _get_cached(market_key: str, sosok: int) -> set[str]:
 
 
 def get_institutional_tickers() -> set[str]:
-    """KOSPI + KOSDAQ 기관 레이더 종목코드 집합 (1시간 캐시)."""
-    kospi  = _get_cached("kospi",  0)
-    kosdaq = _get_cached("kosdaq", 1)
-    return kospi | kosdaq
+    """[2026-06-19] deprecated — sise_invest 페이지 404 폐지.
+    inst_foreign은 이제 종목별 trend API(get_smart_money_confirmed)로 직접 판정하므로
+    레이더 '목록'이 불필요. 호출처 호환 위해 빈 set 반환(인자로만 쓰임)."""
+    return set()
 
 
 def get_supply_demand_score(ticker: str, inst_tickers: set[str] | None = None) -> float:
-    """수급 점수 0.0~1.0.
+    """수급 점수 0.0~1.0 (2026-06-19 m.stock trend 기반).
 
-    기관 레이더에 있으면 0.78, 없으면 0.40.
+    외국인+기관 동시 순매수 0.78 / 한쪽만 0.60 / 그 외 0.40.
     """
-    if inst_tickers is None:
-        inst_tickers = get_institutional_tickers()
-    return 0.78 if ticker.strip() in inst_tickers else 0.40
+    flow = get_investor_flow_today(ticker)
+    if not flow.get("data_ok"):
+        return 0.40
+    _f = float(flow.get("foreign_net", 0.0) or 0.0)
+    _i = float(flow.get("inst_net", 0.0) or 0.0)
+    if _f > 0 and _i > 0:
+        return 0.78
+    if _f > 0 or _i > 0:
+        return 0.60
+    return 0.40
 
 
 # ── 종목별 실시간 외국인/기관 수급 ────────────────────────────────────────────
@@ -154,12 +164,39 @@ def get_investor_flow_today(ticker: str) -> dict[str, Any]:
         if entry and time.monotonic() - entry[0] < _FLOW_CACHE_TTL:
             return entry[1]
 
+    # [2026-06-19] m.stock trend API — 외국인/기관 순매수 수량(일자별 list, [0]=최신)
+    def _qty(s: object) -> float:
+        try:
+            return float(str(s or "").replace(",", "").replace("+", "").strip() or 0)
+        except (ValueError, TypeError):
+            return 0.0
+
     try:
-        url  = _FRGN_URL.format(ticker=ticker)
-        resp = requests.get(url, headers=NAVER_HEADERS, timeout=REQUEST_TIMEOUT)
+        resp = requests.get(
+            _TREND_URL.format(ticker=ticker),
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=REQUEST_TIMEOUT,
+        )
         resp.raise_for_status()
-        html = resp.content.decode("euc-kr", errors="ignore")
-        flow = _parse_investor_flow(html)
+        data = resp.json()
+        if isinstance(data, list) and data:
+            d0 = data[0]
+            _fnet = _qty(d0.get("foreignerPureBuyQuant"))
+            _inet = _qty(d0.get("organPureBuyQuant"))
+            # 외국인 연속 순매수일 (최신부터 양수 연속)
+            _streak = 0
+            for d in data:
+                if _qty(d.get("foreignerPureBuyQuant")) > 0:
+                    _streak += 1
+                else:
+                    break
+            flow = {
+                "foreign_net": _fnet, "foreign_buy": 0.0, "foreign_sell": 0.0,
+                "foreign_streak": _streak if _fnet > 0 else (-1 if _fnet < 0 else 0),
+                "inst_net": _inet, "data_ok": True,
+            }
+        else:
+            flow = empty
     except Exception as exc:
         _log.debug("get_investor_flow_today %s: %s", ticker, exc)
         flow = empty
@@ -186,16 +223,11 @@ def get_smart_money_confirmed(
     -------
     True if (기관 레이더 ✓) AND (외국인 순매수 > min_foreign_net_bn)
     """
-    if inst_tickers is None:
-        inst_tickers = get_institutional_tickers()
-
-    in_inst_radar = ticker.strip() in inst_tickers
-    if not in_inst_radar:
-        return False
-
+    # [2026-06-19] 종목별 trend API로 직접 판정 (기관 레이더 목록 폐지).
+    # 스마트머니 = 외국인 AND 기관 동시 순매수 (둘 다 양수).
     flow = get_investor_flow_today(ticker)
     if not flow.get("data_ok"):
-        # 데이터 미수집 시 레이더 포함만으로 True (보수적 가정)
-        return True
-
-    return float(flow.get("foreign_net", 0.0)) > min_foreign_net_bn
+        return False  # 데이터 없으면 보수적으로 미확인
+    _f = float(flow.get("foreign_net", 0.0) or 0.0)
+    _i = float(flow.get("inst_net", 0.0) or 0.0)
+    return _f > min_foreign_net_bn and _i > 0
