@@ -584,7 +584,7 @@ class ExecutionAgent(BaseAgent):
             # desk loss pressure를 발동시켜 sector_wave 정상 신호를 차단함
             _ep = str(item.get("entry_profile", "") or "")
             _cr = str(item.get("closed_reason", "") or "")
-            if "kis_hold" in _ep or "kis_manual" in _ep or "manual" in _cr:
+            if "kis_hold" in _ep or "kis_manual" in _ep or "manual" in _cr or _cr.startswith("data_error_"):
                 continue
             recent.append(item)
             if len(recent) >= limit:
@@ -1293,6 +1293,23 @@ class ExecutionAgent(BaseAgent):
                     desk_position_cap_hit = True
         desk_notional_cap_hit = (desk_open_notional + notional_pct) > max_desk_notional and action in actionable_entries
         gross_notional_cap_hit = (gross_open_notional + notional_pct) > total_notional_cap and action in actionable_entries
+        # Pyramid price sanity: market_snapshot price > 8% above existing base entry = stale data, block entry
+        pyramid_price_invalid = False
+        if _is_pyramid_entry and desk == "korea" and reference_price > 0 and symbol:
+            _base_entry_price = next(
+                (float(p.get("entry_price") or 0.0)
+                 for p in self.open_positions
+                 if p.get("desk") == desk
+                 and str(p.get("symbol", "")) == str(symbol)
+                 and "pyramid" not in str(p.get("entry_profile") or "").lower()),
+                0.0,
+            )
+            if _base_entry_price > 0 and reference_price > _base_entry_price * 1.08:
+                pyramid_price_invalid = True
+                rotation_notes.append(
+                    f"pyramid blocked: ref={reference_price:,.0f} vs base_entry={_base_entry_price:,.0f} "
+                    f"({(reference_price / _base_entry_price - 1) * 100:.1f}% above — stale market_snapshot)"
+                )
         high_corr_cap_hit = (
             desk == "crypto"
             and action in actionable_entries
@@ -1361,6 +1378,7 @@ class ExecutionAgent(BaseAgent):
             and not high_corr_cap_hit
             and not stale_signal_block
             and not strategy_disabled
+            and not pyramid_price_invalid
             # bear_oversold: 상관 코인 동시 복수 진입 방지 — 1개 포지션만 허용
             and not (
                 strategy_id == "crypto.bear_oversold_bounce"
