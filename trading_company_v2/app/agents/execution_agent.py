@@ -1293,23 +1293,39 @@ class ExecutionAgent(BaseAgent):
                     desk_position_cap_hit = True
         desk_notional_cap_hit = (desk_open_notional + notional_pct) > max_desk_notional and action in actionable_entries
         gross_notional_cap_hit = (gross_open_notional + notional_pct) > total_notional_cap and action in actionable_entries
-        # Pyramid price sanity: market_snapshot price > 8% above existing base entry = stale data, block entry
-        pyramid_price_invalid = False
-        if _is_pyramid_entry and desk == "korea" and reference_price > 0 and symbol:
-            _base_entry_price = next(
-                (float(p.get("entry_price") or 0.0)
-                 for p in self.open_positions
-                 if p.get("desk") == desk
-                 and str(p.get("symbol", "")) == str(symbol)
-                 and "pyramid" not in str(p.get("entry_profile") or "").lower()),
-                0.0,
-            )
-            if _base_entry_price > 0 and reference_price > _base_entry_price * 1.08:
-                pyramid_price_invalid = True
-                rotation_notes.append(
-                    f"pyramid blocked: ref={reference_price:,.0f} vs base_entry={_base_entry_price:,.0f} "
-                    f"({(reference_price / _base_entry_price - 1) * 100:.1f}% above — stale market_snapshot)"
+        # Korea entry price sanity: reference_price > 8% above recent exit price = stale market_snapshot
+        # Catches open-session stale data bug (6/22 pyramid 497k, 6/25 near_120d 791k, etc.)
+        # Uses most recent exit_price for same symbol as reference; also applies to pyramid vs base entry.
+        korea_price_invalid = False
+        if desk == "korea" and reference_price > 0 and symbol and action in actionable_entries:
+            _price_anchor = 0.0
+            if _is_pyramid_entry:
+                # Pyramid: compare against open base position entry price
+                _price_anchor = next(
+                    (float(p.get("entry_price") or 0.0)
+                     for p in self.open_positions
+                     if p.get("desk") == desk
+                     and str(p.get("symbol", "")) == str(symbol)
+                     and "pyramid" not in str(p.get("entry_profile") or "").lower()),
+                    0.0,
                 )
+            else:
+                # Regular entry: compare against most recent closed exit price for this symbol
+                _price_anchor = next(
+                    (float(t.get("exit_price") or 0.0)
+                     for t in self.closed_positions
+                     if str(t.get("symbol", "")) == str(symbol)
+                     and str(t.get("desk", "")) == desk
+                     and float(t.get("exit_price") or 0.0) > 0),
+                    0.0,
+                )
+            if _price_anchor > 0 and reference_price > _price_anchor * 1.08:
+                korea_price_invalid = True
+                rotation_notes.append(
+                    f"korea entry blocked: ref={reference_price:,.0f} vs anchor={_price_anchor:,.0f} "
+                    f"({(reference_price / _price_anchor - 1) * 100:.1f}% above — stale market_snapshot)"
+                )
+        pyramid_price_invalid = korea_price_invalid  # legacy alias used in status check below
         high_corr_cap_hit = (
             desk == "crypto"
             and action in actionable_entries
