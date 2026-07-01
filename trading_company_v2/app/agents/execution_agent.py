@@ -154,6 +154,8 @@ class ExecutionAgent(BaseAgent):
         "crypto.ema_bounce",
         # korea.pyramid: re-enabled 2026-05-19 with profit-floor lock mechanism
         # (peak_pnl_pct raised before pyramid entry → base profit protected)
+        # 2026-07-01: disabled — 80 live trades, WR=26%, cumulative -187.1%; backtesting edge absent in live.
+        "korea.new_high_breakout",
     })
 
     _RETIRED_STRATEGY_IDS: frozenset[str] = frozenset({
@@ -161,6 +163,7 @@ class ExecutionAgent(BaseAgent):
         "crypto.ranging_momentum_leader",
         "crypto.ema_bounce",
         # korea.pyramid: re-enabled 2026-05-19
+        "korea.new_high_breakout",
     })
 
     def _is_retired_strategy_trade(self, item: dict) -> bool:

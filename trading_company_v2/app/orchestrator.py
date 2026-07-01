@@ -946,6 +946,15 @@ class CompanyOrchestrator:
                 live_korea_enabled = any(l.get("desk") == "korea" for l in live_locks)
             except Exception:
                 pass
+        # [2026-07-01] KIS 설정이 활성화된 경우 항상 sync 실행
+        # 봇이 매도 후 KIS 잔고가 남아있어도(매도 실패) DB에 open 포지션이 없으면
+        # sync가 돌지 않아 KIS 앱과 봇 대시보드가 불일치하는 문제 방지.
+        if not live_korea_enabled:
+            try:
+                from app.services.broker_router import _kis_ready as _kr
+                live_korea_enabled = _kr()
+            except Exception:
+                pass
         _korea_sync_ok = False
         if live_korea_enabled:
             try:

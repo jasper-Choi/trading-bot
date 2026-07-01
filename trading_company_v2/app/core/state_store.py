@@ -4483,6 +4483,7 @@ def load_performance_analytics(limit: int = 500) -> dict:
         {
             "id": row.id,
             "symbol": row.symbol,
+            "name": _position_display_name(row),
             "action": row.action,
             "size": row.size,
             "opened_at": row.opened_at,
