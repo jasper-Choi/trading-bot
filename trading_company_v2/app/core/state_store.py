@@ -3168,6 +3168,9 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
             try:
                 # 72h: 오버나이트/주말 보유 후 재생성도 원래 전략 프로필 유지
                 # (2h였으나 익일 개장 시 재생성이 kis_hold로 폴백되는 문제 — 06-11)
+                # 단, 원매수 후 1h 이상 지난 포지션은 장중 조건이 달라졌으므로
+                # kis_hold 유지 (원전략 모멘텀 컷이 즉시 발동하는 루프 방지 — 07-01)
+                _fresh_cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
                 _ord_cutoff = (datetime.now(timezone.utc) - timedelta(hours=72)).isoformat()
                 _recent_buy = db.execute(
                     select(LiveOrderRecord)
@@ -3180,7 +3183,7 @@ def sync_paper_from_kis(account_positions: list[dict], prices: dict[str, float])
                     .order_by(LiveOrderRecord.id.desc())
                     .limit(1)
                 ).scalar_one_or_none()
-                if _recent_buy is not None:
+                if _recent_buy is not None and str(_recent_buy.created_at or "") >= _fresh_cutoff:
                     _op = dict(_recent_buy.payload or {})
                     if _op.get("entry_profile"):
                         _profile = str(_op.get("entry_profile"))
