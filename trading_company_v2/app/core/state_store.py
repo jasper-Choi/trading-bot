@@ -837,8 +837,8 @@ def _position_thresholds(desk: str, action: str, focus: str = "") -> tuple[float
         return 25.0, -3.0, 50000
     if desk == "korea" and "inst_foreign_breakout" in focus:
         # S18: 신고점 돌파 + 기관 레이더 + 외국인 순매수 동시 확인
-        # 2026-06-01: target 7→25%, max_cycles 50000 — trail이 청산 제어, 멀티데이 추세 허용
-        return 25.0, -3.0, 50000
+        # 2026-07-01: stop -3.0→-2.0 (live P:L=0.60 개선 목표. WR=62%로 타이트한 스탑 감당 가능)
+        return 25.0, -2.0, 50000
     if desk == "korea" and "inst_foreign_gap" in focus:
         # S19: 갭 모멘텀 + 기관 레이더 + 외국인 순매수 동시 확인
         # 2026-06-01: target 6→25%, max_cycles 50000 — trail이 청산 제어
