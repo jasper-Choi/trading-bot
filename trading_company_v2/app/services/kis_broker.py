@@ -962,3 +962,150 @@ def get_minute_candles(ticker: str, count: int = 30) -> list[dict[str, Any]]:
         return candles[-count:]
     except Exception:
         return []
+
+
+def get_account_summary_krw() -> dict[str, Any]:
+    """KIS 계좌 총평가 요약 — 총손익/당일손익을 KIS 실측값으로 반환."""
+    cano, product_code = _account_parts()
+    resp = _request(
+        "GET",
+        KIS_BALANCE_PATH,
+        params={
+            "CANO": cano,
+            "ACNT_PRDT_CD": product_code,
+            "AFHR_FLPR_YN": "N",
+            "OFL_YN": "",
+            "INQR_DVSN": "02",
+            "UNPR_DVSN": "01",
+            "FUND_STTL_ICLD_YN": "N",
+            "FNCG_AMT_AUTO_RDPT_YN": "N",
+            "PRCS_DVSN": "00",
+            "CTX_AREA_FK100": "",
+            "CTX_AREA_NK100": "",
+        },
+        tr_id="VTTC8434R" if settings.kis_mock else "TTTC8434R",
+    )
+    out2 = resp.get("output2") or [{}]
+    o = out2[0] if isinstance(out2, list) and out2 else (out2 if isinstance(out2, dict) else {})
+    initial_capital = float(settings.paper_capital_krw or 100_000_000)
+    tot_evlu_amt = _safe_float(o.get("tot_evlu_amt") or o.get("tot_asst_amt") or 0)
+    daily_pnl_krw = _safe_float(o.get("asst_icdc_amt") or 0)
+    daily_pnl_pct = _safe_float(o.get("asst_icdc_erng_rt") or 0)
+    bfdy_amt = _safe_float(o.get("bfdy_tot_asst_evlu_amt") or 0)
+    evlu_pfls = _safe_float(o.get("evlu_pfls_smtl_amt") or 0)
+    return {
+        "tot_evlu_amt": round(tot_evlu_amt),
+        "initial_capital": round(initial_capital),
+        "total_pnl_krw": round(tot_evlu_amt - initial_capital),
+        "total_pnl_pct": round((tot_evlu_amt - initial_capital) / initial_capital * 100, 3) if initial_capital else 0.0,
+        "daily_pnl_krw": round(daily_pnl_krw),
+        "daily_pnl_pct": round(daily_pnl_pct, 3),
+        "bfdy_tot_amt": round(bfdy_amt),
+        "unrealized_pnl_krw": round(evlu_pfls),
+    }
+
+
+def get_recent_executions(since_date: str = "20260601") -> list[dict[str, Any]]:
+    """KIS 체결내역 수집 + FIFO 실현손익 계산.
+
+    모의투자에서 rlzt_pfls가 비어있으므로 buy→sell 매칭으로 직접 계산한다.
+    반환값은 sell 체결만 포함하며, pnl_krw / pnl_pct 필드가 추가된다.
+    """
+    from collections import deque, defaultdict
+
+    cano, product_code = _account_parts()
+    all_exec: list[dict[str, Any]] = []
+
+    start_dt = datetime.strptime(since_date, "%Y%m%d")
+    end_dt = datetime.now()
+    cur = start_dt
+    while cur <= end_dt:
+        ds = cur.strftime("%Y%m%d")
+        try:
+            resp = _request(
+                "GET",
+                KIS_DAILY_CCLD_PATH,
+                params={
+                    "CANO": cano,
+                    "ACNT_PRDT_CD": product_code,
+                    "INQR_STRT_DT": ds,
+                    "INQR_END_DT": ds,
+                    "SLL_BUY_DVSN_CD": "00",
+                    "INQR_DVSN": "00",
+                    "PDNO": "",
+                    "CCLD_DVSN": "00",
+                    "ORD_GNO_BRNO": "",
+                    "ODNO": "",
+                    "INQR_DVSN_3": "00",
+                    "INQR_DVSN_1": "",
+                    "CTX_AREA_FK100": "",
+                    "CTX_AREA_NK100": "",
+                },
+                tr_id="VTTC0081R" if settings.kis_mock else "TTTC0081R",
+            )
+            for r in (resp.get("output1") or []):
+                sym = str(r.get("pdno") or "").strip()
+                if not sym:
+                    continue
+                side = "buy" if str(r.get("sll_buy_dvsn_cd") or "") == "02" else "sell"
+                qty = int(r.get("tot_ccld_qty") or 0)
+                amt = int(r.get("tot_ccld_amt") or 0)
+                price = amt / qty if qty else 0.0
+                name = str(r.get("prdt_name") or "")
+                ord_tm = str(r.get("ord_tmd") or r.get("ord_dt") or ds)
+                all_exec.append({
+                    "date": ds,
+                    "time": ord_tm,
+                    "symbol": sym,
+                    "name": name,
+                    "side": side,
+                    "qty": qty,
+                    "amt": amt,
+                    "price": round(price, 2),
+                })
+        except Exception:
+            pass
+        cur += timedelta(days=1)
+
+    # FIFO 실현손익 계산
+    buy_queue: dict[str, deque] = defaultdict(deque)
+    result: list[dict[str, Any]] = []
+
+    for t in all_exec:
+        sym = t["symbol"]
+        if t["side"] == "buy" and t["qty"] > 0:
+            unit = t["amt"] / t["qty"]
+            buy_queue[sym].append((t["qty"], unit, t["date"]))
+        elif t["side"] == "sell" and t["qty"] > 0:
+            remain = t["qty"]
+            sell_unit = t["amt"] / t["qty"]
+            buy_cost = 0.0
+            matched = 0
+            while remain > 0 and buy_queue[sym]:
+                bq, bu, _ = buy_queue[sym][0]
+                take = min(bq, remain)
+                buy_cost += take * bu
+                matched += take
+                remain -= take
+                if take == bq:
+                    buy_queue[sym].popleft()
+                else:
+                    buy_queue[sym][0] = (bq - take, bu, buy_queue[sym][0][2])
+            if matched > 0:
+                sell_amt = matched * sell_unit
+                pnl = sell_amt - buy_cost
+                pnl_pct = pnl / buy_cost * 100 if buy_cost else 0.0
+                result.append({
+                    "date": t["date"],
+                    "symbol": sym,
+                    "name": t["name"],
+                    "qty": matched,
+                    "buy_amt": round(buy_cost),
+                    "sell_amt": round(sell_amt),
+                    "sell_price": round(sell_unit),
+                    "pnl_krw": round(pnl),
+                    "pnl_pct": round(pnl_pct, 2),
+                })
+
+    result.sort(key=lambda x: x["date"], reverse=True)
+    return result

@@ -4561,16 +4561,60 @@ def load_performance_analytics(limit: int = 500) -> dict:
         "longest_loss_streak": longest_loss,
     }
 
+    # KIS 실계좌 데이터로 손익 오버라이드
+    summary_stats = {
+        **_group_stats(closed),
+        "today": _group_stats(closed_today),
+        "open_positions": len(open_rows),
+        "max_drawdown_pct": _max_drawdown(closed),
+        "sample_size": len(closed),
+    }
+    kis_account: dict = {}
+    kis_executions: list = []
+    try:
+        if settings.kis_app_key and settings.kis_app_secret and settings.kis_account_no:
+            from app.services.kis_broker import get_account_summary_krw, get_recent_executions
+            kis_account = get_account_summary_krw()
+            kis_executions = get_recent_executions(since_date="20260601")
+    except Exception:
+        pass
+
+    if kis_account:
+        summary_stats["total_pnl_krw"] = kis_account["total_pnl_krw"]
+        summary_stats["total_pnl_pct"] = kis_account["total_pnl_pct"]
+        summary_stats["daily_pnl_krw"] = kis_account["daily_pnl_krw"]
+        summary_stats["daily_pnl_pct"] = kis_account["daily_pnl_pct"]
+
+    # KIS 체결 내역을 recent_closed 대신 사용 (맞춰야 할 요구사항)
+    if kis_executions:
+        kis_recent_closed = [
+            {
+                "id": None,
+                "symbol": t["symbol"],
+                "name": t["name"] + f"({t['symbol']})" if t.get("name") else t["symbol"],
+                "action": "reduce_risk",
+                "size": None,
+                "opened_at": None,
+                "closed_at": t["date"],
+                "holding_minutes": None,
+                "entry_price": round(t["buy_amt"] / t["qty"]) if t.get("qty") and t.get("buy_amt") else None,
+                "exit_price": t.get("sell_price"),
+                "pnl_pct": t["pnl_pct"],
+                "pnl_krw": t["pnl_krw"],
+                "peak_pnl_pct": None,
+                "closed_reason": "kis_sell",
+                "focus": None,
+                "kis": True,
+            }
+            for t in kis_executions[:50]
+        ]
+        recent_closed = kis_recent_closed
+
     return {
         "updated_at": utcnow_iso(),
         "timezone": settings.timezone,
-        "summary": {
-            **_group_stats(closed),
-            "today": _group_stats(closed_today),
-            "open_positions": len(open_rows),
-            "max_drawdown_pct": _max_drawdown(closed),
-            "sample_size": len(closed),
-        },
+        "summary": summary_stats,
+        "kis_account": kis_account,
         "hourly_heatmap": hourly_heatmap,
         "daily_performance": daily_performance,
         "entry_reason_stats": _stats_by(closed, lambda row: row.action),

@@ -2642,12 +2642,18 @@ function renderBotStatus(bs){
 
 /* ── 핵심 메트릭 ── */
 function renderMetrics(a){
-  var s=a.summary||{},t=s.today||{};
+  var s=a.summary||{},t=s.today||{},ka=a.kis_account||{};
+  var haKis=ka&&ka.tot_evlu_amt;
+  var totalPnlPct=haKis?ka.total_pnl_pct:s.total_pnl_pct;
+  var totalPnlKrw=haKis?ka.total_pnl_krw:s.total_pnl_krw;
+  var dailyPnlPct=haKis?ka.daily_pnl_pct:(t.total_pnl_pct||0);
+  var dailyPnlKrw=haKis?ka.daily_pnl_krw:(t.total_pnl_krw||0);
+  var kisLabel=haKis?' <span style="font-size:.65rem;color:#6c8ebf;vertical-align:middle">[KIS실측]</span>':'';
   document.getElementById('metrics').innerHTML=[
-    metric('누적 PnL',pct(s.total_pnl_pct),krw(s.total_pnl_krw)+' · '+s.trades+'건',cls(s.total_pnl_pct)),
+    metric('종합 손익률'+kisLabel,pct(totalPnlPct),krw(totalPnlKrw)+(haKis?' · 초기'+krw(ka.initial_capital):' · '+s.trades+'건'),cls(totalPnlPct)),
     metric('승률',n(s.win_rate).toFixed(1)+'%',s.wins+'승 / '+s.losses+'패','blue'),
     metric('평균 기대값',pct(s.avg_pnl_pct),'평균 보유 '+n(s.avg_hold_min).toFixed(1)+'분',cls(s.avg_pnl_pct)),
-    metric('오늘 PnL',pct(t.total_pnl_pct),krw(t.total_pnl_krw)+' · '+t.trades+'건',cls(t.total_pnl_pct)),
+    metric('일별 손익'+kisLabel,pct(dailyPnlPct),krw(dailyPnlKrw)+(haKis?' · 전일대비':''),cls(dailyPnlPct)),
     metric('최대 낙폭',pct(s.max_drawdown_pct),'샘플 '+s.sample_size+'건','yellow'),
     metric('오픈 포지션',String(s.open_positions||0),'현재 보유 중','blue'),
     metric('최고 거래',pct(s.best_pnl_pct),'최근 표본 기준','green'),
@@ -2891,7 +2897,13 @@ function renderTables(a){
   document.getElementById('open-table').innerHTML=table(['종목','진입','보유','PnL','Peak'],(a.open_positions||[]).map(function(x){
     return '<tr><td><b>'+symLabel(x)+'</b></td><td>'+x.action+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td>'+pct(x.peak_pnl_pct)+'</td></tr>';
   }));
-  document.getElementById('closed-table').innerHTML=table(['종목','청산','보유','PnL','금액','시간'],(a.recent_closed||[]).slice(0,20).map(function(x){
+  var kisMode=(a.recent_closed||[]).length>0&&(a.recent_closed[0].kis===true);
+  var closedCols=kisMode?['종목','매도일','매수금액','매도금액','실현손익','손익률']:['종목','청산','보유','PnL','금액','시간'];
+  document.getElementById('closed-table').innerHTML=table(closedCols,(a.recent_closed||[]).slice(0,20).map(function(x){
+    if(kisMode){
+      var nm=x.name||x.symbol||'--';
+      return '<tr><td><b>'+nm+'</b></td><td>'+x.closed_at+'</td><td>'+krw(x.entry_price*(x.qty||0)||x.buy_amt)+'</td><td>'+krw(x.sell_price*(x.qty||0)||x.sell_amt)+'</td><td class="'+cls(x.pnl_krw)+'">'+krw(x.pnl_krw)+'</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td></tr>';
+    }
     return '<tr><td><b>'+symLabel(x)+'</b></td><td>'+x.closed_reason+'</td><td>'+x.holding_minutes+'분</td><td class="'+cls(x.pnl_pct)+'">'+pct(x.pnl_pct)+'</td><td class="'+cls(x.pnl_krw)+'">'+krw(x.pnl_krw)+'</td><td>'+kst(x.closed_at)+'</td></tr>';
   }));
 }
