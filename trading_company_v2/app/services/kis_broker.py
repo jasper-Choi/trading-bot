@@ -1067,11 +1067,49 @@ def get_recent_executions(since_date: str = "20260601") -> list[dict[str, Any]]:
             pass
         cur += timedelta(days=1)
 
-    # FIFO 실현손익 계산
-    buy_queue: dict[str, deque] = defaultdict(deque)
-    result: list[dict[str, Any]] = []
+    # 동일 날짜 내 같은 종목의 매수+매도 = 당일 라운드트립으로 직접 계산
+    # 나머지는 익일 이상 보유 → 최근 매수 기준으로 계산
+    # KIS API는 당일 내 역순 반환 → ord_tmd로 정렬
 
+    # step 1: 당일 라운드트립 먼저 처리
+    from collections import defaultdict as _dd
+
+    by_date_sym: dict[tuple[str, str], list] = _dd(list)
     for t in all_exec:
+        by_date_sym[(t["date"], t["symbol"])].append(t)
+
+    result: list[dict[str, Any]] = []
+    roundtrip_keys: set[tuple[str, str]] = set()
+
+    for (date, sym), trades in by_date_sym.items():
+        buys = [t for t in trades if t["side"] == "buy"]
+        sells = [t for t in trades if t["side"] == "sell"]
+        if buys and sells:
+            roundtrip_keys.add((date, sym))
+            buy_total_amt = sum(b["amt"] for b in buys)
+            sell_total_amt = sum(s["amt"] for s in sells)
+            matched_qty = min(sum(b["qty"] for b in buys), sum(s["qty"] for s in sells))
+            pnl = sell_total_amt - buy_total_amt
+            pnl_pct = pnl / buy_total_amt * 100 if buy_total_amt else 0.0
+            name = sells[0]["name"] or buys[0]["name"]
+            result.append({
+                "date": date,
+                "symbol": sym,
+                "name": name,
+                "qty": matched_qty,
+                "buy_amt": round(buy_total_amt),
+                "sell_amt": round(sell_total_amt),
+                "sell_price": round(sell_total_amt / matched_qty) if matched_qty else 0,
+                "pnl_krw": round(pnl),
+                "pnl_pct": round(pnl_pct, 2),
+            })
+
+    # step 2: 비라운드트립 매수는 큐에, 매도는 큐와 매칭
+    buy_queue: dict[str, deque] = defaultdict(deque)
+    # 날짜순 정렬 후 처리
+    non_rt = [t for t in all_exec if (t["date"], t["symbol"]) not in roundtrip_keys]
+    non_rt.sort(key=lambda x: (x["date"], x["time"] or "000000"))
+    for t in non_rt:
         sym = t["symbol"]
         if t["side"] == "buy" and t["qty"] > 0:
             unit = t["amt"] / t["qty"]
@@ -1082,7 +1120,7 @@ def get_recent_executions(since_date: str = "20260601") -> list[dict[str, Any]]:
             buy_cost = 0.0
             matched = 0
             while remain > 0 and buy_queue[sym]:
-                bq, bu, _ = buy_queue[sym][0]
+                bq, bu, bd = buy_queue[sym][0]
                 take = min(bq, remain)
                 buy_cost += take * bu
                 matched += take
@@ -1090,7 +1128,7 @@ def get_recent_executions(since_date: str = "20260601") -> list[dict[str, Any]]:
                 if take == bq:
                     buy_queue[sym].popleft()
                 else:
-                    buy_queue[sym][0] = (bq - take, bu, buy_queue[sym][0][2])
+                    buy_queue[sym][0] = (bq - take, bu, bd)
             if matched > 0:
                 sell_amt = matched * sell_unit
                 pnl = sell_amt - buy_cost
